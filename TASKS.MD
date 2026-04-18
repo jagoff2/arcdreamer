@@ -1,0 +1,145 @@
+# TASKS
+
+## Active
+
+- [x] Record the generalized-reasoning pivot in [docs/PIVOT_GENERAL_REASONING.md](docs/PIVOT_GENERAL_REASONING.md) and treat it as the governing standard for future synthetic/training changes.
+- [x] Record the allocentric spatial-workspace pivot in [docs/PIVOT_GENERAL_REASONING.md](docs/PIVOT_GENERAL_REASONING.md) and treat it as a required substrate for generalized planning under layout/interface shift.
+- [x] Add the first agent-owned spatial belief workspace to the runtime state path: persistent visited/tested/effect/contradiction place memory now augments structured state with coarse spatial-belief summaries.
+- [x] Sanitize agent-visible transition info on the learned/runtime path so hidden synthetic rule/event payloads remain available for offline diagnostics/training logs but do not leak into agent transitions.
+
+- [x] Make ARC Prize eligibility a hard repo requirement in project tracking, not an implicit preference.
+- [x] Review `AGENTS.MD` and extract hard constraints.
+- [x] Confirm current repository contents and working assumptions.
+- [x] Inspect current public ARC toolkit surface and pin the local API assumptions.
+- [x] Create the package scaffold, docs, and reproducible project metadata.
+- [x] Implement the environment contract and synthetic hidden-rule worlds.
+- [x] Implement structured perception and explicit graph memory.
+- [x] Implement recurrent world model, grounded language, and episodic memory.
+- [x] Implement baseline agents and the full hybrid agent.
+- [x] Add training and evaluation entrypoints.
+- [x] Run the tests and a smoke experiment, then fix failures.
+- [x] Tighten planner/training behavior after the initial smoke failures.
+- [x] Remove the non-prize-eligible synthetic structured controller from the default execution path.
+- [x] Preserve ARC-facing genericity while continuing toward toolkit validation.
+- [x] Validate the official local ARC toolkit path on this machine and keep all non-generic synthetic machinery out of that path.
+- [ ] Improve generic ARC-facing agent performance without reintroducing benchmark-specific hacks.
+- [x] Add an allocentric spatial belief workspace that is agent-owned, persistent across steps, action-updated, and queried by planning/world-model code instead of relying on exact move-trace priors.
+- [x] Integrate the spatial workspace as a hybrid substrate with the object graph and symbolic belief state, not as a raw duplicate of the visible grid.
+- [x] Use the spatial workspace to track explored-vs-unexplored regions, tested interaction sites, return-to-place anchors, and contradiction/effect hotspots under partial observability and size/layout shift.
+- [x] Replace remaining handcrafted ARC-facing controller behavior with generic within-episode rule induction and action-schema exploration.
+- [ ] Ensure the runtime agent learns online from its own transitions while it plays, rather than acting as a frozen checkpointed policy.
+- [x] Beat the synthetic benchmark with a live runtime-learning learned agent rather than the deleted handcrafted controller.
+- [ ] Prove that any ARC-facing control logic is transferable to non-text games with the same observation/action structure, rather than benchmark-specific.
+- [ ] Gate or replace brittle checkpoint priors when live empirical evidence disagrees during runtime.
+- [x] Add explicit rule objects and a hypothesis manager instead of relying mainly on scalar action statistics.
+- [ ] Add stronger counterfactual replay and local proof/disproof writes from failed transitions.
+- [ ] Add explicit diagnostic action selection for rule disambiguation.
+- [ ] Prototype a diffusion-inspired hypothesis-denoising loop for the runtime hypothesis-to-action-to-learning-to-proof pipeline.
+- [x] Commit to retraining on a richer synthetic curriculum before further real-ARC validation.
+- [ ] Expand the synthetic curriculum with selector modes, hidden state, delayed reward, compositional rules, misleading affordances, and non-monotonic objectives.
+- [ ] Retrain the learned stack on the richer synthetic curriculum on GPU when available.
+- [x] Run the first post-audit GPU retrain on the corrected pipeline and record the resulting checkpoint and metrics.
+- [x] Instrument the Stage 1 trainer for manual long runs with interval console metrics, per-epoch snapshots, and interrupt-safe checkpointing.
+- [x] Fix Stage 1 epoch sampling so each epoch gets fresh synthetic episodes instead of replaying the same seeded dataset within a curriculum stage.
+- [x] Fix Stage 1 interval logging so alternating family schedules do not alias into a misleading single-family view at fixed log strides.
+- [x] Replace the fixed staged synthetic schedule with held-out gated stage promotion plus replay mixing.
+- [x] Instrument Stage 1 holdout evaluation with step-level causal traces, event breakdowns, action-family counts, failure signatures, and persisted holdout payloads.
+- [ ] Tune the new held-out synthetic promotion thresholds and eval cadence so gating is informative without dominating wall-clock time.
+- [ ] Fix foundation size-9 held-out generalization: current diagnostic holdout remains `0.4` success with `switch_unlock` partially working but `order_collect` at `0.0`.
+- [x] Remove planner-side probe fallback logic and replace it with target-conditioned evidence: rule induction and online bias updates now score local observable object signatures so failed probes suppress only the targeted signature instead of smearing across the whole interaction family.
+- [ ] Suppress no-effect interaction churn under held-out size shift: current foundation holdout averages `10.0` interactions per episode with `90` `empty_interaction` events across `10` episodes.
+- [ ] Fix long-horizon sequence generalization on held-out size 9: `order_collect` currently times out at `0.0` success despite occasional partial progress (`correct_collect`) and occasional explicit `wrong_order` evidence.
+- [x] Remove generic-memory contamination from the clean learned path: planner memory retrieval now ignores generic language overlap, ignores default `goal_active=0` flag claims, and only retrieves positive recommendations from non-counterfactual evidence.
+- [x] Add a generic spatial interaction prior so blind `interact_*` actions are penalized when no object is actually adjacent in that direction.
+- [x] Reduce blind rule-induction optimism so unseen actions do not receive a large synthetic explore prior by default.
+- [x] Ground Stage 1 language targets more strongly in observable sequence progress by deriving `collect ... then ...` and `need test ... after ...` tokens from visible inventory/object state rather than hidden rule ids.
+- [x] Fix Stage 1 two-variant family aliasing: `order_collect` and `delayed_order_unlock` now cycle both order variants within each epoch instead of training on only one variant per epoch because of modulo aliasing.
+- [x] Stop synthetic post-goal reward farming: redundant mechanism interactions after `goal_active=1` now return a penalty instead of continuing to pay positive subgoal reward.
+- [x] Persist full holdout history in Stage 1 checkpoints so interrupted long runs preserve the entire eval trajectory, not just the last payload.
+- [x] Preserve hidden symbolic state in the learned state path: `StructuredState` summary/transition vectors now encode generic symbolic inventory/flag tokens instead of collapsing them to binary `"1"` checks, and synthetic observations now surface `progress_index` / `selected_color` for perception.
+- [ ] Fix the remaining held-out foundation blocker after the clean-path repairs: the world-model/policy prior still hallucinates interaction value under size shift, so post-fix short continuations remain stuck at `0.0-0.1` success on the size-9 foundation gate.
+- [x] Fix the world-model training path so the ensemble uncertainty is not explicitly collapsed and the recurrent hidden state is actually trained across episode sequences.
+- [ ] Retrain foundation long enough after the root-cause fixes above: the first repaired continuation from `manual_stage1_long.epoch_0004.pt` improved held-out foundation to `0.2` success and lifted `order_collect` to `0.25`, but `switch_unlock` discovery is still weak and average interactions remain `12.8`.
+- [ ] Retrain long enough on the repaired Stage 1 objective to verify whether the new interaction suppression, memory gating, and stronger gate regularization actually open the whole-grid encoder branch and recover held-out foundation competence.
+- [ ] Treat `artifacts/manual_stage1_rootfix_long.epoch_0008.pt` as the current best repaired foundation checkpoint, not `manual_stage1_rootfix_long.pt` or `.interrupt.pt`: the long run peaked at `0.3` held-out success / `-0.47` return / `10.5` interactions at epoch 8, then regressed to `0.0` success and `-1.177` return by epoch 9.
+- [ ] Explain and stop the late-run held-out collapse after the root fixes: train metrics and gate opening stayed stable through epoch 9, but held-out size-9 generalization collapsed after epoch 8, which points to policy-prior drift / over-specialization rather than another sampler or reward-farming bug.
+- [x] Complete the Stage 1 training-objective pivot in code: policy supervision is now event-agnostic by default, smooths over equivalence classes for moves/clicks, and `mixed` collection was downgraded to bounded oracle bootstrap instead of acting as a dominant teacher path.
+- [x] Fix the Stage 1 bootstrap failure on the pivoted path: `mixed` collection now starts with a short imitation warm-start and decays into sparse bounded bootstrap instead of trying to cold-start from almost pure exploration.
+- [x] Replace the fixed epoch-count bootstrap handoff with a competence-gated apprenticeship: the trainer now holds dense bootstrap until the policy clears consecutive train-success thresholds instead of withdrawing support on a blind epoch clock.
+- [x] Lengthen the default Stage 1 bootstrap schedule and expose the live bootstrap state in epoch metrics/checkpoints so future runs show whether success is policy-owned or still scaffold-carried.
+- [x] Replace the one-way competence-gated bootstrap release with a permanent teacher floor plus DAgger-style learner-state relabeling: Stage 1 now keeps a pure-teacher episode floor and writes teacher action labels on learner-visited states instead of relying on a one-shot release epoch.
+- [x] Keep nonzero teacher support for the full run without reverting to oracle-dominated trajectories: the trainer now maintains a minority of pure teacher episodes plus learner roll-ins with teacher labels on visited states.
+- [ ] Make teacher guidance dynamic rather than latched: when train or holdout competence regresses, teacher density and early-step takeover must rise again instead of continuing to decay.
+- [ ] Retest the post-decay regime under the permanent-teacher-floor trainer: the previous competence-gated run stayed healthy through epoch 8, then collapsed once support thinned to `12/2` and below, so the next check must verify that late support no longer ratchets downward into the same failure mode.
+- [ ] Fix the epoch-2 regression under the new mixed DAgger regime: after replacing hard prefix takeover with probabilistic takeover and a `20%` pure-teacher floor, epoch 2 is now genuinely mixed (`teacher_step_fraction≈0.288`, `teacher_relabel_fraction≈0.576`) but still falls to `0.676` train success and `0.0` holdout success, so the remaining problem is no longer teacher ownership but policy degradation once full imitation ends.
+- [ ] Add a real Stage 1 dream/consolidation phase: the current stack has act-time lookahead and tiny counterfactual replay, but it still lacks anchored latent rehearsal over short imagined futures rooted in real memory.
+- [ ] Keep dream replay constrained and reality-checked: dream rollouts should start from real anchors, follow short real or teacher-supported future action chains, and train against later observed outcomes instead of unconstrained self-generated fantasy.
+- [ ] Verify that dream replay improves post-imitation stability: the immediate target is to stop the epoch-2 degradation after full imitation ends without reverting to oracle-owned trajectories.
+- [x] Fix the synthetic grounded-language target misalignment: belief/question supervision now describes the current state, not the post-action next state, so the language head is no longer explicitly trained to say `goal active` before activation.
+- [x] Remove planner-side grounded-language fallback synthesis from the learned eval path: decoded language is no longer replaced by hand-authored grounded beliefs/questions when the planner dislikes it.
+- [x] Replace planner-side color/probe heuristics with generic target-conditioned online evidence over observable object signatures.
+- [ ] Redesign the Stage 1 objective so post-audit retraining improves the cleaned `AR25`/public-slice baseline instead of regressing it.
+- [ ] Prevent the retrained policy/language heads from collapsing back into high-click churn on hard selector/click tasks such as `DC22`.
+- [x] Decide whether the current mixed Stage 1 policy target is poisoning the harder-family action prior and replace it if so.
+- [ ] Run a longer repaired foundation retrain under the new event-aware supervision and planner de-biasing; the first smoke continuation from `manual_stage1_rootfix_long.epoch_0008.pt` cut held-out interactions to `3.6` from the previous `10.5`, but `order_collect` is still failing in the tiny `1`-episode-per-variant probe.
+- [ ] Run a longer continuation under the repaired world-model objective from `manual_stage1_rootfix_long.epoch_0008.pt`; the first one-epoch smoke run after the world-model fix stayed train-stable and kept hold-out interaction churn low at `4.0`, but did not immediately recover size-9 discovery (`0.0` success, `-0.864` return), which is consistent with a recalibrated but not-yet-retrained model.
+- [ ] Revalidate on the chosen real online 5-game slice only after the richer synthetic retrain completes.
+- [ ] Beat the public online 5-game slice with the clean learned eval path only; current measured state after controller removal and multiple planner/adaptation passes is still `0/5`.
+- [x] Fix pre-retrain planner-state mismatch: imagined selector follow-ups and deeper rollouts now use updated imagined state proxies instead of the stale original structured state/action context.
+- [x] Fix pre-retrain search objective mismatch: `_lookahead(...)` no longer rewards uncertainty directly.
+- [x] Fix graph recency across persisted synthetic episodes: `StateGraph` now uses monotonic recency ticks instead of local episode `step_index`.
+- [x] Fix ARC click-affordance generation so it does not prioritize the smallest components first or silently omit larger important objects behind the `max_candidates` cap.
+- [x] Make state fingerprints less brittle by removing episode-local object-id dependence from relation fingerprints.
+- [x] Adapt the grounded language channel during Stage 2 public ARC training instead of leaving it frozen and stale while encoder/world-model representations move.
+- [x] Add explicit logging for missing/unexpected keys during compatibility checkpoint loads so future migrations do not silently mask broken weights.
+- [x] Remove the old hard color ceiling from the encoder/state path by supporting arbitrary color ids through bucketing and explicit background-color handling.
+- [ ] Fully restore parity on the old easy synthetic slice under the current runtime stack before trusting any broader synthetic or real-ARC measurements.
+- [ ] Finish the remaining narrow-slice recovery from the current partial `5/9` `switch_unlock` result to stable near-complete recovery across all original variants.
+- [x] Isolate all hand-authored runtime-controller logic from the learned eval path so it can exist only as explicit bootstrap/training instrumentation.
+- [x] Remove heuristic question-token fallback from the learned eval path so action choice depends on learned outputs, graph statistics, memory, and online updates only.
+- [x] Remove remaining hand-shaped controller target-ranking logic from the ARC-facing runtime path and replace it with evidence learned from within-episode transitions.
+- [ ] Make the runtime controller defer to the learned planner when hypothesis evidence is weak instead of forcing low-evidence selector or target-probe behavior.
+- [x] Couple the learned latent state and grounded scratchpad more tightly to the runtime hypothesis loop so the explicit controller is not carrying nearly all online reasoning by itself.
+- [x] Make selector and click hypotheses consume latent follow-up move predictions so hidden control-state changes can affect objective discovery even when the visible grid barely changes.
+- [ ] Add stronger proof/disproof for latent selector-mode promises by comparing predicted post-selector gains against realized mover/objective improvement.
+- [x] Remove the planner-only control mistake and restore unified arbitration where explicit reasoning can seize action choice when confident.
+- [x] Replace full-width latent search with cached root predictions, claim-guided branch pruning, and a hard per-turn world-model-call budget so deeper lookahead does not explode combinatorially.
+- [ ] Measure whether bounded deeper search improves `AR25` and the online 5-game slice without regressing runtime or steps.
+- [ ] Improve the clean learned eval path on real ARC without reintroducing controller interception:
+  current blockers are weak objective discovery / completion on `AR25`, `BP35`, `CD82`, `CN04`, and `DC22` even after the audit fixes removed most of the previous interaction churn.
+- [x] Add prize-eligible real-ARC action semantics to the adapter, including effective-grid extraction and parameterized interaction affordances.
+- [x] Replace blind real-ARC graph exploration with observation-grounded motion/target planning that still falls back to generic graph novelty.
+- [x] Write the technical report with measured results.
+- [x] Create `CONTEXT.MD` and begin maintaining explicit project-state entries.
+
+## Assumptions
+
+- Python 3.10 is available locally.
+- PyTorch is already present in the environment.
+- ARC toolkit integration should be optional and degrade gracefully when `arc-agi` / `arcengine` are absent.
+- A strong first milestone is a fully runnable synthetic stack plus the ARC adapter surface, even if official benchmark execution is gated on local SDK availability.
+- Learned-model ARC runtime support is not yet proven because the toolkit action mapping still needs local validation.
+- Official toolkit validation on this machine now uses an isolated Python `3.13` environment because current `arc-agi` releases require Python `3.12+`.
+- If this system ever truly solves ARC-AGI-3 for the right reasons, its control loop should transfer to a broad class of non-text games with similar observation/action structure; treat that as an architecture filter, not a post-hoc claim.
+- Runtime adaptation is mandatory: the agent must update beliefs, memory, action priors, and planning state online from its own transitions during play.
+- The runtime learner should eventually infer action semantics, object roles, reward rules, hidden-state beliefs, and diagnostic action value online, not just update scalar action scores.
+- The current synthetic milestone is now satisfied by a runtime object-hypothesis controller plus online `avoid` / `prefer` correction rather than the deleted handcrafted synthetic controller.
+- Real ARC evaluation must now be treated as strict black-box interaction. Environment source files, hidden engine logic, and per-game tuning are forbidden as agent knowledge.
+- Any explicit rule-object system is allowed to have engineered containers and update rules, but the learned rule contents must come from live within-episode interaction only.
+- "Black-box" is necessary but not sufficient: ARC-facing runtime behavior should be legibly driven by generic online learning rather than by controller-score tuning that merely avoids forbidden inputs.
+
+## ARC Prize Eligibility Rule
+
+- Final ARC-facing code must remain eligible for ARC Prize submission.
+- No runtime internet dependency is allowed in the submission path.
+- No benchmark-specific hardcoding or synthetic-task semantics may leak into the generic ARC-facing path.
+- Synthetic curriculum machinery is allowed only for Stage 1 training/evaluation and must be cleanly isolated.
+- Submission-relevant code and methods must remain reproducible and open-source compatible with ARC Prize rules.
+- ARC-facing planning/control changes should be rejected if they would not plausibly transfer to non-text games outside ARC with comparable observation/action structure.
+- ARC-facing runtime behavior should be rejected if it depends on a frozen checkpoint alone and does not improve or adapt from live within-episode experience.
+- ARC-facing runtime behavior should also be rejected if it cannot explain its current behavior in terms of revisable grounded hypotheses, rule support, and contradiction.
+- ARC-facing runtime behavior should be rejected if it encodes game-specific semantics, level-specific priors, or behavior derived from inspecting benchmark environment files.
+- Real-ARC retries must continue to use the official adapter as a black-box interaction surface only; success claims from this point forward should mention whether they were validated offline, online, or both.
+- Internal model-based rollouts are allowed to grow only under explicit compute budgets, cached reuse, and generic claim-guided pruning; brute-force full-width depth increases are not acceptable on the target hardware.
+- The learned eval path must not construct or consult the hand-authored runtime controller unless that controller is being used strictly as explicit training/bootstrap instrumentation outside the submission-relevant path.
+- The learned eval path must not synthesize heuristic language/question tokens when the learned language head is silent; empty learned output is preferable to a hand-authored fallback.
