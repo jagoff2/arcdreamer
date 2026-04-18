@@ -16,22 +16,43 @@ from arcagi.models.world_model import RecurrentWorldModel
 
 GENERIC_MEMORY_TOKENS: frozenset[str] = frozenset(
     {
+        "belief",
+        "question",
         "goal",
         "need",
         "test",
         "unknown",
         "uncertain",
         "rule",
-        "question",
         "plan",
         "explore",
+        "probe",
         "confirm",
         "move",
         "interact",
+        "click",
+        "select",
         "toward",
         "target",
+        "action",
+        "focus",
+        "state",
+        "direction",
+        "color",
+        "family",
+        "because",
         "active",
         "inactive",
+        "present",
+        "absent",
+        "visible",
+        "hidden",
+        "positive",
+        "negative",
+        "none",
+        "near",
+        "mid",
+        "far",
         "high",
         "mid",
         "low",
@@ -163,6 +184,63 @@ def _context_bias_bonus(
     )
 
 
+def _signature_color_tokens(signature: ObjectSignature) -> tuple[str, ...]:
+    color = int(signature[0])
+    named = {
+        3: "red",
+        4: "blue",
+        5: "green",
+        6: "yellow",
+        7: "red",
+        8: "blue",
+    }.get(color)
+    bucket = f"c{max(0, min(color, 11))}"
+    if named is None:
+        return (bucket,)
+    return (named, bucket)
+
+
+def _plan_alignment_bonus(
+    state: StructuredState | _ImaginationStateProxy,
+    action: ActionName,
+    *,
+    schema,
+    plan_tokens: tuple[str, ...],
+) -> float:
+    if not plan_tokens:
+        return 0.0
+    token_set = set(plan_tokens)
+    score = 0.0
+    if "action" in token_set and schema.action_type in token_set:
+        score += 0.28
+    elif schema.action_type in token_set:
+        score += 0.16
+    if schema.direction is not None and schema.direction in token_set:
+        score += 0.22
+    if schema.action_type == "wait" and "wait" in token_set:
+        score += 0.2
+    if "focus" in token_set:
+        if "target" in token_set and schema.action_type == "move":
+            score += 0.12
+        if "interactable" in token_set and schema.action_type == "interact":
+            score += 0.16
+        if "rule" in token_set and schema.action_type in {"click", "select"}:
+            score += 0.16
+        if "frontier" in token_set and schema.action_type == "move":
+            score += 0.08
+    if isinstance(state, StructuredState):
+        target_signatures = action_target_signatures(state, action)
+        if target_signatures:
+            signature_tokens = {
+                token
+                for signature in target_signatures
+                for token in _signature_color_tokens(signature)
+            }
+            if token_set.intersection(signature_tokens):
+                score += 0.18
+    return score
+
+
 class HybridPlanner:
     def __init__(self, config: PlannerConfig | None = None) -> None:
         self.config = config or PlannerConfig()
@@ -179,11 +257,17 @@ class HybridPlanner:
     ) -> RuntimeThought:
         belief_tokens = ()
         question_tokens = ()
+        plan_tokens = ()
         if language_model is not None and latent is not None:
             belief_tokens = language_model.decode(latent, mode="belief")
             question_tokens = language_model.decode(latent, mode="question")
+            plan_tokens = language_model.decode(latent, mode="plan")
         if world_model is None or latent is None:
-            return RuntimeThought(belief_tokens=belief_tokens, question_tokens=question_tokens)
+            return RuntimeThought(
+                belief_tokens=belief_tokens,
+                question_tokens=question_tokens,
+                plan_tokens=plan_tokens,
+            )
         action_thoughts, world_model_calls = self._build_action_thoughts(
             state,
             latent,
@@ -194,6 +278,7 @@ class HybridPlanner:
         return RuntimeThought(
             belief_tokens=belief_tokens,
             question_tokens=question_tokens,
+            plan_tokens=plan_tokens,
             actions=action_thoughts,
             world_model_calls=world_model_calls,
         )
@@ -234,6 +319,7 @@ class HybridPlanner:
             )
         belief_tokens = thought.belief_tokens
         question_tokens = thought.question_tokens
+        plan_tokens = thought.plan_tokens
         search_candidates = self._ordered_search_actions(
             state=state,
             thought=thought,
@@ -259,7 +345,7 @@ class HybridPlanner:
         latent_np = latent.squeeze(0).detach().cpu().numpy() if latent is not None else state.summary_vector()
         memory_query_tokens = tuple(
             token
-            for token in dict.fromkeys(belief_tokens + question_tokens + thought.claim_tokens(limit=6))
+            for token in dict.fromkeys(belief_tokens + question_tokens + plan_tokens + thought.claim_tokens(limit=6))
             if token not in GENERIC_MEMORY_TOKENS
         )
         for action in state.affordances:
@@ -293,6 +379,12 @@ class HybridPlanner:
                 action,
                 schema=schema,
                 context_bias=context_bias,
+            )
+            plan_alignment = _plan_alignment_bonus(
+                state,
+                action,
+                schema=schema,
+                plan_tokens=plan_tokens,
             )
             wait_penalty = 0.35 if action == "wait" else 0.0
             parameter_bonus = 0.0
@@ -384,6 +476,7 @@ class HybridPlanner:
                 + interaction_grounding
                 + spatial_bonus
                 + context_online_bias
+                + plan_alignment
                 + stuck_bonus
                 - 0.9 * cycle_penalty
                 - (1.5 * action_no_effect_rate)
@@ -416,6 +509,7 @@ class HybridPlanner:
                     "interaction_grounding": interaction_grounding,
                     "spatial_bonus": spatial_bonus,
                     "context_online_bias": context_online_bias,
+                    "plan_alignment": plan_alignment,
                     "wait_penalty": wait_penalty,
                     "stuck_bonus": stuck_bonus,
                     "repeat_penalty": repeat_penalty,
@@ -430,7 +524,7 @@ class HybridPlanner:
             language=LanguageTrace(
                 belief_tokens=belief_tokens,
                 question_tokens=question_tokens,
-                plan_tokens=("plan", best_action),
+                plan_tokens=plan_tokens,
             ),
             search_path=(best_action,),
         )

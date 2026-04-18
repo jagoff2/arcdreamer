@@ -230,6 +230,16 @@ Grounded language should describe:
 
 but must be generated from observable transition evidence, not hidden rule ids or hidden env state.
 
+Current status after the latest language pass:
+
+- the old ~29-token toy vocabulary has been replaced with a richer grounded predicate vocabulary covering structural fields like `belief/question/plan`, `action/focus/state/direction/color`, mechanic words, color buckets, and coarse progress/count buckets
+- Stage 1 synthetic training and Stage 2 ARC-public training now both supervise a learned `plan` channel alongside `belief` and `question`
+- planner runtime thought now decodes and carries `plan_tokens`
+- episodic memory now stores and retrieves `plan_tokens`
+- planner action scoring now includes generic plan-action alignment against learned plan tokens instead of treating plan language as inert logging
+
+This still does not make the language module a large open-ended LM. It does make it a materially more serious grounded internal scratchpad rather than a tiny auxiliary caption head.
+
 ### D. Rework Stage 1 policy supervision
 
 Move further away from exact teacher action supervision.

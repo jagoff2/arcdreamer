@@ -3714,3 +3714,38 @@ Immediate implementation target:
 - unroll short latent futures through the world model without re-encoding real intermediate states
 - compare dreamed futures to later real states, rewards, deltas, and grounded belief/question targets
 - log dream metrics explicitly so future runs show whether dream replay is helping or just adding noise
+
+## Entry 056: 2026-04-18 / Language Stack Upgraded From Toy Caption Head To Grounded Predicate Scratchpad
+
+Diagnosis:
+
+- the implemented language model was still functionally a tiny GRU caption head over a toy vocabulary
+- it was only decoding short belief/question snippets from about 29 tokens
+- the `plan` path was not really learned at all in the main runtime; planner outputs still defaulted to `("plan", action)`
+- episodic memory also ignored plan language, so the scratchpad was not first-class in retrieval or control
+
+Implementation changes:
+
+- replaced the old toy vocabulary with a richer grounded predicate vocabulary in `arcagi/models/language.py`
+- added a real `plan_tokens` channel to `RuntimeThought` and episodic memory entries
+- Stage 1 synthetic training now teacher-forces structured `belief`, `question`, and `plan` targets
+- dream replay now trains `plan` alongside `belief` and `question`
+- Stage 2 public ARC training now teacher-forces `plan` as well
+- planner runtime thought now decodes `plan_tokens` from the language model
+- planner action scoring now uses generic plan-action alignment against learned plan tokens
+- learned-agent stabilization, latest-language traces, and memory writes now preserve plan tokens end to end
+
+Verification:
+
+- `python -m py_compile arcagi\\models\\language.py arcagi\\core\\types.py arcagi\\memory\\episodic.py arcagi\\training\\synthetic.py arcagi\\training\\arc_public.py arcagi\\planning\\planner.py arcagi\\planning\\runtime_rule_controller.py arcagi\\agents\\learned_agent.py tests\\test_synthetic_training.py tests\\test_planner_runtime_thought.py tests\\test_arc_public_training.py`
+- `python -m pytest tests\\test_synthetic_training.py tests\\test_planner_runtime_thought.py tests\\test_arc_public_training.py tests\\test_runtime_rule_controller.py -q`
+- result: `30 passed`
+
+Smoke:
+
+- a no-holdout/no-dream one-epoch trainer smoke completed cleanly at `artifacts/language_scratchpad_smoke_nh.pt`
+- train collection remained healthy on the tiny check:
+  - success `1.0`
+  - avg return `1.29125`
+  - avg steps `7.625`
+- epoch metrics now expose `plan_loss` and `dream_plan_loss`

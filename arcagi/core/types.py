@@ -324,6 +324,7 @@ class StructuredClaim:
 class RuntimeThought:
     belief_tokens: tuple[str, ...] = ()
     question_tokens: tuple[str, ...] = ()
+    plan_tokens: tuple[str, ...] = ()
     actions: tuple[ActionThought, ...] = ()
     claims: tuple[StructuredClaim, ...] = ()
     world_model_calls: int = 0

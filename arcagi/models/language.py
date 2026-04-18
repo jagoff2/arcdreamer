@@ -7,37 +7,111 @@ from torch import nn
 from torch.nn import functional as F
 
 
-DEFAULT_VOCAB: tuple[str, ...] = (
-    "<pad>",
-    "<bos>",
-    "<eos>",
-    "goal",
-    "unlock_target",
-    "collect",
-    "then",
-    "red",
-    "blue",
-    "green",
-    "yellow",
-    "switch",
-    "need",
-    "test",
-    "before",
-    "after",
-    "uncertain",
-    "interact",
-    "move",
-    "toward",
-    "target",
-    "active",
-    "inactive",
-    "question",
-    "plan",
-    "explore",
-    "confirm",
-    "rule",
-    "unknown",
-)
+def _default_vocab_tokens() -> tuple[str, ...]:
+    groups = (
+        (
+            "<pad>",
+            "<bos>",
+            "<eos>",
+            "unknown",
+        ),
+        (
+            "belief",
+            "question",
+            "plan",
+            "goal",
+            "target",
+            "state",
+            "mode",
+            "progress",
+            "focus",
+            "contradiction",
+            "effect",
+            "direction",
+            "action",
+            "family",
+            "because",
+            "step",
+            "color",
+        ),
+        (
+            "need",
+            "test",
+            "explore",
+            "probe",
+            "confirm",
+            "commit",
+            "move",
+            "interact",
+            "click",
+            "select",
+            "wait",
+            "toward",
+            "return",
+            "anchor",
+            "frontier",
+            "hotspot",
+            "adjacent",
+        ),
+        (
+            "active",
+            "inactive",
+            "uncertain",
+            "present",
+            "absent",
+            "visible",
+            "hidden",
+            "positive",
+            "negative",
+            "none",
+            "near",
+            "mid",
+            "far",
+        ),
+        (
+            "rule",
+            "collect",
+            "unlock",
+            "selector",
+            "switch",
+            "order",
+            "delayed",
+            "sequence",
+            "recent",
+            "agent",
+            "interactable",
+            "blocking",
+        ),
+        (
+            "up",
+            "down",
+            "left",
+            "right",
+            "red",
+            "blue",
+            "green",
+            "yellow",
+            "gray",
+            "orange",
+            "purple",
+            "cyan",
+        ),
+        tuple(f"c{index}" for index in range(12)),
+        tuple(f"p{index}" for index in range(6)),
+        tuple(f"n{index}" for index in range(6)),
+    )
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        for token in group:
+            if token in seen:
+                continue
+            seen.add(token)
+            ordered.append(token)
+    return tuple(ordered)
+
+
+DEFAULT_VOCAB: tuple[str, ...] = _default_vocab_tokens()
 
 MODE_TO_ID = {"belief": 0, "question": 1, "plan": 2}
 
@@ -130,7 +204,7 @@ class GroundedLanguageModel(nn.Module):
         self,
         latent: torch.Tensor,
         mode: str = "belief",
-        max_length: int = 8,
+        max_length: int = 12,
     ) -> tuple[str, ...]:
         if latent.ndim == 1:
             latent = latent.unsqueeze(0)

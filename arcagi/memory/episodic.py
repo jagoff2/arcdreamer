@@ -39,6 +39,7 @@ class EpisodicEntry:
     key: np.ndarray
     belief_tokens: tuple[str, ...]
     question_tokens: tuple[str, ...]
+    plan_tokens: tuple[str, ...]
     context_tokens: tuple[str, ...]
     action_history: tuple[ActionName, ...]
     reward: float
@@ -59,6 +60,7 @@ class EpisodicMemory:
         key: np.ndarray,
         belief_tokens: tuple[str, ...],
         question_tokens: tuple[str, ...],
+        plan_tokens: tuple[str, ...],
         action_history: tuple[ActionName, ...],
         reward: float,
         salience: float,
@@ -70,6 +72,7 @@ class EpisodicMemory:
                 key=np.asarray(key, dtype=np.float32).copy(),
                 belief_tokens=belief_tokens,
                 question_tokens=question_tokens,
+                plan_tokens=plan_tokens,
                 context_tokens=context_tokens,
                 action_history=action_history,
                 reward=reward,
@@ -95,7 +98,7 @@ class EpisodicMemory:
         for idx, entry in enumerate(self.entries):
             score = cosine_similarity(key, entry.key)
             if query_set:
-                entry_tokens = entry.belief_tokens + entry.question_tokens + entry.context_tokens
+                entry_tokens = entry.belief_tokens + entry.question_tokens + entry.plan_tokens + entry.context_tokens
                 generic_overlap = sum(
                     1 for token in query_set.intersection(entry_tokens) if token in GENERIC_QUERY_TOKENS
                 )

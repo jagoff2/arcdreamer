@@ -208,12 +208,19 @@ def test_language_targets_describe_current_state_not_post_action_state() -> None
     next_state = extract_structured_state(result.observation)
     sample = _make_sample(state, next_state, interact_action, result.reward, result.info)
 
-    assert sample["belief_tokens"] == ("goal", "inactive")
-    assert sample["question_tokens"] != ("move", "toward", "target")
+    assert sample["belief_tokens"][0] == "belief"
+    assert "inactive" in sample["belief_tokens"]
+    assert sample["question_tokens"][0] == "question"
+    assert "move" not in sample["question_tokens"]
+    assert sample["plan_tokens"][0] == "plan"
+    assert "interact" in sample["plan_tokens"]
 
     activated_sample = _make_sample(next_state, next_state, "wait", 0.0, {"event": "noop"})
-    assert activated_sample["belief_tokens"] == ("goal", "active")
-    assert activated_sample["question_tokens"] == ("move", "toward", "target")
+    assert activated_sample["belief_tokens"][0] == "belief"
+    assert "active" in activated_sample["belief_tokens"]
+    assert activated_sample["question_tokens"][0] == "question"
+    assert "move" in activated_sample["question_tokens"]
+    assert "target" in activated_sample["question_tokens"]
 
 
 def test_make_sample_preserves_teacher_action_labels_for_learner_states() -> None:
@@ -235,6 +242,7 @@ def test_make_sample_preserves_teacher_action_labels_for_learner_states() -> Non
 
     assert sample["teacher_action"] == "right"
     assert sample["teacher_weight"] == 0.8
+    assert sample["plan_tokens"][:5] == ("plan", "action", "move", "direction", "right")
 
 
 def test_dream_sequence_windows_follow_contiguous_episode_order() -> None:
@@ -296,6 +304,7 @@ def test_dream_phase_produces_grounded_rehearsal_metrics() -> None:
     assert metrics["dream_sequences"] > 0.0
     assert metrics["dream_steps"] >= metrics["dream_sequences"]
     assert metrics["dream_loss"] >= 0.0
+    assert metrics["dream_plan_loss"] >= 0.0
 
 
 def test_stage_family_weights_replay_previous_frontier_families() -> None:

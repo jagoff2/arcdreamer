@@ -65,6 +65,7 @@ def _make_sample(
         "usefulness": usefulness,
         "belief_tokens": _belief_tokens(state, action, reward, usefulness),
         "question_tokens": _question_tokens(state, action, reward, usefulness),
+        "plan_tokens": _plan_tokens(state, action, reward, usefulness),
     }
 
 
@@ -84,15 +85,10 @@ def _belief_tokens(
         build_action_schema(candidate, context).action_type == "interact"
         for candidate in state.affordances
     )
-    if reward > 0.0:
-        return ("rule", "active") if has_selector or has_interact else ("goal", "active")
-    if schema.action_type in {"click", "select"}:
-        return ("uncertain", "rule")
-    if schema.action_type == "interact":
-        return ("goal", "unknown")
-    if usefulness >= 0.25:
-        return ("uncertain", "rule") if has_selector else ("goal", "unknown")
-    return ("goal", "unknown")
+    status = "active" if reward > 0.0 else "uncertain" if has_selector else "inactive"
+    focus = "rule" if has_selector or schema.action_type in {"click", "select"} else "target" if reward > 0.0 else "frontier"
+    state_token = "probe" if has_selector else "explore"
+    return ("belief", "goal", status, "focus", focus, "state", state_token)
 
 
 def _question_tokens(
@@ -108,14 +104,36 @@ def _question_tokens(
         for candidate in state.affordances
     )
     if reward > 0.0:
-        return ("confirm", "rule") if has_selector else ("confirm", "goal")
-    if schema.action_type in {"click", "select"}:
-        return ("need", "test", "rule")
-    if schema.action_type == "interact":
-        return ("need", "test", "interact")
-    if usefulness >= 0.25:
-        return ("need", "test", "rule") if has_selector else ("need", "explore")
-    return ("need", "explore")
+        intent = "confirm"
+        focus = "rule" if has_selector else "target"
+    elif schema.action_type in {"click", "select"}:
+        intent = "test"
+        focus = "rule"
+    elif schema.action_type == "interact":
+        intent = "test"
+        focus = "interactable"
+    elif usefulness >= 0.25:
+        intent = "probe" if has_selector else "explore"
+        focus = "rule" if has_selector else "frontier"
+    else:
+        intent = "explore"
+        focus = "frontier"
+    return ("question", "need", intent, "focus", focus, "state", "probe" if has_selector else "explore")
+
+
+def _plan_tokens(
+    state: StructuredState,
+    action: str,
+    reward: float,
+    usefulness: float,
+) -> tuple[str, ...]:
+    context = build_action_schema_context(state.affordances, dict(state.action_roles))
+    schema = build_action_schema(action, context)
+    focus = "rule" if schema.action_type in {"click", "select"} else "interactable" if schema.action_type == "interact" else "target" if reward > 0.0 else "frontier"
+    status = "active" if reward > 0.0 else "uncertain" if usefulness >= 0.25 else "inactive"
+    direction = schema.direction or "none"
+    action_token = schema.action_type if schema.action_type in {"move", "interact", "click", "select", "wait"} else "unknown"
+    return ("plan", "action", action_token, "direction", direction, "focus", focus, "state", status)
 
 
 def collect_arc_public_dataset(
@@ -185,6 +203,7 @@ def train_arc_public(
         language_model.train()
         epoch_losses: list[float] = []
         epoch_policy_losses: list[float] = []
+        epoch_plan_losses: list[float] = []
         epoch_uncertainty: list[float] = []
         sequence_episode_id: str | None = None
         sequence_hidden: torch.Tensor | None = None
@@ -197,6 +216,7 @@ def train_arc_public(
             usefulness = float(sample["usefulness"])
             belief_tokens = sample["belief_tokens"]
             question_tokens = sample["question_tokens"]
+            plan_tokens = sample["plan_tokens"]
             if sequence_episode_id != state.episode_id or state.step_index == 0:
                 sequence_episode_id = state.episode_id
                 sequence_hidden = None
@@ -245,7 +265,12 @@ def train_arc_public(
                 [question_tokens or ("need", "explore")],
                 mode="question",
             )
-            loss = world_loss + (0.25 * policy_loss) + (config.language_loss_weight * (belief_loss + question_loss))
+            plan_loss = language_model.teacher_forcing_loss(
+                encoded.latent,
+                [plan_tokens or ("plan", "action", "unknown")],
+                mode="plan",
+            )
+            loss = world_loss + (0.25 * policy_loss) + (config.language_loss_weight * (belief_loss + question_loss + plan_loss))
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(
@@ -266,12 +291,14 @@ def train_arc_public(
                 ).hidden.detach()
             epoch_losses.append(float(loss.detach().cpu()))
             epoch_policy_losses.append(float(policy_loss.detach().cpu()))
+            epoch_plan_losses.append(float(plan_loss.detach().cpu()))
             epoch_uncertainty.append(metrics["uncertainty"])
         history.append(
             {
                 "epoch": float(epoch),
                 "loss": mean(epoch_losses) if epoch_losses else 0.0,
                 "policy_loss": mean(epoch_policy_losses) if epoch_policy_losses else 0.0,
+                "plan_loss": mean(epoch_plan_losses) if epoch_plan_losses else 0.0,
                 "uncertainty": mean(epoch_uncertainty) if epoch_uncertainty else 0.0,
                 "samples": float(len(dataset)),
             }
@@ -293,6 +320,7 @@ def train_arc_public(
         "samples_last_epoch": history[-1]["samples"] if history else 0.0,
         "loss_last_epoch": history[-1]["loss"] if history else 0.0,
         "policy_loss_last_epoch": history[-1]["policy_loss"] if history else 0.0,
+        "plan_loss_last_epoch": history[-1]["plan_loss"] if history else 0.0,
         "uncertainty_last_epoch": history[-1]["uncertainty"] if history else 0.0,
     }
 

@@ -439,6 +439,7 @@ class RuntimeRuleController:
         return RuntimeThought(
             belief_tokens=belief_tokens,
             question_tokens=question_tokens,
+            plan_tokens=thought.plan_tokens,
             actions=tuple(updated_actions),
             claims=tuple(claims[:6]),
         )

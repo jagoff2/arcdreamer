@@ -38,15 +38,19 @@ def _observation(
 class _FakeLanguageModel:
     def decode(self, _latent: torch.Tensor, mode: str = "belief", max_length: int = 8) -> tuple[str, ...]:
         if mode == "belief":
-            return ("uncertain",)
-        return ("need", "test")
+            return ("belief", "goal", "uncertain", "focus", "rule", "state", "probe")
+        if mode == "question":
+            return ("question", "need", "test", "focus", "rule", "state", "probe")
+        return ("plan", "action", "select", "direction", "none", "focus", "rule", "state", "uncertain")
 
 
 class _RawLanguageModel:
     def decode(self, _latent: torch.Tensor, mode: str = "belief", max_length: int = 8) -> tuple[str, ...]:
         if mode == "belief":
-            return ("goal", "active")
-        return ("move", "toward", "target")
+            return ("belief", "goal", "active", "focus", "target", "state", "commit")
+        if mode == "question":
+            return ("question", "need", "move", "focus", "target", "state", "commit")
+        return ("plan", "action", "move", "direction", "up", "focus", "target", "state", "active")
 
 
 def _object(
@@ -268,7 +272,8 @@ def test_runtime_thought_estimates_selector_followup_gain() -> None:
 
     selector_thought = thought.for_action("5")
 
-    assert thought.question_tokens == ("need", "test")
+    assert thought.question_tokens[:4] == ("question", "need", "test", "focus")
+    assert thought.plan_tokens[:4] == ("plan", "action", "select", "direction")
     assert selector_thought is not None
     assert selector_thought.selector_followup > 1.0
     assert selector_thought.next_latent is not None
@@ -293,8 +298,9 @@ def test_runtime_thought_keeps_decoded_language_tokens_without_synthesizing_grou
         language_model=_RawLanguageModel(),
     )
 
-    assert thought.belief_tokens == ("goal", "active")
-    assert thought.question_tokens == ("move", "toward", "target")
+    assert thought.belief_tokens == ("belief", "goal", "active", "focus", "target", "state", "commit")
+    assert thought.question_tokens == ("question", "need", "move", "focus", "target", "state", "commit")
+    assert thought.plan_tokens == ("plan", "action", "move", "direction", "up", "focus", "target", "state", "active")
 
 
 def test_runtime_thought_does_not_synthesize_question_tokens_without_language() -> None:
@@ -324,6 +330,7 @@ def test_runtime_thought_does_not_synthesize_question_tokens_without_language() 
     )
 
     assert thought.question_tokens == ()
+    assert thought.plan_tokens == ()
     assert thought.for_action("5") is not None
 
 

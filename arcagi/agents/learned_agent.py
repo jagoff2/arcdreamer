@@ -27,36 +27,100 @@ from arcagi.planning.rule_induction import EpisodeRuleInducer, ObjectSignature, 
 
 GENERIC_LANGUAGE_TOKENS: frozenset[str] = frozenset(
     {
+        "belief",
+        "question",
         "goal",
         "need",
         "test",
         "unknown",
         "uncertain",
         "rule",
-        "question",
         "plan",
         "explore",
+        "probe",
         "confirm",
+        "commit",
         "move",
         "interact",
+        "click",
+        "select",
+        "wait",
         "toward",
         "target",
+        "state",
+        "focus",
+        "action",
+        "direction",
+        "color",
+        "family",
+        "because",
+        "frontier",
+        "hotspot",
+        "anchor",
+        "adjacent",
         "active",
         "inactive",
+        "present",
+        "absent",
+        "visible",
+        "hidden",
+        "positive",
+        "negative",
+        "none",
+        "near",
+        "mid",
+        "far",
+        "p0",
+        "p1",
+        "p2",
+        "p3",
+        "p4",
+        "p5",
+        "n0",
+        "n1",
+        "n2",
+        "n3",
+        "n4",
+        "n5",
     }
 )
 CONTENT_LANGUAGE_TOKENS: frozenset[str] = frozenset(
     {
-        "unlock_target",
         "collect",
-        "then",
-        "before",
-        "after",
+        "unlock",
+        "selector",
         "switch",
+        "order",
+        "delayed",
+        "sequence",
+        "interactable",
+        "blocking",
+        "contradiction",
+        "effect",
         "red",
         "blue",
         "green",
         "yellow",
+        "gray",
+        "orange",
+        "purple",
+        "cyan",
+        "c0",
+        "c1",
+        "c2",
+        "c3",
+        "c4",
+        "c5",
+        "c6",
+        "c7",
+        "c8",
+        "c9",
+        "c10",
+        "c11",
+        "up",
+        "down",
+        "left",
+        "right",
     }
 )
 
@@ -120,8 +184,10 @@ class LearnedPlanningAgent(BaseAgent):
         self.language_token_scores: dict[str, float] = defaultdict(float)
         self.pending_belief_tokens: tuple[str, ...] = ()
         self.pending_question_tokens: tuple[str, ...] = ()
+        self.pending_plan_tokens: tuple[str, ...] = ()
         self.stable_belief_tokens: tuple[str, ...] = ()
         self.stable_question_tokens: tuple[str, ...] = ()
+        self.stable_plan_tokens: tuple[str, ...] = ()
         self.evidence_steps = 0
         self.runtime_rule_controller = RuntimeRuleController() if self.config.use_runtime_controller else None
         self.rule_inducer = EpisodeRuleInducer()
@@ -162,8 +228,10 @@ class LearnedPlanningAgent(BaseAgent):
         self.language_token_scores.clear()
         self.pending_belief_tokens = ()
         self.pending_question_tokens = ()
+        self.pending_plan_tokens = ()
         self.stable_belief_tokens = ()
         self.stable_question_tokens = ()
+        self.stable_plan_tokens = ()
         self.evidence_steps = 0
         self.global_action_counts.clear()
         self.global_action_delta_sums.clear()
@@ -199,8 +267,10 @@ class LearnedPlanningAgent(BaseAgent):
         self.language_token_scores.clear()
         self.pending_belief_tokens = ()
         self.pending_question_tokens = ()
+        self.pending_plan_tokens = ()
         self.stable_belief_tokens = ()
         self.stable_question_tokens = ()
+        self.stable_plan_tokens = ()
         self.evidence_steps = 0
         self.global_action_counts.clear()
         self.global_action_delta_sums.clear()
@@ -237,13 +307,17 @@ class LearnedPlanningAgent(BaseAgent):
     def _stabilize_runtime_thought(self, runtime_thought: RuntimeThought) -> RuntimeThought:
         filtered_belief = self._filtered_language_tokens(runtime_thought.belief_tokens)
         filtered_question = self._filtered_language_tokens(runtime_thought.question_tokens)
+        filtered_plan = self._filtered_language_tokens(runtime_thought.plan_tokens)
         if not filtered_belief and self.evidence_steps > 0:
             filtered_belief = tuple(token for token in runtime_thought.belief_tokens if token in GENERIC_LANGUAGE_TOKENS)
         if not filtered_question:
             filtered_question = tuple(token for token in runtime_thought.question_tokens if token in GENERIC_LANGUAGE_TOKENS)
+        if not filtered_plan:
+            filtered_plan = tuple(token for token in runtime_thought.plan_tokens if token in GENERIC_LANGUAGE_TOKENS)
         return RuntimeThought(
             belief_tokens=filtered_belief,
             question_tokens=filtered_question,
+            plan_tokens=filtered_plan,
             actions=runtime_thought.actions,
             claims=runtime_thought.claims,
             world_model_calls=runtime_thought.world_model_calls,
@@ -319,7 +393,11 @@ class LearnedPlanningAgent(BaseAgent):
         negative_probe = progress_signal <= -0.15
         if positive_evidence:
             self.evidence_steps += 1
-        raw_tokens = tuple(dict.fromkeys(self.pending_belief_tokens + self.pending_question_tokens))
+        raw_tokens = tuple(
+            dict.fromkeys(
+                self.pending_belief_tokens + self.pending_question_tokens + self.pending_plan_tokens
+            )
+        )
         for token in raw_tokens:
             delta = 0.0
             if token in GENERIC_LANGUAGE_TOKENS:
@@ -359,12 +437,15 @@ class LearnedPlanningAgent(BaseAgent):
         runtime_thought = self._stabilize_runtime_thought(runtime_thought)
         self.pending_belief_tokens = runtime_thought.belief_tokens
         self.pending_question_tokens = runtime_thought.question_tokens
+        self.pending_plan_tokens = runtime_thought.plan_tokens
         self.stable_belief_tokens = runtime_thought.belief_tokens
         self.stable_question_tokens = runtime_thought.question_tokens
+        self.stable_plan_tokens = runtime_thought.plan_tokens
         state_claims = self._state_claims(state)
         runtime_thought = RuntimeThought(
             belief_tokens=runtime_thought.belief_tokens,
             question_tokens=runtime_thought.question_tokens,
+            plan_tokens=runtime_thought.plan_tokens,
             actions=runtime_thought.actions,
             claims=tuple(runtime_thought.claims) + state_claims + self._episode_family_claims(),
             world_model_calls=runtime_thought.world_model_calls,
@@ -403,6 +484,8 @@ class LearnedPlanningAgent(BaseAgent):
         else:
             plan = planner_plan
         action = plan.action
+        self.stable_plan_tokens = plan.language.plan_tokens or runtime_thought.plan_tokens
+        self.pending_plan_tokens = self.stable_plan_tokens
         self.last_runtime_thought = runtime_thought
         self.last_plan_scores = dict(plan.scores)
         self.latest_claims = tuple(runtime_thought.claims)
@@ -413,7 +496,7 @@ class LearnedPlanningAgent(BaseAgent):
             + ("|",)
             + self.stable_question_tokens
             + ("|",)
-            + plan.language.plan_tokens
+            + self.stable_plan_tokens
         )
         self.last_prediction = self.world_model.step(
             encoded.latent,
@@ -528,7 +611,7 @@ class LearnedPlanningAgent(BaseAgent):
             context_tokens = _claim_context_tokens(self.latest_claims)
             content_language = tuple(
                 token
-                for token in (self.stable_belief_tokens + self.stable_question_tokens)
+                for token in (self.stable_belief_tokens + self.stable_question_tokens + self.stable_plan_tokens)
                 if token not in GENERIC_LANGUAGE_TOKENS
             )
             memory_supported = bool(context_tokens or content_language or trusted_action or progress_signal >= 0.25)
@@ -551,10 +634,12 @@ class LearnedPlanningAgent(BaseAgent):
             if memory_supported:
                 belief = self.stable_belief_tokens
                 question_tokens = self.stable_question_tokens
+                plan_tokens = self.stable_plan_tokens
                 self.episodic_memory.write(
                     key=self.last_latent.squeeze(0).detach().cpu().numpy(),
                     belief_tokens=belief,
                     question_tokens=question_tokens,
+                    plan_tokens=plan_tokens,
                     context_tokens=context_tokens,
                     action_history=tuple(self.recent_actions),
                     reward=transition.reward,
@@ -669,11 +754,13 @@ class LearnedPlanningAgent(BaseAgent):
         self.family_bias[best_family] = _clamp(self.family_bias.get(best_family, 0.0) + (0.2 * score_gap), lower=-3.0, upper=3.0)
         belief = self.stable_belief_tokens
         question_tokens = self.stable_question_tokens
+        plan_tokens = self.stable_plan_tokens
         context_tokens = _claim_context_tokens(self.latest_claims)
         self.episodic_memory.write(
             key=self.last_latent.squeeze(0).detach().cpu().numpy(),
             belief_tokens=belief,
             question_tokens=question_tokens,
+            plan_tokens=plan_tokens,
             context_tokens=context_tokens,
             action_history=tuple(self.recent_actions),
             reward=max(transition.reward, 0.0),

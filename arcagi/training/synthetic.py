@@ -72,6 +72,7 @@ class SyntheticTrainingConfig:
     dream_loss_weight: float = 0.35
     dream_belief_weight: float = 0.2
     dream_question_weight: float = 0.2
+    dream_plan_weight: float = 0.2
     holdout_failure_examples: int = 5
     holdout_trace_steps: int = 48
     holdout_trace_top_actions: int = 3
@@ -161,6 +162,7 @@ def _make_sample(
         None,
         delta_norm,
     )
+    plan_action = teacher_action or action
     return {
         "state": state,
         "next_state": next_state,
@@ -181,6 +183,7 @@ def _make_sample(
         "same_type_weight": policy_supervision.same_type_weight,
         "belief_tokens": _grounded_belief_tokens(state),
         "question_tokens": _grounded_question_tokens(state),
+        "plan_tokens": _grounded_plan_tokens(state, plan_action),
     }
 
 
@@ -525,34 +528,99 @@ def _state_symbolic_int(state: StructuredState, key: str, default: int = 0) -> i
         return default
 
 
+def _progress_bucket(value: int) -> str:
+    return f"p{max(0, min(int(value), 5))}"
+
+
+def _language_status_token(
+    state: StructuredState,
+    *,
+    contradiction_count: int,
+    recent_progress: bool,
+) -> str:
+    if _state_has_active_target(state):
+        return "active"
+    if contradiction_count > 0:
+        return "uncertain"
+    if recent_progress:
+        return "positive"
+    if _state_has_target(state):
+        return "inactive"
+    return "unknown"
+
+
+def _mode_token(raw_mode: str) -> str:
+    normalized = str(raw_mode).strip().lower()
+    if normalized in {"explore", "probe", "commit", "confirm"}:
+        return normalized
+    return "unknown"
+
+
+def _action_token(action_type: str) -> str:
+    if action_type in {"move", "interact", "click", "select", "wait"}:
+        return action_type
+    return "unknown"
+
+
+def _focus_token(
+    state: StructuredState,
+    *,
+    action_type: str,
+    contradiction_count: int,
+) -> str:
+    if _state_has_active_target(state):
+        return "target"
+    if contradiction_count > 0:
+        return "contradiction"
+    if action_type in {"click", "select"} and _has_selector_affordance(state):
+        return "rule"
+    if action_type == "interact":
+        return "interactable"
+    if action_type == "move" and _state_has_target(state):
+        return "target"
+    if _nearest_interactable_tokens(state):
+        return "interactable"
+    return "frontier"
+
+
+def _color_clause(state: StructuredState) -> tuple[str, ...]:
+    nearest = _nearest_interactable_tokens(state)
+    if nearest:
+        return ("color", nearest[0])
+    return ()
+
+
 def _grounded_belief_tokens(
     state: StructuredState,
 ) -> tuple[str, ...]:
-    nearest = _nearest_interactable_tokens(state)
     has_selector = _has_selector_affordance(state)
-    target_visible = _state_has_target(state)
     progress_level = _state_symbolic_int(state, "belief_progress_level")
     contradiction_count = _state_symbolic_int(state, "belief_contradiction_count")
     flags = state.flags_dict()
-    mode = flags.get("belief_mode", "explore")
+    mode = _mode_token(flags.get("belief_mode", "explore"))
     recent_progress = flags.get("belief_recent_progress", "0") == "1"
-    last_effect_family = flags.get("belief_last_effect_family", "none")
-
-    if _state_has_active_target(state):
-        return ("goal", "active")
-    if recent_progress and last_effect_family in {"interact", "click"}:
-        return ("confirm", "interact") + nearest[:1]
-    if progress_level >= 2 and mode == "commit":
-        return ("confirm", "goal")
-    if has_selector and contradiction_count > 0:
-        return ("uncertain", "rule") + nearest[:1]
-    if target_visible:
-        return ("goal", "inactive")
-    if has_selector and nearest:
-        return ("uncertain", "rule") + nearest[:1]
-    if nearest:
-        return ("goal", "unknown") + nearest[:1]
-    return ("goal", "unknown")
+    action_type = "select" if has_selector else "interact" if _nearest_interactable_tokens(state) else "move"
+    status = _language_status_token(
+        state,
+        contradiction_count=contradiction_count,
+        recent_progress=recent_progress,
+    )
+    focus = _focus_token(
+        state,
+        action_type=action_type,
+        contradiction_count=contradiction_count,
+    )
+    return (
+        "belief",
+        "goal",
+        status,
+        "focus",
+        focus,
+        "state",
+        mode,
+        *_color_clause(state),
+        _progress_bucket(progress_level),
+    )
 
 
 def _grounded_question_tokens(
@@ -563,19 +631,73 @@ def _grounded_question_tokens(
     progress_level = _state_symbolic_int(state, "belief_progress_level")
     contradiction_count = _state_symbolic_int(state, "belief_contradiction_count")
     flags = state.flags_dict()
-    mode = flags.get("belief_mode", "explore")
+    mode = _mode_token(flags.get("belief_mode", "explore"))
     recent_progress = flags.get("belief_recent_progress", "0") == "1"
     last_effect_family = flags.get("belief_last_effect_family", "none")
 
     if _state_has_active_target(state) or (progress_level >= 2 and mode == "commit"):
-        return ("move", "toward", "target")
-    if has_selector and (mode in {"explore", "probe"} or contradiction_count > 0):
-        return ("need", "test", "rule")
-    if recent_progress and last_effect_family in {"interact", "click"}:
-        return ("need", "test", "interact")
-    if has_interactable:
-        return ("need", "test", "interact")
-    return ("need", "explore")
+        intent = "move"
+        focus = "target"
+    elif has_selector and (mode in {"explore", "probe"} or contradiction_count > 0):
+        intent = "test"
+        focus = "rule"
+    elif recent_progress and last_effect_family in {"interact", "click"}:
+        intent = "confirm"
+        focus = "effect"
+    elif has_interactable:
+        intent = "test"
+        focus = "interactable"
+    else:
+        intent = "explore"
+        focus = "frontier"
+    return (
+        "question",
+        "need",
+        intent,
+        "focus",
+        focus,
+        "state",
+        mode,
+        *_color_clause(state),
+        _progress_bucket(progress_level),
+    )
+
+
+def _grounded_plan_tokens(
+    state: StructuredState,
+    action: str,
+) -> tuple[str, ...]:
+    context = build_action_schema_context(state.affordances, dict(state.action_roles))
+    schema = build_action_schema(action, context)
+    progress_level = _state_symbolic_int(state, "belief_progress_level")
+    contradiction_count = _state_symbolic_int(state, "belief_contradiction_count")
+    flags = state.flags_dict()
+    mode = _mode_token(flags.get("belief_mode", "explore"))
+    recent_progress = flags.get("belief_recent_progress", "0") == "1"
+    focus = _focus_token(
+        state,
+        action_type=schema.action_type,
+        contradiction_count=contradiction_count,
+    )
+    status = _language_status_token(
+        state,
+        contradiction_count=contradiction_count,
+        recent_progress=recent_progress,
+    )
+    direction = schema.direction or "none"
+    return (
+        "plan",
+        "action",
+        _action_token(schema.action_type),
+        "direction",
+        direction,
+        "focus",
+        focus,
+        *_color_clause(state),
+        "state",
+        status if status != "positive" else mode,
+        _progress_bucket(progress_level),
+    )
 
 
 def _summarize_episode_records(records: list[dict[str, object]]) -> dict[str, object]:
@@ -1147,6 +1269,7 @@ def _run_dream_phase(
             "dream_world_loss": 0.0,
             "dream_belief_loss": 0.0,
             "dream_question_loss": 0.0,
+            "dream_plan_loss": 0.0,
             "dream_seconds": 0.0,
         }
     total_sequences = int(config.dream_batches_per_epoch) * int(config.dream_batch_size)
@@ -1164,6 +1287,7 @@ def _run_dream_phase(
             "dream_world_loss": 0.0,
             "dream_belief_loss": 0.0,
             "dream_question_loss": 0.0,
+            "dream_plan_loss": 0.0,
             "dream_seconds": 0.0,
         }
     dream_started = perf_counter()
@@ -1171,6 +1295,7 @@ def _run_dream_phase(
     world_losses: list[float] = []
     belief_losses: list[float] = []
     question_losses: list[float] = []
+    plan_losses: list[float] = []
     total_steps = 0
     encoder.train()
     world_model.train()
@@ -1184,7 +1309,8 @@ def _run_dream_phase(
         sequence_world_terms: list[torch.Tensor] = []
         sequence_belief_terms: list[torch.Tensor] = []
         sequence_question_terms: list[torch.Tensor] = []
-        for index in window:
+        sequence_plan_terms: list[torch.Tensor] = []
+        for position, index in enumerate(window):
             sample = dataset[index]
             state = sample["state"]
             next_state = sample["next_state"]
@@ -1220,13 +1346,28 @@ def _run_dream_phase(
                 [_grounded_question_tokens(next_state)],
                 mode="question",
             )
+            next_plan_tokens: tuple[str, ...]
+            if position + 1 < len(window):
+                next_plan_tokens = tuple(dataset[window[position + 1]].get("plan_tokens", ()))
+            else:
+                next_plan_tokens = _grounded_plan_tokens(
+                    next_state,
+                    str(sample.get("teacher_action") or sample["action"]),
+                )
+            plan_loss = language_model.teacher_forcing_loss(
+                prediction.next_latent_mean,
+                [next_plan_tokens or ("plan", "action", "unknown")],
+                mode="plan",
+            )
             sequence_world_terms.append(world_loss)
             sequence_belief_terms.append(belief_loss)
             sequence_question_terms.append(question_loss)
+            sequence_plan_terms.append(plan_loss)
             sequence_terms.append(
                 world_loss
                 + (float(config.dream_belief_weight) * belief_loss)
                 + (float(config.dream_question_weight) * question_loss)
+                + (float(config.dream_plan_weight) * plan_loss)
             )
             hidden = prediction.hidden
             latent = prediction.next_latent_mean
@@ -1245,6 +1386,7 @@ def _run_dream_phase(
         world_losses.append(float(torch.stack(sequence_world_terms).mean().detach().cpu()))
         belief_losses.append(float(torch.stack(sequence_belief_terms).mean().detach().cpu()))
         question_losses.append(float(torch.stack(sequence_question_terms).mean().detach().cpu()))
+        plan_losses.append(float(torch.stack(sequence_plan_terms).mean().detach().cpu()))
     return {
         "dream_sequences": float(len(losses)),
         "dream_steps": float(total_steps),
@@ -1252,6 +1394,7 @@ def _run_dream_phase(
         "dream_world_loss": mean(world_losses) if world_losses else 0.0,
         "dream_belief_loss": mean(belief_losses) if belief_losses else 0.0,
         "dream_question_loss": mean(question_losses) if question_losses else 0.0,
+        "dream_plan_loss": mean(plan_losses) if plan_losses else 0.0,
         "dream_seconds": perf_counter() - dream_started,
     }
 
@@ -1522,6 +1665,7 @@ def train_synthetic(
     epoch_usefulness_losses: list[float] = []
     epoch_belief_losses: list[float] = []
     epoch_question_losses: list[float] = []
+    epoch_plan_losses: list[float] = []
     epoch_policy_losses: list[float] = []
     epoch_positive_policy_losses: list[float] = []
     epoch_negative_policy_losses: list[float] = []
@@ -1558,6 +1702,7 @@ def train_synthetic(
             epoch_usefulness_losses = []
             epoch_belief_losses = []
             epoch_question_losses = []
+            epoch_plan_losses = []
             epoch_policy_losses = []
             epoch_positive_policy_losses = []
             epoch_negative_policy_losses = []
@@ -1587,6 +1732,7 @@ def train_synthetic(
                 same_type_weight = float(sample["same_type_weight"])
                 belief_tokens = sample["belief_tokens"]
                 question_tokens = sample["question_tokens"]
+                plan_tokens = sample["plan_tokens"]
                 if sequence_episode_id != state.episode_id or state.step_index == 0:
                     sequence_episode_id = state.episode_id
                     sequence_hidden = None
@@ -1615,6 +1761,11 @@ def train_synthetic(
                     encoded.latent,
                     [question_tokens or ("need", "explore")],
                     mode="question",
+                )
+                plan_loss = language_model.teacher_forcing_loss(
+                    encoded.latent,
+                    [plan_tokens or ("plan", "action", "unknown")],
+                    mode="plan",
                 )
                 repeated_latent = encoded.latent.repeat(len(available_actions), 1)
                 repeated_hidden = None
@@ -1707,7 +1858,14 @@ def train_synthetic(
                 gate_target = torch.tensor(config.enhancement_gate_target, dtype=torch.float32, device=device)
                 gate_value = torch.tanh(encoder.enhancement_gate)
                 gate_loss = config.enhancement_gate_weight * torch.square(gate_value - gate_target)
-                loss = world_loss + 0.3 * belief_loss + 0.3 * question_loss + 0.5 * policy_loss + gate_loss
+                loss = (
+                    world_loss
+                    + 0.25 * belief_loss
+                    + 0.25 * question_loss
+                    + 0.25 * plan_loss
+                    + 0.5 * policy_loss
+                    + gate_loss
+                )
                 optimizer.zero_grad()
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(
@@ -1731,6 +1889,7 @@ def train_synthetic(
                 epoch_usefulness_losses.append(metrics["loss_usefulness"])
                 epoch_belief_losses.append(float(belief_loss.detach().cpu()))
                 epoch_question_losses.append(float(question_loss.detach().cpu()))
+                epoch_plan_losses.append(float(plan_loss.detach().cpu()))
                 epoch_policy_losses.append(float(policy_loss.detach().cpu()))
                 epoch_positive_policy_losses.append(float(positive_policy_loss.detach().cpu()))
                 epoch_negative_policy_losses.append(float(negative_policy_loss.detach().cpu()))
@@ -1875,6 +2034,7 @@ def train_synthetic(
                     "usefulness_loss": mean(epoch_usefulness_losses) if epoch_usefulness_losses else 0.0,
                     "belief_loss": mean(epoch_belief_losses) if epoch_belief_losses else 0.0,
                     "question_loss": mean(epoch_question_losses) if epoch_question_losses else 0.0,
+                    "plan_loss": mean(epoch_plan_losses) if epoch_plan_losses else 0.0,
                     "policy_loss": mean(epoch_policy_losses) if epoch_policy_losses else 0.0,
                     "positive_policy_loss": mean(epoch_positive_policy_losses) if epoch_positive_policy_losses else 0.0,
                     "negative_policy_loss": mean(epoch_negative_policy_losses) if epoch_negative_policy_losses else 0.0,
@@ -1906,6 +2066,7 @@ def train_synthetic(
                     "dream_world_loss": dream_metrics.get("dream_world_loss", 0.0),
                     "dream_belief_loss": dream_metrics.get("dream_belief_loss", 0.0),
                     "dream_question_loss": dream_metrics.get("dream_question_loss", 0.0),
+                    "dream_plan_loss": dream_metrics.get("dream_plan_loss", 0.0),
                     "dream_seconds": dream_metrics.get("dream_seconds", 0.0),
                 }
             )
@@ -1935,6 +2096,7 @@ def train_synthetic(
                 "dream_world_loss": dream_metrics.get("dream_world_loss", 0.0),
                 "dream_belief_loss": dream_metrics.get("dream_belief_loss", 0.0),
                 "dream_question_loss": dream_metrics.get("dream_question_loss", 0.0),
+                "dream_plan_loss": dream_metrics.get("dream_plan_loss", 0.0),
                 "dream_seconds": dream_metrics.get("dream_seconds", 0.0),
             }
             snapshot = _build_checkpoint_snapshot(
@@ -1978,6 +2140,7 @@ def train_synthetic(
                         "usefulness_loss": history[-1]["usefulness_loss"],
                         "belief_loss": history[-1]["belief_loss"],
                         "question_loss": history[-1]["question_loss"],
+                        "plan_loss": history[-1]["plan_loss"],
                         "policy_loss": history[-1]["policy_loss"],
                         "positive_policy_loss": history[-1]["positive_policy_loss"],
                         "negative_policy_loss": history[-1]["negative_policy_loss"],
@@ -1997,6 +2160,7 @@ def train_synthetic(
                         "dream_world_loss": history[-1]["dream_world_loss"],
                         "dream_belief_loss": history[-1]["dream_belief_loss"],
                         "dream_question_loss": history[-1]["dream_question_loss"],
+                        "dream_plan_loss": history[-1]["dream_plan_loss"],
                         "dream_seconds": history[-1]["dream_seconds"],
                         **saved_paths,
                     }
@@ -2027,6 +2191,7 @@ def train_synthetic(
             "dream_world_loss": float(dream_metrics.get("dream_world_loss", 0.0)),
             "dream_belief_loss": float(dream_metrics.get("dream_belief_loss", 0.0)),
             "dream_question_loss": float(dream_metrics.get("dream_question_loss", 0.0)),
+            "dream_plan_loss": float(dream_metrics.get("dream_plan_loss", 0.0)),
             "dream_seconds": float(dream_metrics.get("dream_seconds", 0.0)),
         }
         snapshot = _build_checkpoint_snapshot(
@@ -2132,6 +2297,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dream-loss-weight", type=float, default=0.35)
     parser.add_argument("--dream-belief-weight", type=float, default=0.2)
     parser.add_argument("--dream-question-weight", type=float, default=0.2)
+    parser.add_argument("--dream-plan-weight", type=float, default=0.2)
     parser.add_argument("--log-every-episodes", type=int, default=16)
     parser.add_argument("--holdout-eval-every-epochs", type=int, default=4)
     parser.add_argument("--holdout-episodes-per-variant", type=int, default=2)
@@ -2179,6 +2345,7 @@ def main() -> int:
         dream_loss_weight=args.dream_loss_weight,
         dream_belief_weight=args.dream_belief_weight,
         dream_question_weight=args.dream_question_weight,
+        dream_plan_weight=args.dream_plan_weight,
         log_every_episodes=args.log_every_episodes,
         holdout_eval_every_epochs=args.holdout_eval_every_epochs,
         holdout_episodes_per_variant=args.holdout_episodes_per_variant,

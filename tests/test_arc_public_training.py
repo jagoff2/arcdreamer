@@ -4,7 +4,7 @@ import numpy as np
 
 from arcagi.core.types import GridObservation
 from arcagi.perception.object_encoder import extract_structured_state
-from arcagi.training.arc_public import _belief_tokens, _question_tokens
+from arcagi.training.arc_public import _belief_tokens, _plan_tokens, _question_tokens
 
 
 def _state(actions: tuple[str, ...]) -> object:
@@ -39,8 +39,8 @@ def test_arc_public_language_targets_probe_rules_when_selector_actions_exist() -
     belief = _belief_tokens(state, "5", reward=0.0, usefulness=0.1)
     question = _question_tokens(state, "5", reward=0.0, usefulness=0.1)
 
-    assert belief == ("uncertain", "rule")
-    assert question == ("need", "test", "rule")
+    assert belief == ("belief", "goal", "uncertain", "focus", "rule", "state", "probe")
+    assert question == ("question", "need", "test", "focus", "rule", "state", "probe")
 
 
 def test_arc_public_language_targets_confirm_goal_on_positive_move_reward() -> None:
@@ -49,5 +49,13 @@ def test_arc_public_language_targets_confirm_goal_on_positive_move_reward() -> N
     belief = _belief_tokens(state, "1", reward=1.0, usefulness=0.5)
     question = _question_tokens(state, "1", reward=1.0, usefulness=0.5)
 
-    assert belief == ("goal", "active")
-    assert question == ("confirm", "goal")
+    assert belief == ("belief", "goal", "active", "focus", "target", "state", "explore")
+    assert question == ("question", "need", "confirm", "focus", "target", "state", "explore")
+
+
+def test_arc_public_plan_tokens_encode_action_focus_and_direction() -> None:
+    state = _state(("1", "interact_right"))
+
+    plan = _plan_tokens(state, "interact_right", reward=0.0, usefulness=0.2)
+
+    assert plan == ("plan", "action", "interact", "direction", "right", "focus", "interactable", "state", "inactive")
