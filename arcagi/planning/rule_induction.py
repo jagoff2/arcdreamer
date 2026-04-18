@@ -7,7 +7,7 @@ import math
 import numpy as np
 
 from arcagi.core.action_schema import build_action_schema, build_action_schema_context
-from arcagi.core.types import ActionName, ObjectState, StructuredState, Transition
+from arcagi.core.types import ActionName, ObjectState, StructuredClaim, StructuredState, Transition
 from arcagi.core.spatial_workspace import INTERACT_DELTAS
 
 ObjectSignature = tuple[int, int, int, int, tuple[str, ...]]
@@ -108,6 +108,65 @@ class ActionFamilyStats:
         return self.no_effect_count / self.visits
 
 
+@dataclass(frozen=True)
+class GroundedPredicate:
+    predicate_type: str
+    subject: str
+    relation: str
+    object: str
+
+    def key(self) -> tuple[str, str, str, str]:
+        return (self.predicate_type, self.subject, self.relation, self.object)
+
+    def render(self) -> str:
+        return f"{self.predicate_type}:{self.subject}{self.relation}{self.object}"
+
+    def as_claim(
+        self,
+        *,
+        subject_prefix: str,
+        confidence: float,
+        evidence: float,
+        salience: float,
+    ) -> StructuredClaim:
+        return StructuredClaim(
+            claim_type="hypothesis",
+            subject=subject_prefix,
+            relation="predicts",
+            object=self.render(),
+            confidence=confidence,
+            evidence=evidence,
+            salience=salience,
+        )
+
+
+@dataclass
+class GroundedHypothesis:
+    scope: tuple[GroundedPredicate, ...]
+    consequence: GroundedPredicate
+    support: float = 0.0
+    contradiction: float = 0.0
+    observations: int = 0
+
+    @property
+    def confidence(self) -> float:
+        return (self.support + 1.0) / (self.support + self.contradiction + 2.0)
+
+    @property
+    def weight(self) -> float:
+        return (2.0 * self.confidence) - 1.0
+
+    @property
+    def evidence(self) -> float:
+        return self.support + self.contradiction
+
+    def scope_key(self) -> tuple[tuple[str, str, str, str], ...]:
+        return tuple(predicate.key() for predicate in self.scope)
+
+    def scope_label(self) -> str:
+        return ";".join(predicate.render() for predicate in self.scope)
+
+
 class EpisodeRuleInducer:
     def __init__(self) -> None:
         self.action_rules: dict[ActionName, ActionRuleStats] = {}
@@ -115,6 +174,13 @@ class EpisodeRuleInducer:
         self.target_context_rules: dict[tuple[str, ObjectSignature], ActionFamilyStats] = {}
         self.signature_values: dict[ObjectSignature, float] = defaultdict(float)
         self.total_transitions = 0
+        self.hypotheses: dict[
+            tuple[tuple[tuple[str, str, str, str], ...], tuple[str, str, str, str]],
+            GroundedHypothesis,
+        ] = {}
+        self.hypotheses_by_scope: dict[tuple[tuple[str, str, str, str], ...], set[
+            tuple[tuple[tuple[str, str, str, str], ...], tuple[str, str, str, str]]
+        ]] = defaultdict(set)
 
     def clear(self) -> None:
         self.action_rules.clear()
@@ -122,6 +188,8 @@ class EpisodeRuleInducer:
         self.target_context_rules.clear()
         self.signature_values.clear()
         self.total_transitions = 0
+        self.hypotheses.clear()
+        self.hypotheses_by_scope.clear()
 
     def record(self, transition: Transition) -> None:
         self.total_transitions += 1
@@ -184,6 +252,7 @@ class EpisodeRuleInducer:
                 effect.delta_sum += float(after_obj.area)
                 effect.reward_sum += transition.reward
                 self.signature_values[signature] += transition.reward + (0.1 * after_obj.area)
+        self._record_grounded_hypotheses(transition)
 
     def action_score(self, state: StructuredState, action: ActionName) -> float:
         action_stats = self.action_rules.get(action)
@@ -243,7 +312,83 @@ class EpisodeRuleInducer:
         if action_stats is not None:
             progress_bonus = self._progress_bonus(state, action_stats)
         context_bonus = self._target_context_bonus(schema.action_type, target_signatures)
-        return action_score + family_score + progress_bonus + context_bonus
+        hypothesis_bonus = self.action_hypothesis_bonus(state, action)
+        diagnostic_bonus = self.action_diagnostic_bonus(state, action)
+        return action_score + family_score + progress_bonus + context_bonus + hypothesis_bonus + diagnostic_bonus
+
+    def top_claims(
+        self,
+        *,
+        state: StructuredState | None = None,
+        action: ActionName | None = None,
+        limit: int = 4,
+        min_weight: float = 0.1,
+    ) -> tuple[StructuredClaim, ...]:
+        if state is not None and action is not None:
+            candidates = self.applicable_hypotheses(state, action)
+        else:
+            candidates = tuple(self.hypotheses.values())
+        ranked = sorted(
+            (
+                hypothesis
+                for hypothesis in candidates
+                if hypothesis.weight >= min_weight
+            ),
+            key=lambda hypothesis: (hypothesis.weight, hypothesis.support, -hypothesis.contradiction),
+            reverse=True,
+        )
+        claims: list[StructuredClaim] = []
+        for hypothesis in ranked[:limit]:
+            confidence = max(min(hypothesis.confidence, 1.0), 0.0)
+            claims.append(
+                hypothesis.consequence.as_claim(
+                    subject_prefix=hypothesis.scope_label(),
+                    confidence=confidence,
+                    evidence=hypothesis.evidence,
+                    salience=abs(hypothesis.weight),
+                )
+            )
+        return tuple(claims)
+
+    def applicable_hypotheses(self, state: StructuredState, action: ActionName) -> tuple[GroundedHypothesis, ...]:
+        scopes = self._scope_definitions(state, action)
+        hypothesis_ids: set[
+            tuple[tuple[tuple[str, str, str, str], ...], tuple[str, str, str, str]]
+        ] = set()
+        for scope_key, _scope_predicates, _target_signature in scopes:
+            hypothesis_ids.update(self.hypotheses_by_scope.get(scope_key, set()))
+        hypotheses = [self.hypotheses[hypothesis_id] for hypothesis_id in hypothesis_ids]
+        hypotheses.sort(key=lambda item: (abs(item.weight), item.support, -item.contradiction), reverse=True)
+        return tuple(hypotheses)
+
+    def action_hypothesis_bonus(self, state: StructuredState, action: ActionName) -> float:
+        bonus = 0.0
+        for hypothesis in self.applicable_hypotheses(state, action)[:8]:
+            desirability = _consequence_desirability(hypothesis.consequence)
+            if desirability == 0.0:
+                continue
+            bonus += desirability * hypothesis.weight
+        return max(min(bonus, 2.5), -2.5)
+
+    def action_diagnostic_bonus(self, state: StructuredState, action: ActionName) -> float:
+        grouped: dict[tuple[str, str], list[GroundedHypothesis]] = defaultdict(list)
+        for hypothesis in self.applicable_hypotheses(state, action):
+            grouped[(hypothesis.consequence.predicate_type, hypothesis.consequence.subject)].append(hypothesis)
+        bonus = 0.0
+        for group in grouped.values():
+            if len(group) < 2:
+                continue
+            support = [hypothesis for hypothesis in group if hypothesis.support > 0.0]
+            if len(support) < 2:
+                continue
+            weights = [abs(hypothesis.weight) for hypothesis in support]
+            if not weights:
+                continue
+            uncertainty = 1.0 - max(weights)
+            if uncertainty <= 0.0:
+                continue
+            bonus += 0.2 * uncertainty
+        return min(bonus, 0.75)
 
     @staticmethod
     def _state_delta(before: StructuredState, after: StructuredState) -> float:
@@ -315,6 +460,160 @@ class EpisodeRuleInducer:
             )
         return bonus / float(len(signatures))
 
+    def _record_grounded_hypotheses(self, transition: Transition) -> None:
+        scopes = self._scope_definitions(transition.state, transition.action)
+        relation_predicates = self._relation_delta_predicates(transition.state, transition.next_state)
+        hidden_predicates = self._hidden_state_delta_predicates(transition.state, transition.next_state)
+        reward_predicates = self._reward_predicates(transition.reward)
+        state_change_predicates = self._state_change_predicates(transition)
+        for scope_key, scope_predicates, target_signature in scopes:
+            observed = list(reward_predicates)
+            observed.extend(state_change_predicates)
+            observed.extend(hidden_predicates)
+            observed.extend(relation_predicates)
+            if target_signature is not None:
+                observed.extend(self._target_effect_predicates(transition, target_signature))
+            observed_keys = {predicate.key() for predicate in observed}
+            existing_ids = set(self.hypotheses_by_scope.get(scope_key, set()))
+            for hypothesis_id in existing_ids:
+                hypothesis = self.hypotheses[hypothesis_id]
+                hypothesis.observations += 1
+                if hypothesis.consequence.key() in observed_keys:
+                    hypothesis.support += 1.0
+                else:
+                    hypothesis.contradiction += 1.0
+            for predicate in observed:
+                hypothesis_id = (scope_key, predicate.key())
+                hypothesis = self.hypotheses.get(hypothesis_id)
+                if hypothesis is None:
+                    hypothesis = GroundedHypothesis(scope=scope_predicates, consequence=predicate, support=1.0, observations=1)
+                    self.hypotheses[hypothesis_id] = hypothesis
+                    self.hypotheses_by_scope[scope_key].add(hypothesis_id)
+
+    def _scope_definitions(
+        self,
+        state: StructuredState,
+        action: ActionName,
+    ) -> tuple[
+        tuple[
+            tuple[tuple[str, str, str, str], ...],
+            tuple[GroundedPredicate, ...],
+            ObjectSignature | None,
+        ],
+        ...
+    ]:
+        context = build_action_schema_context(state.affordances, dict(state.action_roles))
+        schema = build_action_schema(action, context)
+        base_scope = (
+            GroundedPredicate("action", "type", "=", schema.action_type),
+            GroundedPredicate("action", "role", "=", schema.role or "unknown"),
+        )
+        scopes: list[
+            tuple[
+                tuple[tuple[str, str, str, str], ...],
+                tuple[GroundedPredicate, ...],
+                ObjectSignature | None,
+            ]
+        ] = [
+            (tuple(predicate.key() for predicate in base_scope), base_scope, None),
+        ]
+        relation_label = _target_relation_label(schema.action_type)
+        for signature in action_target_signatures(state, action):
+            signature_token = _signature_token(signature)
+            scope_predicates = base_scope + (
+                GroundedPredicate("object", "target_signature", "=", signature_token),
+                GroundedPredicate("relation", "agent_target", "=", relation_label),
+            )
+            scopes.append((tuple(predicate.key() for predicate in scope_predicates), scope_predicates, signature))
+        return tuple(scopes)
+
+    def _reward_predicates(self, reward: float) -> tuple[GroundedPredicate, ...]:
+        if reward > 0.0:
+            bucket = "positive"
+        elif reward < 0.0:
+            bucket = "negative"
+        else:
+            bucket = "zero"
+        return (
+            GroundedPredicate("reward", "episode", "=", bucket),
+        )
+
+    def _state_change_predicates(self, transition: Transition) -> tuple[GroundedPredicate, ...]:
+        delta = self._state_delta(transition.state, transition.next_state)
+        bucket = "changed" if delta >= 0.05 else "stable"
+        return (
+            GroundedPredicate("transition", "state_change", "=", bucket),
+        )
+
+    def _hidden_state_delta_predicates(
+        self,
+        before: StructuredState,
+        after: StructuredState,
+    ) -> tuple[GroundedPredicate, ...]:
+        predicates: list[GroundedPredicate] = []
+        before_flags = before.flags_dict()
+        after_flags = after.flags_dict()
+        for key in sorted(before_flags.keys() | after_flags.keys()):
+            if before_flags.get(key, "") == after_flags.get(key, ""):
+                continue
+            predicates.append(GroundedPredicate("flag", key, "=", after_flags.get(key, "")))
+        before_inventory = before.inventory_dict()
+        after_inventory = after.inventory_dict()
+        for key in sorted(before_inventory.keys() | after_inventory.keys()):
+            if before_inventory.get(key, "") == after_inventory.get(key, ""):
+                continue
+            predicates.append(GroundedPredicate("inventory", key, "=", after_inventory.get(key, "")))
+        return tuple(predicates)
+
+    def _relation_delta_predicates(
+        self,
+        before: StructuredState,
+        after: StructuredState,
+    ) -> tuple[GroundedPredicate, ...]:
+        before_counts = _relation_type_counts(before)
+        after_counts = _relation_type_counts(after)
+        predicates: list[GroundedPredicate] = []
+        for relation_type in sorted(before_counts.keys() | after_counts.keys()):
+            delta = int(after_counts.get(relation_type, 0) - before_counts.get(relation_type, 0))
+            if delta == 0:
+                continue
+            predicates.append(
+                GroundedPredicate("relation_count", relation_type, "delta", f"{delta:+d}")
+            )
+        return tuple(predicates)
+
+    def _target_effect_predicates(
+        self,
+        transition: Transition,
+        signature: ObjectSignature,
+    ) -> tuple[GroundedPredicate, ...]:
+        before_groups = _group_objects(transition.state.objects)
+        after_groups = _group_objects(transition.next_state.objects)
+        before_objects = before_groups.get(signature, [])
+        after_objects = after_groups.get(signature, [])
+        predicates: list[GroundedPredicate] = []
+        matched_count = min(len(before_objects), len(after_objects))
+        changed = False
+        moved = False
+        for index in range(matched_count):
+            before_obj = before_objects[index]
+            after_obj = after_objects[index]
+            if _object_delta(before_obj, after_obj) > 0.0:
+                changed = True
+            if abs(after_obj.centroid[0] - before_obj.centroid[0]) > 1e-6 or abs(after_obj.centroid[1] - before_obj.centroid[1]) > 1e-6:
+                moved = True
+        if changed:
+            predicates.append(GroundedPredicate("object", "target_effect", "=", "changed"))
+        if moved:
+            predicates.append(GroundedPredicate("object", "target_effect", "=", "moved"))
+        if len(after_objects) < len(before_objects):
+            predicates.append(GroundedPredicate("object", "target_effect", "=", "disappeared"))
+        if len(after_objects) > len(before_objects):
+            predicates.append(GroundedPredicate("object", "target_effect", "=", "appeared"))
+        if not predicates:
+            predicates.append(GroundedPredicate("object", "target_effect", "=", "stable"))
+        return tuple(predicates)
+
 
 def object_signature(obj: ObjectState) -> ObjectSignature:
     height = (obj.bbox[2] - obj.bbox[0]) + 1
@@ -370,3 +669,56 @@ def _object_delta(before: ObjectState, after: ObjectState) -> float:
 
 def _cell_distance(source: tuple[float, float], target: tuple[float, float]) -> float:
     return abs(source[0] - target[0]) + abs(source[1] - target[1])
+
+
+def _relation_type_counts(state: StructuredState) -> dict[str, int]:
+    counts: dict[str, int] = defaultdict(int)
+    for relation in state.relations:
+        counts[relation.relation_type] += 1
+    return counts
+
+
+def _signature_token(signature: ObjectSignature) -> str:
+    color, area, height, width, tags = signature
+    tag_part = ",".join(tags)
+    return f"c{color}:a{area}:h{height}:w{width}:{tag_part}"
+
+
+def _target_relation_label(action_type: str) -> str:
+    if action_type == "interact":
+        return "adjacent"
+    if action_type == "click":
+        return "clicked"
+    if action_type == "select":
+        return "selected"
+    return "present"
+
+
+def _consequence_desirability(predicate: GroundedPredicate) -> float:
+    if predicate.predicate_type == "reward":
+        return {
+            "positive": 1.25,
+            "zero": -0.1,
+            "negative": -1.25,
+        }.get(predicate.object, 0.0)
+    if predicate.predicate_type == "transition":
+        return {
+            "changed": 0.55,
+            "stable": -0.35,
+        }.get(predicate.object, 0.0)
+    if predicate.predicate_type == "object" and predicate.subject == "target_effect":
+        return {
+            "changed": 0.7,
+            "moved": 0.45,
+            "disappeared": 0.6,
+            "appeared": 0.45,
+            "stable": -0.35,
+        }.get(predicate.object, 0.0)
+    if predicate.predicate_type in {"flag", "inventory"}:
+        return 0.35
+    if predicate.predicate_type == "relation_count":
+        if predicate.object.startswith("+"):
+            return 0.2
+        if predicate.object.startswith("-"):
+            return -0.1
+    return 0.0
