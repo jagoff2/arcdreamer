@@ -2,6 +2,16 @@
 
 ## Active
 
+- [x] Move the generic runtime hypothesis controller into the full hybrid eval path instead of leaving it as sidecar research code.
+- [x] Add explicit proof and exception objects to the runtime hypothesis loop and write them into episodic memory.
+- [x] Add a first online representation-repair substrate: split/merge/rebind repair hypotheses now accumulate within the episode and suppress premature exploitation when the current object view looks wrong.
+- [x] Add local per-episode model patches over action value, usefulness, policy prior, and uncertainty so the agent can edit bad expectations without waiting for full retraining.
+- [x] Upgrade representation repair from diagnostics into actual online split/merge/relabel/rebind execution over the working state graph.
+- [x] Replace heuristic objective scoring with normalized rival hypothesis posteriors and explicit action-conditioned likelihood comparisons.
+- [x] Add option induction on top of proof objects so short reusable programs become first-class within-episode actions rather than just planner traces.
+- [x] Replace geometry-only repair proposal gating with an online learned repair scorer that can generalize split/merge/rebind proposals across signatures within the episode.
+- [x] Broaden posterior competition beyond single pairwise objective stories: family-level approach/contact/interact/activate/avoid theories now compete as executable hypotheses.
+- [ ] Stress-test the live repair workspace, induced options, and family-level posterior controller on longer synthetic runs and the real ARC public slice; the architecture gap is closed, but transfer/generalization is still not proven.
 - [x] Record the generalized-reasoning pivot in [docs/PIVOT_GENERAL_REASONING.md](docs/PIVOT_GENERAL_REASONING.md) and treat it as the governing standard for future synthetic/training changes.
 - [x] Record the allocentric spatial-workspace pivot in [docs/PIVOT_GENERAL_REASONING.md](docs/PIVOT_GENERAL_REASONING.md) and treat it as a required substrate for generalized planning under layout/interface shift.
 - [x] Add the first agent-owned spatial belief workspace to the runtime state path: persistent visited/tested/effect/contradiction place memory now augments structured state with coarse spatial-belief summaries.
@@ -44,11 +54,11 @@
 - [x] Fix Stage 1 interval logging so alternating family schedules do not alias into a misleading single-family view at fixed log strides.
 - [x] Replace the fixed staged synthetic schedule with held-out gated stage promotion plus replay mixing.
 - [x] Instrument Stage 1 holdout evaluation with step-level causal traces, event breakdowns, action-family counts, failure signatures, and persisted holdout payloads.
-- [ ] Tune the new held-out synthetic promotion thresholds and eval cadence so gating is informative without dominating wall-clock time.
-- [ ] Fix foundation size-9 held-out generalization: current diagnostic holdout remains `0.4` success with `switch_unlock` partially working but `order_collect` at `0.0`.
+- [ ] Tune the new held-out synthetic promotion thresholds and eval cadence now that a `25k`-episodes-per-epoch manual run can clear foundation and reach `hidden_modes`; gating still needs to stay informative without dominating wall-clock time.
+- [x] Recover foundation size-9 held-out competence enough to clear staged promotion: the long manual run now advances into `hidden_modes` by epoch `4`, so foundation is no longer the active blocker.
 - [x] Remove planner-side probe fallback logic and replace it with target-conditioned evidence: rule induction and online bias updates now score local observable object signatures so failed probes suppress only the targeted signature instead of smearing across the whole interaction family.
-- [ ] Suppress no-effect interaction churn under held-out size shift: current foundation holdout averages `10.0` interactions per episode with `90` `empty_interaction` events across `10` episodes.
-- [ ] Fix long-horizon sequence generalization on held-out size 9: `order_collect` currently times out at `0.0` success despite occasional partial progress (`correct_collect`) and occasional explicit `wrong_order` evidence.
+- [ ] Suppress residual no-effect churn after promotion: the epoch-4 `hidden_modes` windows still carry many `48`-step failures and negative-return episodes, so the controller is still wasting actions after foundation has already been cleared.
+- [ ] Fix long-horizon hidden-mode control and sequence generalization: after promotion, `selector_unlock` and `delayed_order_unlock` are still only around `0.45` running success with frequent timeout failures.
 - [x] Remove generic-memory contamination from the clean learned path: planner memory retrieval now ignores generic language overlap, ignores default `goal_active=0` flag claims, and only retrieves positive recommendations from non-counterfactual evidence.
 - [x] Add a generic spatial interaction prior so blind `interact_*` actions are penalized when no object is actually adjacent in that direction.
 - [x] Reduce blind rule-induction optimism so unseen actions do not receive a large synthetic explore prior by default.
@@ -57,12 +67,12 @@
 - [x] Stop synthetic post-goal reward farming: redundant mechanism interactions after `goal_active=1` now return a penalty instead of continuing to pay positive subgoal reward.
 - [x] Persist full holdout history in Stage 1 checkpoints so interrupted long runs preserve the entire eval trajectory, not just the last payload.
 - [x] Preserve hidden symbolic state in the learned state path: `StructuredState` summary/transition vectors now encode generic symbolic inventory/flag tokens instead of collapsing them to binary `"1"` checks, and synthetic observations now surface `progress_index` / `selected_color` for perception.
-- [ ] Fix the remaining held-out foundation blocker after the clean-path repairs: the world-model/policy prior still hallucinates interaction value under size shift, so post-fix short continuations remain stuck at `0.0-0.1` success on the size-9 foundation gate.
+- [ ] Fix the remaining post-promotion blocker after the clean-path repairs: the world-model/policy prior still overvalues unproductive control interactions in `hidden_modes`, so the promoted run remains only partially competent instead of consolidating into a stable solve policy.
 - [x] Fix the world-model training path so the ensemble uncertainty is not explicitly collapsed and the recurrent hidden state is actually trained across episode sequences.
-- [ ] Retrain foundation long enough after the root-cause fixes above: the first repaired continuation from `manual_stage1_long.epoch_0004.pt` improved held-out foundation to `0.2` success and lifted `order_collect` to `0.25`, but `switch_unlock` discovery is still weak and average interactions remain `12.8`.
-- [ ] Retrain long enough on the repaired Stage 1 objective to verify whether the new interaction suppression, memory gating, and stronger gate regularization actually open the whole-grid encoder branch and recover held-out foundation competence.
-- [ ] Treat `artifacts/manual_stage1_rootfix_long.epoch_0008.pt` as the current best repaired foundation checkpoint, not `manual_stage1_rootfix_long.pt` or `.interrupt.pt`: the long run peaked at `0.3` held-out success / `-0.47` return / `10.5` interactions at epoch 8, then regressed to `0.0` success and `-1.177` return by epoch 9.
-- [ ] Explain and stop the late-run held-out collapse after the root fixes: train metrics and gate opening stayed stable through epoch 9, but held-out size-9 generalization collapsed after epoch 8, which points to policy-prior drift / over-specialization rather than another sampler or reward-farming bug.
+- [x] Retrain foundation long enough after the root-cause fixes above: a `25k`-episodes-per-epoch manual run now clears the foundation gate and advances into `hidden_modes` by epoch `4`.
+- [x] Retrain long enough on the repaired Stage 1 objective to verify that the interaction suppression, memory gating, and stronger gate regularization can recover foundation competence: this is now demonstrated by the epoch-4 promotion into `hidden_modes`.
+- [ ] Replace the old "best repaired foundation checkpoint" story with the real promoted long-run artifact chain and index the exact stage-advance checkpoint and holdout payload in the repo.
+- [ ] Explain and stop post-promotion instability: the run reaches `hidden_modes`, but late epoch-4 windows still swing between roughly `0.375` and `0.500` interval success with many timeout failures.
 - [x] Complete the Stage 1 training-objective pivot in code: policy supervision is now event-agnostic by default, smooths over equivalence classes for moves/clicks, and `mixed` collection was downgraded to bounded oracle bootstrap instead of acting as a dominant teacher path.
 - [x] Fix the Stage 1 bootstrap failure on the pivoted path: `mixed` collection now starts with a short imitation warm-start and decays into sparse bounded bootstrap instead of trying to cold-start from almost pure exploration.
 - [x] Replace the fixed epoch-count bootstrap handoff with a competence-gated apprenticeship: the trainer now holds dense bootstrap until the policy clears consecutive train-success thresholds instead of withdrawing support on a blind epoch clock.
@@ -70,9 +80,9 @@
 - [x] Replace the one-way competence-gated bootstrap release with a permanent teacher floor plus DAgger-style learner-state relabeling: Stage 1 now keeps a pure-teacher episode floor and writes teacher action labels on learner-visited states instead of relying on a one-shot release epoch.
 - [x] Keep nonzero teacher support for the full run without reverting to oracle-dominated trajectories: the trainer now maintains a minority of pure teacher episodes plus learner roll-ins with teacher labels on visited states.
 - [x] Replace the toy auxiliary language head with a richer grounded predicate scratchpad: the vocabulary now spans belief/question/plan predicates, Stage 1 and Stage 2 both train a real plan channel, and planner/memory/runtime code now carry learned plan tokens instead of reducing language to short toy captions plus `("plan", action)` logs.
-- [ ] Make teacher guidance dynamic rather than latched: when train or holdout competence regresses, teacher density and early-step takeover must rise again instead of continuing to decay.
-- [ ] Retest the post-decay regime under the permanent-teacher-floor trainer: the previous competence-gated run stayed healthy through epoch 8, then collapsed once support thinned to `12/2` and below, so the next check must verify that late support no longer ratchets downward into the same failure mode.
-- [ ] Fix the epoch-2 regression under the new mixed DAgger regime: after replacing hard prefix takeover with probabilistic takeover and a `20%` pure-teacher floor, epoch 2 is now genuinely mixed (`teacher_step_fraction≈0.288`, `teacher_relabel_fraction≈0.576`) but still falls to `0.676` train success and `0.0` holdout success, so the remaining problem is no longer teacher ownership but policy degradation once full imitation ends.
+- [ ] Make teacher guidance dynamic rather than latched: even after promotion into `hidden_modes`, the long run is still using `teacher_step_fraction≈0.259` and `teacher_relabel_fraction≈0.622`, so support is still substantial and should rise again automatically on regression.
+- [ ] Quantify post-promotion learner ownership under the permanent-teacher-floor trainer: clearing foundation is not enough if `hidden_modes` competence disappears once teacher density is reduced further.
+- [ ] Reduce teacher episode dependence after promotion: the epoch-4 run still used `teacher_episode_fraction=0.2`, `teacher_takeover_prob=0.5`, and `5062` teacher episodes by the end of the epoch.
 - [ ] Add a real Stage 1 dream/consolidation phase: the current stack has act-time lookahead and tiny counterfactual replay, but it still lacks anchored latent rehearsal over short imagined futures rooted in real memory.
 - [ ] Keep dream replay constrained and reality-checked: dream rollouts should start from real anchors, follow short real or teacher-supported future action chains, and train against later observed outcomes instead of unconstrained self-generated fantasy.
 - [ ] Verify that dream replay improves post-imitation stability: the immediate target is to stop the epoch-2 degradation after full imitation ends without reverting to oracle-owned trajectories.
@@ -82,8 +92,8 @@
 - [ ] Redesign the Stage 1 objective so post-audit retraining improves the cleaned `AR25`/public-slice baseline instead of regressing it.
 - [ ] Prevent the retrained policy/language heads from collapsing back into high-click churn on hard selector/click tasks such as `DC22`.
 - [x] Decide whether the current mixed Stage 1 policy target is poisoning the harder-family action prior and replace it if so.
-- [ ] Run a longer repaired foundation retrain under the new event-aware supervision and planner de-biasing; the first smoke continuation from `manual_stage1_rootfix_long.epoch_0008.pt` cut held-out interactions to `3.6` from the previous `10.5`, but `order_collect` is still failing in the tiny `1`-episode-per-variant probe.
-- [ ] Run a longer continuation under the repaired world-model objective from `manual_stage1_rootfix_long.epoch_0008.pt`; the first one-epoch smoke run after the world-model fix stayed train-stable and kept hold-out interaction churn low at `4.0`, but did not immediately recover size-9 discovery (`0.0` success, `-0.864` return), which is consistent with a recalibrated but not-yet-retrained model.
+- [ ] Run a longer post-promotion continuation from the epoch-4 promoted checkpoint and measure whether `hidden_modes` success can be pushed materially above `0.45` without losing foundation competence.
+- [ ] Produce the same style of held-out diagnostic report for promoted `hidden_modes` checkpoints that foundation now has, including family breakdowns for `selector_unlock` and `delayed_order_unlock`.
 - [ ] Revalidate on the chosen real online 5-game slice only after the richer synthetic retrain completes.
 - [ ] Beat the public online 5-game slice with the clean learned eval path only; current measured state after controller removal and multiple planner/adaptation passes is still `0/5`.
 - [x] Fix pre-retrain planner-state mismatch: imagined selector follow-ups and deeper rollouts now use updated imagined state proxies instead of the stale original structured state/action context.
@@ -142,5 +152,6 @@
 - ARC-facing runtime behavior should be rejected if it encodes game-specific semantics, level-specific priors, or behavior derived from inspecting benchmark environment files.
 - Real-ARC retries must continue to use the official adapter as a black-box interaction surface only; success claims from this point forward should mention whether they were validated offline, online, or both.
 - Internal model-based rollouts are allowed to grow only under explicit compute budgets, cached reuse, and generic claim-guided pruning; brute-force full-width depth increases are not acceptable on the target hardware.
-- The learned eval path must not construct or consult the hand-authored runtime controller unless that controller is being used strictly as explicit training/bootstrap instrumentation outside the submission-relevant path.
+- The learned eval path may construct the generic runtime hypothesis controller.
+- The learned eval path must not construct or consult any synthetic-task-specific or benchmark-shaped runtime controller unless that controller is being used strictly as explicit training/bootstrap instrumentation outside the submission-relevant path.
 - The learned eval path must not synthesize heuristic language/question tokens when the learned language head is silent; empty learned output is preferable to a hand-authored fallback.

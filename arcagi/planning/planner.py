@@ -66,10 +66,10 @@ class PlannerConfig:
     value_weight: float = 1.0
     info_gain_weight: float = 0.8
     memory_weight: float = 0.6
-    search_depth: int = 4
-    search_root_width: int = 4
+    search_depth: int = 3
+    search_root_width: int = 3
     search_branch_width: int = 2
-    max_world_model_calls: int = 256
+    max_world_model_calls: int = 96
     discount: float = 0.7
 
 

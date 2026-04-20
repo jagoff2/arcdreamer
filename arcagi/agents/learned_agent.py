@@ -15,7 +15,7 @@ from arcagi.core.progress_signals import (
     transition_policy_supervision,
     transition_usefulness_target,
 )
-from arcagi.core.types import ActionName, GridObservation, RuntimeThought, StructuredClaim, Transition
+from arcagi.core.types import ActionName, ActionThought, GridObservation, HypothesisProof, RuntimeThought, StructuredClaim, Transition
 from arcagi.memory.episodic import EpisodicMemory
 from arcagi.models.encoder import StructuredStateEncoder
 from arcagi.models.language import GroundedLanguageModel
@@ -86,6 +86,18 @@ GENERIC_LANGUAGE_TOKENS: frozenset[str] = frozenset(
 )
 CONTENT_LANGUAGE_TOKENS: frozenset[str] = frozenset(
     {
+        "proof",
+        "support",
+        "contradiction",
+        "exception",
+        "repair",
+        "representation",
+        "objective",
+        "control",
+        "mode",
+        "split",
+        "merge",
+        "rebind",
         "collect",
         "unlock",
         "selector",
@@ -151,6 +163,47 @@ class LearnedAgentConfig:
     online_world_model_update_steps: int = 1
 
 
+@dataclass
+class LocalModelPatch:
+    value_shift: float = 0.0
+    policy_shift: float = 0.0
+    usefulness_shift: float = 0.0
+    uncertainty_shift: float = 0.0
+    entries: int = 0
+
+    def observe(
+        self,
+        *,
+        reward_error: float,
+        usefulness_error: float,
+        policy_error: float,
+        delta_error: float,
+        predicted_uncertainty: float,
+    ) -> None:
+        rate = 0.35 / float((self.entries + 1) ** 0.5)
+        self.value_shift = _clamp(
+            self.value_shift + (rate * ((0.6 * reward_error) + (0.4 * usefulness_error) - (0.08 * delta_error))),
+            lower=-2.5,
+            upper=2.5,
+        )
+        self.policy_shift = _clamp(
+            self.policy_shift + (rate * policy_error),
+            lower=-1.5,
+            upper=1.5,
+        )
+        self.usefulness_shift = _clamp(
+            self.usefulness_shift + (rate * usefulness_error),
+            lower=-1.5,
+            upper=1.5,
+        )
+        self.uncertainty_shift = _clamp(
+            self.uncertainty_shift + (rate * (delta_error - predicted_uncertainty)),
+            lower=-1.5,
+            upper=1.5,
+        )
+        self.entries += 1
+
+
 class LearnedPlanningAgent(BaseAgent):
     def __init__(
         self,
@@ -171,6 +224,7 @@ class LearnedPlanningAgent(BaseAgent):
         self.episodic_memory = episodic_memory
         self.config = config or LearnedAgentConfig()
         self.device = device or torch.device("cpu")
+        self.gradient_world_model_adaptation = self.config.use_online_world_model_adaptation and self.device.type != "cpu"
         self.hidden: torch.Tensor | None = None
         self.last_hidden_input: torch.Tensor | None = None
         self.last_latent: torch.Tensor | None = None
@@ -180,6 +234,8 @@ class LearnedPlanningAgent(BaseAgent):
         self.recent_actions: list[ActionName] = []
         self.online_action_bias: dict[ActionName, float] = {}
         self.online_context_bias: dict[tuple[str, ObjectSignature], float] = {}
+        self.local_action_patches: dict[ActionName, LocalModelPatch] = {}
+        self.local_context_patches: dict[tuple[str, ObjectSignature], LocalModelPatch] = {}
         self.family_bias: dict[str, float] = defaultdict(float)
         self.language_token_scores: dict[str, float] = defaultdict(float)
         self.pending_belief_tokens: tuple[str, ...] = ()
@@ -194,7 +250,7 @@ class LearnedPlanningAgent(BaseAgent):
         self._world_model_base_state = copy.deepcopy(self.world_model.state_dict())
         self.world_model_optimizer = (
             torch.optim.Adam(self.world_model.parameters(), lr=self.config.online_world_model_lr)
-            if self.config.use_online_world_model_adaptation
+            if self.gradient_world_model_adaptation
             else None
         )
         self.global_action_counts: dict[ActionName, int] = defaultdict(int)
@@ -208,7 +264,7 @@ class LearnedPlanningAgent(BaseAgent):
 
     def reset_episode(self) -> None:
         super().reset_episode()
-        if self.world_model_optimizer is not None:
+        if self.gradient_world_model_adaptation and self.world_model_optimizer is not None:
             self.world_model.load_state_dict(self._world_model_base_state)
             self.world_model_optimizer = torch.optim.Adam(
                 self.world_model.parameters(),
@@ -224,6 +280,8 @@ class LearnedPlanningAgent(BaseAgent):
         self.recent_actions = []
         self.online_action_bias = {}
         self.online_context_bias = {}
+        self.local_action_patches = {}
+        self.local_context_patches = {}
         self.family_bias.clear()
         self.language_token_scores.clear()
         self.pending_belief_tokens = ()
@@ -247,7 +305,7 @@ class LearnedPlanningAgent(BaseAgent):
 
     def reset_all(self) -> None:
         super().reset_all()
-        if self.world_model_optimizer is not None:
+        if self.gradient_world_model_adaptation and self.world_model_optimizer is not None:
             self.world_model.load_state_dict(self._world_model_base_state)
             self.world_model_optimizer = torch.optim.Adam(
                 self.world_model.parameters(),
@@ -263,6 +321,8 @@ class LearnedPlanningAgent(BaseAgent):
         self.recent_actions = []
         self.online_action_bias = {}
         self.online_context_bias = {}
+        self.local_action_patches = {}
+        self.local_context_patches = {}
         self.family_bias.clear()
         self.language_token_scores.clear()
         self.pending_belief_tokens = ()
@@ -381,6 +441,117 @@ class LearnedPlanningAgent(BaseAgent):
                 break
         return tuple(claims)
 
+    def _combined_patch(
+        self,
+        state,
+        action: ActionName,
+    ) -> LocalModelPatch:
+        combined = LocalModelPatch()
+        action_patch = self.local_action_patches.get(action)
+        if action_patch is not None:
+            combined.value_shift += action_patch.value_shift
+            combined.policy_shift += action_patch.policy_shift
+            combined.usefulness_shift += action_patch.usefulness_shift
+            combined.uncertainty_shift += action_patch.uncertainty_shift
+        context_keys = self._action_context_keys(state, action)
+        if context_keys:
+            for key in context_keys:
+                patch = self.local_context_patches.get(key)
+                if patch is None:
+                    continue
+                combined.value_shift += 0.5 * patch.value_shift
+                combined.policy_shift += 0.5 * patch.policy_shift
+                combined.usefulness_shift += 0.5 * patch.usefulness_shift
+                combined.uncertainty_shift += 0.5 * patch.uncertainty_shift
+        return combined
+
+    def _apply_local_model_patches(self, state, runtime_thought: RuntimeThought) -> RuntimeThought:
+        if not runtime_thought.actions:
+            return runtime_thought
+        patched_actions: list[ActionThought] = []
+        patch_claims: list[StructuredClaim] = list(runtime_thought.claims)
+        for action_thought in runtime_thought.actions:
+            patch = self._combined_patch(state, action_thought.action)
+            patched_actions.append(
+                ActionThought(
+                    action=action_thought.action,
+                    value=action_thought.value + patch.value_shift + (0.2 * patch.usefulness_shift),
+                    uncertainty=max(action_thought.uncertainty + patch.uncertainty_shift, 0.0),
+                    policy=action_thought.policy + patch.policy_shift,
+                    policy_weight=action_thought.policy_weight,
+                    predicted_reward=action_thought.predicted_reward,
+                    usefulness=action_thought.usefulness + patch.usefulness_shift,
+                    selector_followup=action_thought.selector_followup,
+                    next_latent=action_thought.next_latent,
+                    next_hidden=action_thought.next_hidden,
+                    next_state_proxy=action_thought.next_state_proxy,
+                )
+            )
+            patch_strength = abs(patch.value_shift) + abs(patch.policy_shift) + abs(patch.usefulness_shift)
+            if patch_strength >= 0.4:
+                patch_claims.append(
+                    StructuredClaim(
+                        claim_type="local_patch",
+                        subject=action_thought.action,
+                        relation="edited",
+                        object="world_model",
+                        confidence=min(patch_strength / 2.0, 1.0),
+                        evidence=patch_strength,
+                        salience=patch_strength,
+                    )
+                )
+        return RuntimeThought(
+            belief_tokens=runtime_thought.belief_tokens,
+            question_tokens=runtime_thought.question_tokens,
+            plan_tokens=runtime_thought.plan_tokens,
+            actions=tuple(patched_actions),
+            claims=tuple(patch_claims),
+            world_model_calls=runtime_thought.world_model_calls,
+        )
+
+    def _write_runtime_proofs(
+        self,
+        proofs: tuple[HypothesisProof, ...],
+    ) -> None:
+        if (
+            not proofs
+            or not self.config.use_memory
+            or self.episodic_memory is None
+            or self.last_latent is None
+        ):
+            return
+        context_tokens = _claim_context_tokens(self.latest_claims)
+        action_history = tuple(self.recent_actions)
+        for proof in proofs:
+            salience = max(proof.confidence, abs(proof.evidence), 0.25)
+            payload = {
+                "context_id": self.last_state.task_id if self.last_state is not None else "",
+                "recommended_action": proof.action if proof.proof_type == "support" and not proof.exception else None,
+                "avoid_action": proof.action if proof.proof_type == "contradiction" or proof.exception else None,
+                "action_confidence": salience,
+                "proof": {
+                    "proof_type": proof.proof_type,
+                    "hypothesis_type": proof.hypothesis_type,
+                    "subject": proof.subject,
+                    "relation": proof.relation,
+                    "object": proof.object,
+                    "predicted": proof.predicted,
+                    "observed": proof.observed,
+                    "exception": proof.exception,
+                },
+            }
+            self.episodic_memory.write(
+                key=self.last_latent.squeeze(0).detach().cpu().numpy(),
+                belief_tokens=tuple(token for token in self.stable_belief_tokens if token not in GENERIC_LANGUAGE_TOKENS),
+                question_tokens=tuple(token for token in self.stable_question_tokens if token not in GENERIC_LANGUAGE_TOKENS),
+                plan_tokens=proof.as_tokens(),
+                context_tokens=context_tokens,
+                action_history=action_history,
+                reward=0.0,
+                salience=salience,
+                payload=payload,
+            )
+
     def _update_language_support(self, transition: Transition, *, state_change: float) -> None:
         action_family = _action_family(transition.action)
         progress_signal = transition_usefulness_target(
@@ -431,6 +602,7 @@ class LearnedPlanningAgent(BaseAgent):
             hidden=self.hidden,
             language_model=self.language_model if self.config.use_language else None,
         )
+        runtime_thought = self._apply_local_model_patches(state, runtime_thought)
         if self.config.use_runtime_controller:
             assert self.runtime_rule_controller is not None
             runtime_thought = self.runtime_rule_controller.augment_runtime_thought(state, runtime_thought)
@@ -564,9 +736,11 @@ class LearnedPlanningAgent(BaseAgent):
         return planner_plan
 
     def on_transition(self, transition: Transition) -> None:
+        runtime_proofs: tuple[HypothesisProof, ...] = ()
         if self.config.use_runtime_controller:
             assert self.runtime_rule_controller is not None
             self.runtime_rule_controller.observe_transition(transition)
+            runtime_proofs = self.runtime_rule_controller.consume_recent_proofs()
         self.rule_inducer.record(transition)
         if self.last_latent is None or self.last_prediction is None:
             return
@@ -583,6 +757,7 @@ class LearnedPlanningAgent(BaseAgent):
             state_change,
         )
         self._update_language_support(transition, state_change=state_change)
+        self._write_runtime_proofs(runtime_proofs)
         self.global_action_counts[transition.action] += 1
         self.global_action_delta_sums[transition.action] += state_change
         self.global_action_reward_sums[transition.action] += float(transition.reward)
@@ -649,6 +824,11 @@ class LearnedPlanningAgent(BaseAgent):
         if self.config.use_memory and self.episodic_memory is not None:
             self._counterfactual_replay(transition, state_change=state_change)
         self._update_online_action_bias(transition, state_change=state_change)
+        self._update_local_model_patches(
+            transition,
+            state_change=state_change,
+            progress_signal=progress_signal,
+        )
         self._adapt_world_model(transition, state_change=state_change)
 
     def _update_online_action_bias(self, transition: Transition, state_change: float) -> None:
@@ -677,6 +857,52 @@ class LearnedPlanningAgent(BaseAgent):
             previous_baseline = self.online_action_bias.get(previous_action, 0.0)
             delayed_credit = 0.35 * progress_signal
             self.online_action_bias[previous_action] = _clamp(previous_baseline + delayed_credit, lower=-2.5, upper=2.5)
+
+    def _update_local_model_patches(
+        self,
+        transition: Transition,
+        *,
+        state_change: float,
+        progress_signal: float,
+    ) -> None:
+        if self.last_prediction is None:
+            return
+        predicted_reward = float(self.last_prediction.reward.item())
+        predicted_usefulness = float(self.last_prediction.usefulness.item())
+        predicted_policy = float(torch.sigmoid(self.last_prediction.policy).item())
+        predicted_uncertainty = float(self.last_prediction.uncertainty.item())
+        predicted_delta = self.last_prediction.delta.detach().cpu().reshape(-1).numpy()
+        actual_delta = transition.next_state.transition_vector() - transition.state.transition_vector()
+        delta_error = float(np.linalg.norm(actual_delta - predicted_delta))
+        policy_supervision = transition_policy_supervision(
+            transition.action,
+            float(transition.reward),
+            None,
+            state_change,
+        )
+        reward_error = float(transition.reward) - predicted_reward
+        usefulness_error = progress_signal - predicted_usefulness
+        policy_error = float(policy_supervision.target) - predicted_policy
+
+        action_patch = self.local_action_patches.setdefault(transition.action, LocalModelPatch())
+        action_patch.observe(
+            reward_error=reward_error,
+            usefulness_error=usefulness_error,
+            policy_error=policy_error,
+            delta_error=delta_error,
+            predicted_uncertainty=predicted_uncertainty,
+        )
+
+        context_keys = self._action_context_keys(transition.state, transition.action)
+        for key in context_keys:
+            patch = self.local_context_patches.setdefault(key, LocalModelPatch())
+            patch.observe(
+                reward_error=0.5 * reward_error,
+                usefulness_error=0.5 * usefulness_error,
+                policy_error=0.5 * policy_error,
+                delta_error=delta_error,
+                predicted_uncertainty=predicted_uncertainty,
+            )
 
     def _counterfactual_replay(self, transition: Transition, state_change: float) -> None:
         if self.last_latent is None or self.last_prediction is None:
@@ -919,6 +1145,6 @@ class HybridAgent(LearnedPlanningAgent):
             planner=planner,
             language_model=language_model,
             episodic_memory=episodic_memory,
-            config=LearnedAgentConfig(use_language=True, use_memory=True, use_runtime_controller=False),
+            config=LearnedAgentConfig(use_language=True, use_memory=True, use_runtime_controller=True),
             device=device,
         )

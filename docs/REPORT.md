@@ -2,7 +2,28 @@
 
 ## Date
 
-2026-04-14
+2026-04-19
+
+## 2026-04-19 Runtime Architecture Correction
+
+The previous repo state still had a structural mismatch between the stated thesis and the actual eval path:
+
+- the explicit runtime hypothesis controller existed
+- but the full `HybridAgent` did not construct it by default
+- proof objects, exception records, and representation-repair signals were mostly design intent rather than first-class runtime data
+
+That mismatch is now materially corrected:
+
+- the full hybrid eval agent now owns the generic runtime hypothesis controller
+- runtime hypotheses now emit proof and exception objects for control, objective, mode, and representation events
+- those proof objects are written into episodic memory so later retrieval can condition on what actually supported or falsified a claim
+- the base agent now runs a representation-repair workspace that can split, merge, relabel, and rebind entities inside the working structured state
+- the controller still tracks repair confidence and suppresses premature exploitation when the current entity view looks unstable
+- control, objective, and selector-mode hypotheses are now weighted as normalized rival executable theories rather than only heuristic score buckets
+- the learned agent now applies local per-episode model patches over action value, usefulness, policy prior, and uncertainty before falling back to heavier online world-model updates
+- the full train-plus-eval smoke path now passes with these changes in place
+
+This is still not the full target architecture. Option induction is still missing, and the repair proposals are still geometry-driven rather than learned from a richer decomposition model.
 
 ## Current Honest State
 
@@ -95,10 +116,10 @@ Implemented or partially implemented:
 
 Current limitations:
 
-- hypothesis competition is still weak
+- hypothesis competition is now posterior-normalized, but the candidate family is still narrow and mostly object-signature based
 - the hybrid memory path no longer catastrophically loops, but its current success still depends heavily on the runtime rule layer
 - counterfactual replay exists, but it is still a local patch rather than the dominant runtime loop
-- representation repair is still shallow; it currently uses compatible size/color matching rather than a richer learned object-tracking mechanism
+- representation repair now executes live split / merge / relabel / rebind edits, but it still relies on cheap geometric evidence rather than a richer learned object-tracking mechanism
 - selector/click semantics are still under-modeled:
   - the controller does not yet maintain a strong enough latent belief over control mode or selected object identity
 - proof/disproof pressure is too weak:
@@ -1330,3 +1351,43 @@ Interpretation:
 - the remaining blocker is now narrower:
   - early `switch_unlock` discovery under held-out size shift is still weak
   - longer retraining under the repaired sampler and repaired post-goal semantics is now the correct next experiment
+
+## 2026-04-20 Long Manual Run Promotion
+
+The earlier foundation blockage documented above is now historical rather than current. A longer manual Stage 1 run using the repaired runtime stack and `25,000` episodes per epoch advanced beyond foundation and into `hidden_modes` by epoch `4`.
+
+End-of-epoch `4` running metrics from the promoted regime:
+
+- `stage_name = hidden_modes`
+- `frontier_families = ["selector_unlock", "delayed_order_unlock"]`
+- `running_success_rate = 0.45072`
+- `running_avg_return = -0.0482464`
+- `running_avg_steps = 33.6464`
+- `samples_collected = 841160`
+- `elapsed_seconds = 2631.7117`
+- `teacher_episode_fraction = 0.2`
+- `teacher_takeover_prob = 0.5`
+- `teacher_episode_count = 5062`
+- `teacher_step_fraction = 0.259249`
+- `teacher_relabel_fraction = 0.621525`
+
+Recent interval windows near the end of epoch `4` still fluctuated materially:
+
+- interval success moved between `0.375` and `0.500`
+- interval average steps moved between `30.94` and `35.56`
+- failed episodes still frequently timed out at `48` steps
+
+Interpretation:
+
+1. The repo is no longer stuck at the old foundation generalization wall. The repaired runtime path is now strong enough to satisfy the staged promotion gate and expose the harder hidden-mode families.
+2. The architecture changes were behaviorally relevant, not just test-clean:
+   - executable posterior competition now survives into longer training
+   - live representation repair and local patches did not destabilize the long run
+   - option induction did not block promotion and is compatible with the promoted controller
+3. The next bottleneck is not "can foundation be cleared?" It is "can the promoted learner own hidden-mode control and sequence mechanics reliably?"
+4. Teacher support is still carrying a meaningful part of the run. `teacher_step_fraction≈0.259` and `teacher_relabel_fraction≈0.622` are too high to claim robust learner-owned hidden-mode competence.
+5. The correct next experiments are:
+   - capture and index the exact promoted checkpoint and holdout payload
+   - run held-out diagnostics on `selector_unlock` and `delayed_order_unlock`
+   - reduce teacher dependence without losing the promotion
+   - stabilize post-promotion performance so interval success does not keep swinging around the `0.4-0.5` band

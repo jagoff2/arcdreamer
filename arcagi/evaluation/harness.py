@@ -20,7 +20,7 @@ def build_agent(agent_name: str, checkpoint_path: str | None = None, device=None
 
     from arcagi.agents.learned_agent import HybridAgent, LanguageNoMemoryAgent, RecurrentAblationAgent
     from arcagi.memory.episodic import EpisodicMemory
-    from arcagi.planning.planner import HybridPlanner
+    from arcagi.planning.planner import HybridPlanner, PlannerConfig
     from arcagi.training.synthetic import build_default_modules, load_checkpoint
 
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -28,7 +28,11 @@ def build_agent(agent_name: str, checkpoint_path: str | None = None, device=None
         encoder, world_model, language_model = load_checkpoint(checkpoint_path, device=device)
     else:
         encoder, world_model, language_model, _planner = build_default_modules(device=device)
-    planner = HybridPlanner()
+    planner = HybridPlanner(
+        PlannerConfig(search_depth=2, search_root_width=2, search_branch_width=1, max_world_model_calls=48)
+        if device.type == "cpu"
+        else PlannerConfig()
+    )
     if agent_name == "recurrent":
         return RecurrentAblationAgent(encoder=encoder, world_model=world_model, planner=planner, device=device)
     if agent_name == "language":

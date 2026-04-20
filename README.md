@@ -42,16 +42,22 @@ Detailed runtime-learning design:
   - `hybrid`: `1.0` success rate on the full synthetic eval slice
 - current runtime-learning status:
   - the learned agent now beats the synthetic benchmark through live runtime rule learning
-  - the learned eval path no longer constructs the hand-authored runtime controller
-  - the learned eval path no longer synthesizes heuristic question tokens when the language head is silent
-  - the controller-heavy synthetic work remains research/bootstrap-only and is not the default submission-relevant path
-  - the next useful work is stronger learned online rule induction, not more controller shaping
+  - the full hybrid agent now does construct the generic runtime hypothesis controller by default
+  - that controller now records proof and exception objects, executes online split / merge / relabel / rebind repair in the working structured state, and writes local model edits within the episode
+  - control, objective, and selector-mode competition now use normalized posteriors over rival executable theories instead of only heuristic utility ranking
+  - temporary options are now induced online from successful control sequences such as path-to-objective chains and selector-followed-by-move behaviors
+  - heuristic language/question fallbacks remain disabled
+  - the controller-heavy synthetic work remains research/bootstrap-only only when it depends on synthetic semantics; the generic runtime hypothesis controller is now part of the intended submission-relevant hybrid path
+  - a long manual Stage 1 run at `25,000` episodes per epoch now clears foundation and reaches `hidden_modes` by epoch `4`
+  - that promoted epoch-4 snapshot is still only partial competence in `hidden_modes`: `running_success_rate = 0.45072`, `running_avg_return = -0.0482464`, `running_avg_steps = 33.6464`, `teacher_step_fraction = 0.259249`, `teacher_relabel_fraction = 0.621525`
+  - the next useful work is hidden-mode stabilization, lower teacher dependence, and broader transfer validation, not more shallow controller shaping
 
 ## Prize Eligibility Boundary
 
 - The default ARC-facing path must stay generic.
 - Synthetic-task-specific controller logic is not part of the default execution path.
-- The learned eval path does not construct the training-time runtime controller.
+- The learned eval path may construct the generic runtime hypothesis controller.
+- The learned eval path must not construct any synthetic-task-specific or benchmark-shaped controller.
 - The learned eval path does not use heuristic language/question fallbacks.
 - Generic perception does not infer synthetic roles from raw color IDs.
 - The ARC toolkit adapter is now offline-first. Prize-facing execution should use locally cached environments and avoid runtime network dependence.
@@ -85,6 +91,18 @@ Notes:
 ## Manual Stage 1 Training
 
 The synthetic trainer now supports long manual runs with live JSON progress, interrupt-safe checkpoints, and held-out gated stage promotion.
+
+Observed long-run milestone on `2026-04-20`:
+
+- a manual run with `25,000` episodes per epoch advanced into `hidden_modes` by epoch `4`
+- end-of-epoch running metrics at the promotion regime were:
+  - `running_success_rate = 0.45072`
+  - `running_avg_return = -0.0482464`
+  - `running_avg_steps = 33.6464`
+  - `samples_collected = 841160`
+  - `teacher_step_fraction = 0.259249`
+  - `teacher_relabel_fraction = 0.621525`
+- this means foundation is no longer the active synthetic blocker; hidden-mode stability and learner ownership are now the main Stage 1 problems
 
 ```bash
 python -m arcagi.training.synthetic \

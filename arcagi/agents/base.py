@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 
 from arcagi.core.inferred_state import InferredStateTracker
+from arcagi.core.representation_repair import RepresentationRepairWorkspace
 from arcagi.core.spatial_workspace import SpatialBeliefWorkspace
 from arcagi.core.types import ActionName, GridObservation, StructuredState, Transition
 from arcagi.core.types import StructuredClaim
@@ -25,6 +26,7 @@ class BaseAgent(ABC):
         self.name = name
         self.graph = StateGraph()
         self.inferred_state = InferredStateTracker()
+        self.representation_repair = RepresentationRepairWorkspace()
         self.spatial_workspace = SpatialBeliefWorkspace()
         self.last_state: StructuredState | None = None
         self.last_raw_state: StructuredState | None = None
@@ -37,6 +39,7 @@ class BaseAgent(ABC):
 
     def reset_episode(self) -> None:
         self.inferred_state.reset()
+        self.representation_repair.reset()
         self.spatial_workspace.reset()
         self.last_state = None
         self.last_raw_state = None
@@ -52,7 +55,7 @@ class BaseAgent(ABC):
         self.graph.clear()
 
     def observe(self, observation: GridObservation) -> StructuredState:
-        raw_state = extract_structured_state(observation)
+        raw_state = self.representation_repair.augment(extract_structured_state(observation))
         self.last_raw_state = raw_state
         self.spatial_workspace.observe_state(raw_state)
         state = self.inferred_state.augment(raw_state)
@@ -69,8 +72,17 @@ class BaseAgent(ABC):
         info: dict[str, object],
     ) -> StructuredState:
         agent_info = _agent_visible_info(info)
-        next_raw_state = extract_structured_state(next_observation)
+        extracted_next_raw_state = extract_structured_state(next_observation)
+        next_raw_state = self.representation_repair.augment(extracted_next_raw_state, commit=False)
         if self.last_raw_state is not None and self.last_action is not None:
+            self.representation_repair.observe_transition(
+                before=self.last_raw_state,
+                action=self.last_action,
+                reward=reward,
+                after=next_raw_state,
+                terminated=terminated,
+            )
+            next_raw_state = self.representation_repair.augment(extracted_next_raw_state, commit=True)
             self.inferred_state.observe_transition(
                 before=self.last_raw_state,
                 action=self.last_action,
@@ -85,6 +97,8 @@ class BaseAgent(ABC):
                 after=next_raw_state,
                 terminated=terminated,
             )
+        else:
+            next_raw_state = self.representation_repair.augment(extracted_next_raw_state, commit=True)
         self.spatial_workspace.observe_state(next_raw_state)
         next_state = self.inferred_state.augment(next_raw_state)
         next_state = self.spatial_workspace.augment(next_state)

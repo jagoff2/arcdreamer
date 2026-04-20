@@ -26,7 +26,7 @@ from arcagi.models.encoder import StructuredStateEncoder
 from arcagi.models.language import GroundedLanguageModel
 from arcagi.models.world_model import RecurrentWorldModel
 from arcagi.perception.object_encoder import extract_structured_state
-from arcagi.planning.planner import HybridPlanner
+from arcagi.planning.planner import HybridPlanner, PlannerConfig
 from arcagi.training.synthetic_oracle import oracle_action
 
 logger = logging.getLogger(__name__)
@@ -1413,7 +1413,11 @@ def _build_eval_agent(
     eval_encoder.load_state_dict(encoder.state_dict())
     eval_world_model.load_state_dict(world_model.state_dict())
     eval_language_model.load_state_dict(language_model.state_dict())
-    planner = HybridPlanner()
+    planner = HybridPlanner(
+        PlannerConfig(search_depth=2, search_root_width=2, search_branch_width=1, max_world_model_calls=48)
+        if device.type == "cpu"
+        else PlannerConfig()
+    )
     return HybridAgent(
         encoder=eval_encoder,
         world_model=eval_world_model,

@@ -321,6 +321,37 @@ class StructuredClaim:
 
 
 @dataclass(frozen=True)
+class HypothesisProof:
+    proof_type: str
+    hypothesis_type: str
+    action: ActionName
+    subject: str
+    relation: str
+    object: str
+    confidence: float = 0.0
+    evidence: float = 0.0
+    predicted: str = ""
+    observed: str = ""
+    step_index: int = 0
+    exception: bool = False
+
+    def as_tokens(self) -> tuple[str, ...]:
+        confidence_bucket = "high" if self.confidence >= 0.75 else "mid" if self.confidence >= 0.5 else "low"
+        tokens = [
+            "proof",
+            self.proof_type,
+            self.hypothesis_type,
+            self.subject,
+            self.relation,
+            self.object,
+            confidence_bucket,
+        ]
+        if self.exception:
+            tokens.append("exception")
+        return tuple(tokens)
+
+
+@dataclass(frozen=True)
 class RuntimeThought:
     belief_tokens: tuple[str, ...] = ()
     question_tokens: tuple[str, ...] = ()
