@@ -4,6 +4,48 @@
 
 2026-04-19
 
+## 2026-04-20 Interface-Aware Runtime Update
+
+The latest correction focused on the exact gap exposed by the real public ARC slice:
+
+- the agent could execute generic runtime hypotheses and induced options
+- but its first-contact experiments were still too narrow
+- its emitted language often reflected stale pre-plan runtime tokens instead of the controller plan that actually won arbitration
+- the online harness itself was also flawed because it opened a new ARC scorecard per game and could fail mid-slice with `409` conflicts
+
+That is now materially corrected:
+
+- ARC adapter and generic perception now surface interface-aware state features:
+  - action-schema-derived inventory and flags for move / click / select / interact structure
+  - inferred clickable / interface-target / selector-candidate tags over visible objects
+- the runtime controller now includes interface-aware first-contact experiment programs:
+  - selector-then-move probing
+  - selector-then-interact probing when interaction affordances are present
+  - bind-then-objective option materialization when a non-default control mode and objective sequence stabilize
+- the learned agent now keeps the chosen controller-plan language after arbitration instead of leaving diagnostics and episodic memory anchored to stale pre-plan tokens
+- the ARC harness now reuses one shared online scorecard across the full slice, so the 5-game online run completes end-to-end instead of failing on repeated scorecard creation
+
+Measured real online 5-game slice with `artifacts/test_bootstrap_handoff_fix.interrupt.pt` after this pass:
+
+- `ar25-0c556536`: fail, return `0.0`, `72` steps, `5` interaction steps
+- `bp35-0a0ad940`: fail, return `0.0`, `22` steps, `0` interaction steps
+- `cd82-fb555c5d`: fail, return `0.0`, `100` steps, `0` interaction steps
+- `cn04-2fe56bfb`: fail, return `0.0`, `75` steps, `1` interaction step
+- `dc22-fdcac232`: fail, return `0.0`, `128` steps, `16` interaction steps
+
+This is still `0/5`, but the failure signature changed in a useful direction:
+
+- `ar25` is no longer fully passive
+- `dc22` now spends materially more of its budget on real interactions
+- `cn04` now emits `objective_competition` and `disambiguate_objective` in the live trace instead of only vague control noise
+
+So the current bottleneck is no longer basic runtime-controller plumbing.
+The remaining problem is semantic transfer:
+
+- the agent is running broader first-contact experiments
+- but it is still not converting those experiments into reward-bearing task semantics quickly enough on the real slice
+- synthetic competence still overpredicts real-world hidden control and reward structure
+
 ## 2026-04-19 Runtime Architecture Correction
 
 The previous repo state still had a structural mismatch between the stated thesis and the actual eval path:
@@ -23,7 +65,7 @@ That mismatch is now materially corrected:
 - the learned agent now applies local per-episode model patches over action value, usefulness, policy prior, and uncertainty before falling back to heavier online world-model updates
 - the full train-plus-eval smoke path now passes with these changes in place
 
-This is still not the full target architecture. Option induction is still missing, and the repair proposals are still geometry-driven rather than learned from a richer decomposition model.
+This is still not the full target architecture. Option induction is now present, but the option library is still too weak on real ARC, and repair proposals are still driven mostly by lightweight geometry/interface evidence rather than a richer learned decomposition model.
 
 ## Current Honest State
 

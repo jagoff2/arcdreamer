@@ -756,3 +756,159 @@ def test_runtime_rule_controller_induces_selector_move_option_from_followup_moti
     controller.observe_transition(Transition(state=after_selector, action="down", reward=0.0, next_state=after_move, terminated=False))
 
     assert any(option.option_type == "selector_move" for option in controller.option_hypotheses.values())
+
+
+def test_runtime_rule_controller_first_contact_plan_prefers_specific_question_and_probe_chain() -> None:
+    state = extract_structured_state(
+        _observation(
+            np.array(
+                [
+                    [0, 0, 0],
+                    [0, 2, 0],
+                    [0, 0, 0],
+                ],
+                dtype=np.int64,
+            ),
+            step_index=0,
+            actions=("up", "right", "click:1:1"),
+            action_roles={"up": "move_up", "right": "move_right", "click:1:1": "click"},
+        )
+    )
+
+    controller = RuntimeRuleController()
+    plan = controller.propose(
+        state,
+        thought=RuntimeThought(
+            question_tokens=("question", "need", "focus", "state", "probe"),
+            actions=(
+                ActionThought(action="up", value=0.1, uncertainty=0.4),
+                ActionThought(action="right", value=0.0, uncertainty=0.2),
+                ActionThought(action="click:1:1", value=0.2, uncertainty=0.5, selector_followup=1.1),
+            ),
+        ),
+    )
+
+    assert plan is not None
+    assert plan.action == "click:1:1"
+    assert len(plan.search_path) == 2
+    assert plan.search_path[0] == "click:1:1"
+    assert plan.search_path[1] in {"up", "right"}
+    assert plan.language.question_tokens == ("question", "need", "test", "focus", "control_binding", "state", "probe")
+    assert plan.language.plan_tokens == ("plan", "click_then_move", "focus", "control_binding", "state", "probe")
+    assert any(option.option_type == "mode_probe_chain" for option in controller.option_hypotheses.values())
+
+
+def test_runtime_rule_controller_augment_runtime_thought_emits_interface_and_control_binding_claims() -> None:
+    state = extract_structured_state(
+        _observation(
+            np.array(
+                [
+                    [0, 0, 0, 0],
+                    [0, 9, 0, 3],
+                    [0, 0, 0, 0],
+                    [0, 0, 0, 0],
+                ],
+                dtype=np.int64,
+            ),
+            step_index=0,
+            actions=("up", "down", "click:3:1"),
+            action_roles={"up": "move_up", "down": "move_down", "click:3:1": "click"},
+            cell_tags={(1, 1): ("agent",)},
+        )
+    )
+
+    controller = RuntimeRuleController()
+    mover_signature = _signature_for_tag(state, "agent")
+    click_target = next(obj for obj in state.objects if (1, 3) in obj.cells)
+    target_signature = object_signature(click_target)
+    context = build_action_schema_context(state.affordances, dict(state.action_roles))
+    mode_key = f"{build_action_schema('click:3:1', context).family}:{build_action_schema('click:3:1', context).coarse_bin}"
+    controller.mode_hypotheses[mode_key] = ModeHypothesis(
+        evidence=EvidenceCounter(support=5, contradiction=1),
+        entries=3,
+        action_support={"click:3:1": 3},
+        target_support={target_signature: 2},
+        hidden_only_steps=1,
+    )
+    controller.control_hypotheses[(controller.current_mode_key, mover_signature)] = ControlHypothesis(
+        evidence=EvidenceCounter(support=5, contradiction=1),
+        moved_steps=3,
+        motion_sum=3.0,
+    )
+
+    thought = RuntimeThought(
+        belief_tokens=("belief", "goal", "unknown"),
+        question_tokens=("question", "need", "explore"),
+        actions=(
+            ActionThought(action="up", value=0.1, uncertainty=0.2),
+            ActionThought(action="down", value=0.0, uncertainty=0.2),
+            ActionThought(action="click:3:1", value=0.2, uncertainty=0.3, selector_followup=1.0),
+        ),
+    )
+
+    augmented = controller.augment_runtime_thought(state, thought)
+
+    assert any(claim.claim_type == "interface" and claim.relation == "targets" for claim in augmented.claims)
+    assert any(claim.claim_type == "control_binding" and claim.relation == "controls" for claim in augmented.claims)
+    assert augmented.question_tokens == ("question", "need", "test", "focus", "control_binding", "state", "probe")
+
+
+def test_runtime_rule_controller_exploit_plan_materializes_bind_then_objective_option() -> None:
+    state = extract_structured_state(
+        _observation(
+            np.array(
+                [
+                    [5, 0, 0, 0],
+                    [0, 9, 0, 2],
+                    [0, 0, 0, 0],
+                    [0, 0, 0, 0],
+                ],
+                dtype=np.int64,
+            ),
+            step_index=0,
+            actions=("right", "click:0:0"),
+            action_roles={"right": "move_right", "click:0:0": "click"},
+            cell_tags={
+                (1, 1): ("agent",),
+                (1, 3): ("target",),
+            },
+        )
+    )
+
+    controller = RuntimeRuleController()
+    mover_signature = _signature_for_tag(state, "agent")
+    target_signature = _signature_for_tag(state, "target")
+    context = build_action_schema_context(state.affordances, dict(state.action_roles))
+    click_schema = build_action_schema("click:0:0", context)
+    controller.current_mode_key = f"{click_schema.family}:{click_schema.coarse_bin}"
+    controller.mode_hypotheses[controller.current_mode_key] = ModeHypothesis(
+        evidence=EvidenceCounter(support=4, contradiction=1),
+        entries=2,
+        action_support={"click:0:0": 2},
+    )
+    controller.control_hypotheses[(controller.current_mode_key, mover_signature)] = ControlHypothesis(
+        evidence=EvidenceCounter(support=5, contradiction=1),
+        moved_steps=3,
+        motion_sum=3.0,
+    )
+    controller.objective_hypotheses[(controller.current_mode_key, mover_signature, target_signature)] = ObjectiveHypothesis(
+        evidence=EvidenceCounter(support=6, contradiction=1),
+        progress_sum=2.0,
+    )
+    controller.objective_family_hypotheses[(controller.current_mode_key, mover_signature, target_signature, "approach")] = (
+        ObjectiveFamilyHypothesis(
+            family="approach",
+            evidence=EvidenceCounter(support=6, contradiction=1),
+            progress_sum=2.0,
+        )
+    )
+
+    plan = controller._exploit_plan(
+        state=state,
+        move_actions=["right"],
+        mover_scores={mover_signature: 1.0},
+        thought=RuntimeThought(actions=(ActionThought(action="right", value=0.2, uncertainty=0.1),)),
+    )
+
+    assert plan is not None
+    assert any(option.option_type == "bind_then_objective" for option in controller.option_hypotheses.values())

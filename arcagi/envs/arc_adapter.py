@@ -5,6 +5,7 @@ from typing import Any
 
 import numpy as np
 
+from arcagi.core.action_schema import build_action_schema, build_action_schema_context
 from arcagi.core.types import ActionName, GridObservation, StepResult
 from arcagi.envs.base import BaseEnvironment
 
@@ -48,11 +49,12 @@ def list_arc_games(operation_mode: Any | None = None) -> list[str]:
 
 
 class ArcToolkitEnv(BaseEnvironment):
-    def __init__(self, game_id: str, operation_mode: Any | None = None) -> None:
+    def __init__(self, game_id: str, operation_mode: Any | None = None, arcade: Any | None = None) -> None:
         if Arcade is None:
             raise RuntimeError("ARC toolkit is not installed. Install with `pip install -e .[arc]`.")
         self._operation_mode = operation_mode if operation_mode is not None else _default_operation_mode()
-        self.arcade = Arcade(operation_mode=self._operation_mode)
+        self.arcade = arcade if arcade is not None else Arcade(operation_mode=self._operation_mode)
+        self._owns_arcade = arcade is None
         self.env = self.arcade.make(game_id)
         self._task_id = f"arc/{game_id}"
         self._family_id = self._task_id
@@ -74,6 +76,22 @@ class ArcToolkitEnv(BaseEnvironment):
 
     def legal_actions(self) -> tuple[ActionName, ...]:
         return self._last_actions
+
+    def close(self) -> None:
+        close_method = getattr(self.env, "close", None)
+        if callable(close_method):
+            try:
+                close_method()
+            except Exception:
+                pass
+        if not self._owns_arcade:
+            return
+        close_scorecard = getattr(self.arcade, "close_scorecard", None)
+        if callable(close_scorecard):
+            try:
+                close_scorecard()
+            except Exception:
+                pass
 
     def reset(self, seed: int | None = None) -> GridObservation:
         self._episode_index += 1
@@ -494,6 +512,13 @@ def _build_arc_extras(
     step_index: int,
     info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    action_roles = _action_roles(base_actions, affordances)
+    inventory, flags = _arc_interface_inventory_flags(
+        observation=observation,
+        affordances=affordances,
+        action_roles=action_roles,
+        camera_meta=camera_meta,
+    )
     extras: dict[str, Any] = {
         "adapter": "arc_toolkit",
         "raw_observation_type": type(observation).__name__,
@@ -501,7 +526,10 @@ def _build_arc_extras(
         "levels_completed": int(getattr(observation, "levels_completed", 0) or 0),
         "background_color": int(np.bincount(np.asarray(grid).astype(np.int64).reshape(-1)).argmax()),
         "raw_available_actions": base_actions,
-        "action_roles": _action_roles(base_actions, affordances),
+        "action_roles": action_roles,
+        "inventory": inventory,
+        "flags": flags,
+        "cell_tags": _arc_cell_tags(grid, affordances, action_roles, camera_meta),
         "arc_step_index": step_index,
     }
     if camera_meta is not None:
@@ -520,6 +548,101 @@ def _action_roles(base_actions: tuple[ActionName, ...], affordances: tuple[Actio
         if action.startswith("click:"):
             roles[action] = "click"
     return roles
+
+
+def _arc_interface_inventory_flags(
+    *,
+    observation: Any,
+    affordances: tuple[ActionName, ...],
+    action_roles: dict[str, str],
+    camera_meta: dict[str, int] | None,
+) -> tuple[dict[str, str], dict[str, str]]:
+    context = build_action_schema_context(affordances, action_roles)
+    counts: dict[str, int] = {key: 0 for key in ("move", "click", "select", "interact", "undo", "wait", "raw", "other")}
+    click_bins: set[tuple[int, int]] = set()
+    for action in affordances:
+        schema = build_action_schema(action, context)
+        counts[schema.action_type if schema.action_type in counts else "other"] += 1
+        if schema.coarse_bin is not None:
+            click_bins.add(schema.coarse_bin)
+    inventory: dict[str, str] = {
+        "interface_move_actions": str(counts["move"]),
+        "interface_click_actions": str(counts["click"]),
+        "interface_select_actions": str(counts["select"]),
+        "interface_interact_actions": str(counts["interact"]),
+        "interface_undo_actions": str(counts["undo"]),
+        "interface_raw_actions": str(counts["raw"]),
+        "interface_click_bin_count": str(len(click_bins)),
+        "interface_levels_completed": str(int(getattr(observation, "levels_completed", 0) or 0)),
+        "interface_game_state": str(getattr(observation, "state", "") or "unknown"),
+    }
+    if camera_meta is not None:
+        inventory["interface_camera_width"] = str(int(camera_meta["width"]))
+        inventory["interface_camera_height"] = str(int(camera_meta["height"]))
+    flags: dict[str, str] = {
+        "interface_has_click": "1" if counts["click"] > 0 else "0",
+        "interface_has_select": "1" if counts["select"] > 0 else "0",
+        "interface_has_interact": "1" if counts["interact"] > 0 else "0",
+        "interface_has_undo": "1" if counts["undo"] > 0 else "0",
+        "interface_has_mode_actions": "1" if (counts["click"] + counts["select"]) > 0 else "0",
+        "interface_dense_clicks": "1" if counts["click"] >= 8 else "0",
+        "interface_parametric_clicks": "1" if any(action.startswith("click:") for action in affordances) else "0",
+    }
+    return inventory, flags
+
+
+def _arc_cell_tags(
+    grid: np.ndarray,
+    affordances: tuple[ActionName, ...],
+    action_roles: dict[str, str],
+    camera_meta: dict[str, int] | None,
+) -> dict[tuple[int, int], tuple[str, ...]]:
+    if grid.ndim != 2:
+        return {}
+    height, width = grid.shape
+    context = build_action_schema_context(affordances, action_roles)
+    selector_count = sum(
+        1 for action in affordances if build_action_schema(action, context).action_type in {"click", "select"}
+    )
+    tags_by_cell: dict[tuple[int, int], set[str]] = {}
+    for action in affordances:
+        schema = build_action_schema(action, context)
+        if schema.action_type != "click" or schema.click is None:
+            continue
+        if camera_meta is not None:
+            grid_cell = _display_to_grid_cell(schema.click[0], schema.click[1], camera_meta)
+        else:
+            grid_cell = (schema.click[1], schema.click[0])
+        if grid_cell is None:
+            continue
+        grid_y, grid_x = grid_cell
+        if grid_y < 0 or grid_x < 0 or grid_y >= height or grid_x >= width:
+            continue
+        tags = tags_by_cell.setdefault((grid_y, grid_x), set())
+        tags.add("clickable")
+        tags.add("interface_target")
+        if schema.coarse_bin is not None:
+            tags.add(f"click_bin_{schema.coarse_bin[0]}_{schema.coarse_bin[1]}")
+        if selector_count >= 2:
+            tags.add("selector_candidate")
+    return {cell: tuple(sorted(tags)) for cell, tags in tags_by_cell.items()}
+
+
+def _display_to_grid_cell(
+    display_x: int,
+    display_y: int,
+    camera_meta: dict[str, int],
+) -> tuple[int, int] | None:
+    scale = int(camera_meta.get("scale", 0) or 0)
+    if scale <= 0:
+        return None
+    pad_x = int(camera_meta.get("pad_x", 0) or 0)
+    pad_y = int(camera_meta.get("pad_y", 0) or 0)
+    origin_x = int(camera_meta.get("x", 0) or 0)
+    origin_y = int(camera_meta.get("y", 0) or 0)
+    grid_x = int((display_x - pad_x) // scale) + origin_x
+    grid_y = int((display_y - pad_y) // scale) + origin_y
+    return (grid_y, grid_x)
 
 
 def _default_operation_mode():

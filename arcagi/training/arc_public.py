@@ -77,17 +77,17 @@ def _belief_tokens(
 ) -> tuple[str, ...]:
     context = build_action_schema_context(state.affordances, dict(state.action_roles))
     schema = build_action_schema(action, context)
-    has_selector = any(
-        build_action_schema(candidate, context).action_type in {"click", "select"}
-        for candidate in state.affordances
+    flags = state.flags_dict()
+    has_selector = flags.get("interface_has_mode_actions") == "1" or any(
+        build_action_schema(candidate, context).action_type in {"click", "select"} for candidate in state.affordances
     )
-    has_interact = any(
-        build_action_schema(candidate, context).action_type == "interact"
-        for candidate in state.affordances
-    )
-    status = "active" if reward > 0.0 else "uncertain" if has_selector else "inactive"
-    focus = "rule" if has_selector or schema.action_type in {"click", "select"} else "target" if reward > 0.0 else "frontier"
-    state_token = "probe" if has_selector else "explore"
+    if reward > 0.0 and has_selector:
+        return ("belief", "reward_model", "reward_after_activate", "control_binding")
+    if schema.action_type in {"click", "select"} or has_selector:
+        return ("belief", "interface", "control_binding", "uncertain", "clickable")
+    status = "active" if reward > 0.0 else "inactive"
+    focus = "target" if reward > 0.0 else "frontier"
+    state_token = "explore"
     return ("belief", "goal", status, "focus", focus, "state", state_token)
 
 
@@ -99,25 +99,27 @@ def _question_tokens(
 ) -> tuple[str, ...]:
     context = build_action_schema_context(state.affordances, dict(state.action_roles))
     schema = build_action_schema(action, context)
-    has_selector = any(
-        build_action_schema(candidate, context).action_type in {"click", "select"}
-        for candidate in state.affordances
+    has_selector = state.flags_dict().get("interface_has_mode_actions") == "1" or any(
+        build_action_schema(candidate, context).action_type in {"click", "select"} for candidate in state.affordances
     )
-    if reward > 0.0:
+    if reward > 0.0 and has_selector:
         intent = "confirm"
-        focus = "rule" if has_selector else "target"
+        focus = "reward_model"
+    elif reward > 0.0:
+        intent = "confirm"
+        focus = "target"
     elif schema.action_type in {"click", "select"}:
         intent = "test"
-        focus = "rule"
+        focus = "control_binding"
     elif schema.action_type == "interact":
         intent = "test"
-        focus = "interactable"
+        focus = "reward_model"
     elif usefulness >= 0.25:
-        intent = "probe" if has_selector else "explore"
-        focus = "rule" if has_selector else "frontier"
+        intent = "test" if has_selector else "explore"
+        focus = "control_binding" if has_selector else "frontier"
     else:
-        intent = "explore"
-        focus = "frontier"
+        intent = "test" if has_selector else "explore"
+        focus = "control_binding" if has_selector else "frontier"
     return ("question", "need", intent, "focus", focus, "state", "probe" if has_selector else "explore")
 
 
@@ -129,10 +131,19 @@ def _plan_tokens(
 ) -> tuple[str, ...]:
     context = build_action_schema_context(state.affordances, dict(state.action_roles))
     schema = build_action_schema(action, context)
-    focus = "rule" if schema.action_type in {"click", "select"} else "interactable" if schema.action_type == "interact" else "target" if reward > 0.0 else "frontier"
+    has_selector = state.flags_dict().get("interface_has_mode_actions") == "1" or any(
+        build_action_schema(candidate, context).action_type in {"click", "select"} for candidate in state.affordances
+    )
     status = "active" if reward > 0.0 else "uncertain" if usefulness >= 0.25 else "inactive"
     direction = schema.direction or "none"
-    action_token = schema.action_type if schema.action_type in {"move", "interact", "click", "select", "wait"} else "unknown"
+    if schema.action_type in {"click", "select"}:
+        return ("plan", "click_then_move", "focus", "control_binding", "state", status)
+    if schema.action_type == "interact":
+        return ("plan", "move_then_interact", "direction", direction, "focus", "interactable", "state", status)
+    if reward > 0.0 and has_selector:
+        return ("plan", "bind_then_objective", "direction", direction, "focus", "target", "state", status)
+    action_token = schema.action_type if schema.action_type in {"move", "wait"} else "unknown"
+    focus = "target" if reward > 0.0 else "frontier"
     return ("plan", "action", action_token, "direction", direction, "focus", focus, "state", status)
 
 

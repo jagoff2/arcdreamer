@@ -30,3 +30,5 @@ class BaseEnvironment(ABC):
     def legal_actions(self) -> tuple[ActionName, ...]:
         raise NotImplementedError
 
+    def close(self) -> None:
+        return None

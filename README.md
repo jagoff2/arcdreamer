@@ -45,11 +45,19 @@ Detailed runtime-learning design:
   - the full hybrid agent now does construct the generic runtime hypothesis controller by default
   - that controller now records proof and exception objects, executes online split / merge / relabel / rebind repair in the working structured state, and writes local model edits within the episode
   - control, objective, and selector-mode competition now use normalized posteriors over rival executable theories instead of only heuristic utility ranking
-  - temporary options are now induced online from successful control sequences such as path-to-objective chains and selector-followed-by-move behaviors
+  - temporary options are now induced online from successful control sequences such as path-to-objective chains, selector-followed-by-move behaviors, and bind-then-objective programs
+  - interface-aware first-contact probing is now explicit in the runtime controller: the agent can test selector binding and follow-up move or interact semantics from generic action-schema structure rather than ARC-shaped controller labels
+  - chosen controller-plan language now overrides stale pre-plan language carryover, so emitted traces and episodic memory reflect the plan that actually won action arbitration
   - heuristic language/question fallbacks remain disabled
   - the controller-heavy synthetic work remains research/bootstrap-only only when it depends on synthetic semantics; the generic runtime hypothesis controller is now part of the intended submission-relevant hybrid path
   - a long manual Stage 1 run at `25,000` episodes per epoch now clears foundation and reaches `hidden_modes` by epoch `4`
   - that promoted epoch-4 snapshot is still only partial competence in `hidden_modes`: `running_success_rate = 0.45072`, `running_avg_return = -0.0482464`, `running_avg_steps = 33.6464`, `teacher_step_fraction = 0.259249`, `teacher_relabel_fraction = 0.621525`
+  - the official public online 5-game slice now completes end-to-end under one shared scorecard in the harness; current result remains `0/5`, but first-contact activity is less passive:
+    - `ar25`: `72` steps, `5` interaction steps
+    - `bp35`: `22` steps, `0` interaction steps
+    - `cd82`: `100` steps, `0` interaction steps
+    - `cn04`: `75` steps, `1` interaction step, with `objective_competition` / `disambiguate_objective` in the trace
+    - `dc22`: `128` steps, `16` interaction steps
   - the next useful work is hidden-mode stabilization, lower teacher dependence, and broader transfer validation, not more shallow controller shaping
 
 ## Prize Eligibility Boundary

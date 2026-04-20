@@ -7,7 +7,7 @@ from statistics import mean
 
 from arcagi.agents.graph_agent import GraphExplorerAgent
 from arcagi.agents.random_agent import RandomHeuristicAgent
-from arcagi.envs.arc_adapter import ArcToolkitEnv, arc_operation_mode, arc_toolkit_available, list_arc_games
+from arcagi.envs.arc_adapter import Arcade, ArcToolkitEnv, arc_operation_mode, arc_toolkit_available, list_arc_games
 from arcagi.envs.synthetic import DEFAULT_SYNTHETIC_FAMILY_MODES, HiddenRuleEnv, family_variants_for_mode
 
 
@@ -156,11 +156,22 @@ def evaluate_arc(
     games = list_arc_games(operation_mode=operation_mode)[:game_limit]
     agent = build_agent(agent_name, checkpoint_path=checkpoint_path)
     results = []
+    shared_arcade = None if Arcade is None else Arcade(operation_mode=operation_mode)
     for index, game_id in enumerate(games):
         agent.reset_all()
-        env = ArcToolkitEnv(game_id, operation_mode=operation_mode)
-        episode = run_episode(agent, env, seed=index, max_steps=256, stop_on_positive_reward=True)
+        env = ArcToolkitEnv(game_id, operation_mode=operation_mode, arcade=shared_arcade)
+        try:
+            episode = run_episode(agent, env, seed=index, max_steps=256, stop_on_positive_reward=True)
+        finally:
+            env.close()
         results.append({"game_id": game_id, **episode})
+    if shared_arcade is not None:
+        close_scorecard = getattr(shared_arcade, "close_scorecard", None)
+        if callable(close_scorecard):
+            try:
+                close_scorecard()
+            except Exception:
+                pass
     return {"agent": agent_name, "mode": mode, "games": results}
 
 

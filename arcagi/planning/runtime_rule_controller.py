@@ -20,6 +20,42 @@ from arcagi.core.types import (
 from arcagi.planning.rule_induction import ObjectSignature, object_signature
 
 DEFAULT_MODE = "__default__"
+GENERIC_LANGUAGE_TOKENS: frozenset[str] = frozenset(
+    {
+        "belief",
+        "question",
+        "goal",
+        "need",
+        "test",
+        "unknown",
+        "uncertain",
+        "rule",
+        "plan",
+        "explore",
+        "probe",
+        "confirm",
+        "commit",
+        "move",
+        "interact",
+        "click",
+        "select",
+        "wait",
+        "toward",
+        "target",
+        "state",
+        "focus",
+        "action",
+        "direction",
+        "frontier",
+        "active",
+        "inactive",
+        "visible",
+        "hidden",
+        "positive",
+        "negative",
+        "none",
+    }
+)
 OBJECTIVE_FAMILIES: tuple[str, ...] = ("approach", "contact", "interact", "activate", "avoid")
 
 
@@ -308,6 +344,9 @@ class ModeHypothesis:
     stalled_steps: int = 0
     reward_sum: float = 0.0
     mover_support: dict[ObjectSignature, int] = field(default_factory=dict)
+    action_support: dict[ActionName, int] = field(default_factory=dict)
+    target_support: dict[ObjectSignature, int] = field(default_factory=dict)
+    hidden_only_steps: int = 0
 
     def observe_move(self, movers: set[ObjectSignature], reward: float) -> None:
         if movers:
@@ -332,6 +371,7 @@ class ModeHypothesis:
             + (0.35 * self.move_effect_steps)
             - (0.6 * self.stalled_steps)
             + (1.5 * self.reward_sum)
+            + (0.1 * self.hidden_only_steps)
             + diversity_bonus
         )
 
@@ -536,6 +576,7 @@ class RuntimeRuleController:
         mover_scores = self._mover_scores(state, move_actions)
         action_bonus: dict[ActionName, float] = defaultdict(float)
         claims: list[StructuredClaim] = []
+        top_mover_signature: ObjectSignature | None = None
 
         if mover_scores:
             top_mover_signature, top_mover_score = max(mover_scores.items(), key=lambda item: item[1])
@@ -629,6 +670,7 @@ class RuntimeRuleController:
                 hypothesis = self.mode_hypotheses.get(mode_key)
                 utility = 0.0 if hypothesis is None else hypothesis.utility
                 confidence = mode_posteriors.get(mode_key, 0.0)
+                best_action = self._best_selector_action_for_mode(mode_key, actions, context)
                 followup = max(self._thought_selector_followup(thought, action) for action in actions)
                 uncertainty = max(self._thought_uncertainty(thought, action) for action in actions)
                 exploration = 1.0 / math.sqrt((0 if hypothesis is None else hypothesis.entries) + 1.0)
@@ -645,6 +687,32 @@ class RuntimeRuleController:
                         salience=max(mode_score * max(confidence, 1e-6), confidence),
                     )
                 )
+                if best_action is not None:
+                    target_object = self._interaction_target_object(state, best_action, context)
+                    if target_object is not None:
+                        claims.append(
+                            StructuredClaim(
+                                claim_type="interface",
+                                subject=_action_code(best_action, context),
+                                relation="targets",
+                                object=_signature_code(object_signature(target_object)),
+                                confidence=min(0.5 + (0.1 * confidence), 1.0),
+                                evidence=0.0 if hypothesis is None else float(hypothesis.target_support.get(object_signature(target_object), 0)),
+                                salience=max(0.45 + confidence + (0.1 * followup), 0.1),
+                            )
+                        )
+                    if top_mover_signature is not None:
+                        claims.append(
+                            StructuredClaim(
+                                claim_type="control_binding",
+                                subject=_action_code(best_action, context),
+                                relation="controls",
+                                object=_signature_code(top_mover_signature),
+                                confidence=min(max(confidence, 0.05) * max(control_posteriors.get(top_mover_signature, 0.2), 0.2), 1.0),
+                                evidence=0.0 if hypothesis is None else float(hypothesis.evidence.balance),
+                                salience=max(confidence + control_posteriors.get(top_mover_signature, 0.0) + (0.1 * followup), 0.05),
+                            )
+                        )
                 for action in actions:
                     action_bonus[action] += confidence * max(self._thought_selector_followup(thought, action), 0.0)
                     action_bonus[action] += 0.15 * self._thought_uncertainty(thought, action)
@@ -702,6 +770,27 @@ class RuntimeRuleController:
                     salience=max(option.utility, option.evidence.confidence),
                 )
             )
+        for mover_signature, target_object, family, _objective, family_hypothesis in objective_family_candidates[:2]:
+            if family_hypothesis.goal_hits <= 0 and family_hypothesis.reward_sum <= 0.0:
+                continue
+            relation = {
+                "activate": "reward_after_activate",
+                "interact": "reward_after_interact",
+                "contact": "reward_after_contact",
+                "approach": "reward_after_approach",
+                "avoid": "reward_after_avoid",
+            }.get(family, f"reward_after_{family}")
+            claims.append(
+                StructuredClaim(
+                    claim_type="reward_model",
+                    subject=_signature_code(object_signature(target_object)),
+                    relation=relation,
+                    object=_signature_code(mover_signature),
+                    confidence=max(family_hypothesis.evidence.confidence, 0.1),
+                    evidence=max(family_hypothesis.reward_sum, float(family_hypothesis.goal_hits)),
+                    salience=max(family_hypothesis.utility, family_hypothesis.evidence.confidence),
+                )
+            )
 
         claims.sort(key=lambda claim: claim.salience, reverse=True)
         updated_actions: list[ActionThought] = []
@@ -720,17 +809,21 @@ class RuntimeRuleController:
             )
 
         question_tokens = thought.question_tokens
-        if top_candidates:
-            question_tokens = ("question", "reduce_objective_distance")
+        if selector_actions and not mover_scores:
+            question_tokens = ("question", "need", "test", "focus", "control_binding", "state", "probe")
         elif any(repair.evidence.confidence >= 0.55 for repair in self.repair_hypotheses.values()):
-            question_tokens = ("question", "repair_representation")
+            question_tokens = ("question", "need", "repair", "focus", "representation", "state", "probe")
+        elif top_candidates:
+            question_tokens = ("question", "need", "test", "focus", "objective", "state", "commit")
         elif selector_actions and max((self._thought_selector_followup(thought, action) for action in selector_actions), default=0.0) > 0.5:
-            question_tokens = ("question", "test_control_mode")
+            question_tokens = ("question", "need", "test", "focus", "control_binding", "state", "probe")
         elif move_actions:
-            question_tokens = ("question", "test_move_effect")
+            question_tokens = ("question", "need", "test", "focus", "move_effect", "state", "probe")
 
         belief_tokens = thought.belief_tokens
-        if claims:
+        if selector_actions and not mover_scores:
+            belief_tokens = ("belief", "control_binding", "uncertain", "clickable")
+        elif claims:
             belief_tokens = ("belief", claims[0].claim_type, claims[0].relation)
 
         return RuntimeThought(
@@ -796,6 +889,19 @@ class RuntimeRuleController:
         if option_plan is not None:
             self._pending_action_mode_key = self.current_mode_key
             return option_plan
+
+        first_contact_plan = self._first_contact_program_plan(
+            state,
+            move_actions,
+            interact_actions,
+            selector_actions,
+            mover_scores,
+            thought,
+            context,
+        )
+        if first_contact_plan is not None:
+            self._pending_action_mode_key = self.current_mode_key
+            return first_contact_plan
 
         momentum_plan = self._momentum_plan(state, move_actions, mover_scores, thought)
         if momentum_plan is not None:
@@ -883,8 +989,14 @@ class RuntimeRuleController:
             self._recent_selector_action = transition.action
             mode = self.mode_hypotheses.setdefault(self.current_mode_key, ModeHypothesis(evidence=EvidenceCounter()))
             mode.entries += 1
+            mode.action_support[transition.action] = mode.action_support.get(transition.action, 0) + 1
+            clicked_target = self._interaction_target_object(transition.state, transition.action, context)
+            if clicked_target is not None:
+                clicked_signature = object_signature(clicked_target)
+                mode.target_support[clicked_signature] = mode.target_support.get(clicked_signature, 0) + 1
             if transition_delta <= 0.1:
                 mode.evidence.support += 1
+                mode.hidden_only_steps += 1
                 self._record_proof(
                     proof_type="support",
                     hypothesis_type="mode",
@@ -1661,6 +1773,19 @@ class RuntimeRuleController:
                 objective_family=best_family,
             )
             self._activate_option(option_key)
+        selector_actions = [
+            action for action in state.affordances if build_action_schema(action, context).action_type in {"click", "select"}
+        ]
+        best_selector_action = self._best_selector_action_for_mode(self.current_mode_key, selector_actions, context)
+        if best_selector_action is not None and self.current_mode_key != DEFAULT_MODE:
+            self._materialize_option(
+                option_type="bind_then_objective",
+                action_sequence=(best_selector_action,) + best_search_path,
+                mover_signature=best_pair_key[1],
+                target_signature=target_signature,
+                objective_family=best_family,
+                mode_key=self.current_mode_key,
+            )
         target_code = f"{target_signature[0]}:{target_signature[1]}:{target_signature[2]}x{target_signature[3]}"
         return PlanOutput(
             action=best_action,
@@ -1769,9 +1894,19 @@ class RuntimeRuleController:
             ):
                 continue
             score = option.utility
-            if option.option_type == "selector_move":
+            if option.option_type in {"selector_move", "mode_probe_chain"}:
                 score += mode_posteriors.get(option.mode_key, 0.0)
                 score += self._thought_selector_followup(thought, option.action_sequence[0])
+            elif option.option_type == "bind_then_objective":
+                mode = self.mode_hypotheses.get(option.mode_key)
+                score += mode_posteriors.get(option.mode_key, 0.0)
+                score += 0.0 if mode is None else mode.evidence.confidence
+                score += self._thought_selector_followup(thought, option.action_sequence[0])
+                if option.mover_signature is not None and option.target_signature is not None:
+                    score += family_posteriors.get(
+                        (option.mover_signature, option.target_signature, option.objective_family or "approach"),
+                        0.0,
+                    )
             elif option.mover_signature is not None and option.target_signature is not None:
                 score += family_posteriors.get(
                     (option.mover_signature, option.target_signature, option.objective_family or "approach"),
@@ -1799,6 +1934,178 @@ class RuntimeRuleController:
             search_path=best_option.action_sequence,
         )
 
+    def _first_contact_program_plan(
+        self,
+        state: StructuredState,
+        move_actions: list[ActionName],
+        interact_actions: list[ActionName],
+        selector_actions: list[ActionName],
+        mover_scores: dict[ObjectSignature, float],
+        thought: RuntimeThought | None,
+        context,
+    ) -> PlanOutput | None:
+        if not selector_actions or not move_actions or self._goal_is_active(state):
+            return None
+        if self.active_pair_key is not None or self.active_probe_pair_key is not None:
+            return None
+        strongest_control = max(self._control_posteriors(state, move_actions).values(), default=0.0)
+        if strongest_control >= 0.45 and mover_scores:
+            return None
+        mode_posteriors = self._mode_posteriors(selector_actions, context, thought)
+        best_selector: ActionName | None = None
+        best_mode_key = DEFAULT_MODE
+        best_target_signature: ObjectSignature | None = None
+        best_score = float("-inf")
+        for action in selector_actions:
+            schema = build_action_schema(action, context)
+            mode_key = _mode_key(action, schema)
+            mode = self.mode_hypotheses.get(mode_key)
+            target_object = self._interaction_target_object(state, action, context)
+            target_bonus = 0.0
+            target_signature: ObjectSignature | None = None
+            if target_object is not None:
+                target_signature = object_signature(target_object)
+                target_bonus += 0.35
+                if any(tag in target_object.tags for tag in ("clickable", "selector_candidate", "interface_target")):
+                    target_bonus += 0.25
+                if any(tag in target_object.tags for tag in ("target", "repaired_goal")):
+                    target_bonus += 0.2
+                if any(tag in target_object.tags for tag in ("interactable", "repaired_control")):
+                    target_bonus += 0.2
+            mode_entries = 0 if mode is None else mode.entries
+            score = (
+                (1.0 / math.sqrt(self.selector_visits[action] + 1.0))
+                + (1.0 / math.sqrt(mode_entries + 1.0))
+                + (0.5 * mode_posteriors.get(mode_key, 0.0))
+                + max(self._thought_selector_followup(thought, action), 0.0)
+                + (0.4 * self._thought_uncertainty(thought, action))
+                + (0.1 * self._thought_value(thought, action))
+                + target_bonus
+            )
+            if score > best_score:
+                best_score = score
+                best_selector = action
+                best_mode_key = mode_key
+                best_target_signature = target_signature
+        followup_action, followup_kind = self._best_probe_followup_action(
+            state,
+            move_actions,
+            interact_actions,
+            thought,
+            context,
+        )
+        if best_selector is None or followup_action is None or best_score <= 0.6:
+            return None
+        option_key = self._materialize_option(
+            option_type="mode_probe_chain",
+            action_sequence=(best_selector, followup_action),
+            mover_signature=None,
+            target_signature=best_target_signature,
+            objective_family="control_binding",
+            mode_key=best_mode_key,
+        )
+        self._activate_option(option_key)
+        target_code = "unknown" if best_target_signature is None else _signature_code(best_target_signature)
+        return PlanOutput(
+            action=best_selector,
+            scores={
+                "diagnostic": best_score,
+                "first_contact": 1.0,
+                "mode_probe": 1.0,
+                "mode_posterior": mode_posteriors.get(best_mode_key, 0.0),
+            },
+            language=LanguageTrace(
+                belief_tokens=("belief", "control_binding", "uncertain", "clickable"),
+                question_tokens=self._question_tokens(thought, ("question", "need", "test", "focus", "control_binding", "state", "probe")),
+                plan_tokens=(
+                    "plan",
+                    "click_then_interact" if followup_kind == "interact" else "click_then_move",
+                    "focus",
+                    "control_binding",
+                    "state",
+                    "probe",
+                ),
+            ),
+            search_path=(best_selector, followup_action),
+        )
+
+    def _best_probe_followup_action(
+        self,
+        state: StructuredState,
+        move_actions: list[ActionName],
+        interact_actions: list[ActionName],
+        thought: RuntimeThought | None,
+        context,
+    ) -> tuple[ActionName | None, str]:
+        best_action: ActionName | None = None
+        best_kind = ""
+        best_score = float("-inf")
+        candidates = [
+            action
+            for action in move_actions
+            if not self._move_action_hits_visible_blocker(state, action, context)
+        ]
+        if not candidates:
+            candidates = list(move_actions)
+        for action in candidates:
+            score = (
+                0.65
+                + (0.25 if self.action_visits[(self.current_mode_key, action)] == 0 else 0.0)
+                + self._thought_uncertainty(thought, action)
+                + (0.35 * self._thought_value(thought, action))
+                - (0.08 * self.action_visits[(self.current_mode_key, action)])
+            )
+            if score > best_score:
+                best_action = action
+                best_kind = "move"
+                best_score = score
+        for action in interact_actions:
+            target_object = self._interaction_target_object(state, action, context)
+            if target_object is None:
+                continue
+            target_bonus = 0.35
+            if any(
+                tag in target_object.tags
+                for tag in ("interactable", "repaired_control", "clickable", "interface_target", "selector_candidate")
+            ):
+                target_bonus += 0.25
+            if any(tag in target_object.tags for tag in ("target", "repaired_goal")):
+                target_bonus += 0.15
+            score = (
+                0.8
+                + target_bonus
+                + (0.25 if self.action_visits[(self.current_mode_key, action)] == 0 else 0.0)
+                + (0.8 * self._thought_uncertainty(thought, action))
+                + (0.4 * self._thought_value(thought, action))
+                - (0.08 * self.action_visits[(self.current_mode_key, action)])
+            )
+            if score > best_score:
+                best_action = action
+                best_kind = "interact"
+                best_score = score
+        return best_action, best_kind
+
+    def _best_selector_action_for_mode(
+        self,
+        mode_key: str,
+        selector_actions: list[ActionName],
+        context,
+    ) -> ActionName | None:
+        if not selector_actions:
+            return None
+        hypothesis = self.mode_hypotheses.get(mode_key)
+        if hypothesis is None:
+            return max(selector_actions, key=lambda action: -self.selector_visits[action], default=None)
+        def _score(action: ActionName) -> tuple[float, float, float]:
+            schema = build_action_schema(action, context)
+            target_bonus = 0.05 if schema.coarse_bin is not None else 0.0
+            return (
+                float(hypothesis.action_support.get(action, 0)),
+                target_bonus,
+                -float(self.selector_visits[action]),
+            )
+        return max(selector_actions, key=_score, default=None)
+
     def _option_applicable(
         self,
         state: StructuredState,
@@ -1812,8 +2119,13 @@ class RuntimeRuleController:
         del thought
         if not remaining or remaining[0] not in state.affordances:
             return False
-        if option.option_type != "selector_move" and option.mode_key not in {DEFAULT_MODE, self.current_mode_key}:
+        if option.option_type not in {"selector_move", "mode_probe_chain", "bind_then_objective"} and option.mode_key not in {DEFAULT_MODE, self.current_mode_key}:
             return False
+        if option.option_type == "bind_then_objective":
+            if remaining == option.action_sequence and self.current_mode_key != DEFAULT_MODE:
+                return False
+            if remaining != option.action_sequence and option.mode_key != self.current_mode_key:
+                return False
         if option.mover_signature is not None and option.mover_signature not in mover_scores:
             return False
         if option.target_signature is not None:
@@ -1830,9 +2142,12 @@ class RuntimeRuleController:
                 )
                 if score < -0.25:
                     return False
-        if option.option_type == "selector_move":
+        if option.option_type in {"selector_move", "mode_probe_chain"}:
             schema = build_action_schema(remaining[0], context)
-            return schema.action_type in {"click", "select", "move"}
+            return schema.action_type in {"click", "select", "move", "interact"}
+        if option.option_type == "bind_then_objective" and remaining == option.action_sequence:
+            schema = build_action_schema(remaining[0], context)
+            return schema.action_type in {"click", "select"}
         return True
 
     def _update_active_option(
@@ -1875,7 +2190,7 @@ class RuntimeRuleController:
             goal_activated
             or float(transition.reward) > 0.0
             or progress > 0.0
-            or (option.option_type == "selector_move" and schema.action_type in {"click", "select"})
+            or (option.option_type in {"selector_move", "mode_probe_chain", "bind_then_objective"} and schema.action_type in {"click", "select"})
             or (schema.action_type == "move" and bool(moving_signatures))
             or (schema.action_type == "interact" and state_delta >= 0.05)
         )
@@ -2965,7 +3280,7 @@ class RuntimeRuleController:
             return False
         if "agent" in obj.tags or "blocking" in obj.tags:
             return False
-        if "interactable" in obj.tags or "repaired_control" in obj.tags:
+        if any(tag in obj.tags for tag in ("interactable", "repaired_control", "clickable", "interface_target", "selector_candidate")):
             return True
         if "target" in obj.tags or "repaired_goal" in obj.tags:
             return False
@@ -3030,6 +3345,10 @@ class RuntimeRuleController:
         fallback: tuple[str, ...],
     ) -> tuple[str, ...]:
         if thought is not None and thought.question_tokens:
+            thought_specific = sum(token not in GENERIC_LANGUAGE_TOKENS for token in thought.question_tokens)
+            fallback_specific = sum(token not in GENERIC_LANGUAGE_TOKENS for token in fallback)
+            if fallback_specific > thought_specific:
+                return fallback
             return thought.question_tokens
         return fallback
 
@@ -3096,7 +3415,7 @@ class RuntimeRuleController:
         grid_area = grid_shape[0] * grid_shape[1]
         if obj.area >= max(int(0.45 * grid_area), 36):
             return False
-        if "repaired_goal" in obj.tags:
+        if any(tag in obj.tags for tag in ("repaired_goal", "target", "clickable", "interface_target", "selector_candidate")):
             return True
         height = (obj.bbox[2] - obj.bbox[0]) + 1
         width = (obj.bbox[3] - obj.bbox[1]) + 1
@@ -3377,6 +3696,19 @@ def _anchor_distance(source: ObjectState, anchor: tuple[float, float]) -> float:
 
 def _signature_code(signature: ObjectSignature) -> str:
     return f"{signature[0]}:{signature[1]}:{signature[2]}x{signature[3]}"
+
+
+def _action_code(action: ActionName, context) -> str:
+    schema = build_action_schema(action, context)
+    if schema.coarse_bin is not None:
+        return f"click_bin_{schema.coarse_bin[0]}_{schema.coarse_bin[1]}"
+    if schema.action_type == "move":
+        return f"move_{schema.direction or 'none'}"
+    if schema.action_type == "select":
+        return "select_cycle"
+    if schema.raw_action is not None:
+        return f"raw_{schema.raw_action}"
+    return schema.family.replace(":", "_")
 
 
 def _mode_code(mode_key: str) -> str:

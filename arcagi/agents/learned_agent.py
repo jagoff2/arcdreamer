@@ -107,6 +107,27 @@ CONTENT_LANGUAGE_TOKENS: frozenset[str] = frozenset(
         "sequence",
         "interactable",
         "blocking",
+        "clickable",
+        "interface",
+        "interface_target",
+        "control_binding",
+        "reward_model",
+        "reward_after_activate",
+        "reward_after_interact",
+        "reward_after_contact",
+        "reward_after_approach",
+        "reward_after_avoid",
+        "mode_probe_chain",
+        "click_then_move",
+        "click_then_interact",
+        "move_then_interact",
+        "bind_then_objective",
+        "objective_chain",
+        "targets",
+        "controls",
+        "move_effect",
+        "latent_only",
+        "selector_candidate",
         "contradiction",
         "effect",
         "red",
@@ -607,12 +628,6 @@ class LearnedPlanningAgent(BaseAgent):
             assert self.runtime_rule_controller is not None
             runtime_thought = self.runtime_rule_controller.augment_runtime_thought(state, runtime_thought)
         runtime_thought = self._stabilize_runtime_thought(runtime_thought)
-        self.pending_belief_tokens = runtime_thought.belief_tokens
-        self.pending_question_tokens = runtime_thought.question_tokens
-        self.pending_plan_tokens = runtime_thought.plan_tokens
-        self.stable_belief_tokens = runtime_thought.belief_tokens
-        self.stable_question_tokens = runtime_thought.question_tokens
-        self.stable_plan_tokens = runtime_thought.plan_tokens
         state_claims = self._state_claims(state)
         runtime_thought = RuntimeThought(
             belief_tokens=runtime_thought.belief_tokens,
@@ -656,7 +671,11 @@ class LearnedPlanningAgent(BaseAgent):
         else:
             plan = planner_plan
         action = plan.action
+        self.stable_belief_tokens = plan.language.belief_tokens or runtime_thought.belief_tokens
+        self.stable_question_tokens = plan.language.question_tokens or runtime_thought.question_tokens
         self.stable_plan_tokens = plan.language.plan_tokens or runtime_thought.plan_tokens
+        self.pending_belief_tokens = self.stable_belief_tokens
+        self.pending_question_tokens = self.stable_question_tokens
         self.pending_plan_tokens = self.stable_plan_tokens
         self.last_runtime_thought = runtime_thought
         self.last_plan_scores = dict(plan.scores)

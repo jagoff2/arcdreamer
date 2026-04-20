@@ -19,6 +19,18 @@ That changes the immediate target:
 3. reduce teacher ownership so promoted behavior is actually learner-owned
 4. verify that the same runtime machinery transfers beyond the promoted synthetic regime
 
+Real ARC status after the latest interface-aware runtime pass:
+
+1. the public online 5-game slice now completes end-to-end under one shared scorecard instead of failing mid-slice on scorecard-open conflicts
+2. solved count is still `0/5`
+3. first-contact behavior is less passive:
+   - `ar25`: `5` interaction steps
+   - `bp35`: `0`
+   - `cd82`: `0`
+   - `cn04`: `1`, with `objective_competition` / `disambiguate_objective` showing up in the emitted trace
+   - `dc22`: `16`
+4. the current bottleneck is now converting broader interaction/program induction into reward-bearing task semantics, not basic online runtime plumbing
+
 ## Near-Term Milestones
 
 1. Foundation
@@ -41,6 +53,7 @@ That changes the immediate target:
    - Explicit rule-hypothesis competition with normalized posteriors over rival executable theories rather than single-story commitment.
    - Proof and exception objects carried into memory and later action choice.
    - Online representation repair that can split, merge, relabel, and rebind entities inside the working structured state.
+   - Interface-aware first-contact experiment programs over selector, move, and interact affordances, with reusable bind-then-objective options when control hypotheses stabilize.
 5. Evaluation
    - Language-off and memory-off ablations.
    - Search-only vs learned comparison.

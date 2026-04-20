@@ -11,6 +11,9 @@
 - [x] Add option induction on top of proof objects so short reusable programs become first-class within-episode actions rather than just planner traces.
 - [x] Replace geometry-only repair proposal gating with an online learned repair scorer that can generalize split/merge/rebind proposals across signatures within the episode.
 - [x] Broaden posterior competition beyond single pairwise objective stories: family-level approach/contact/interact/activate/avoid theories now compete as executable hypotheses.
+- [x] Add interface-aware first-contact experiment programs so the runtime controller tests control binding and follow-up action semantics from generic action-schema structure rather than ARC-shaped controller labels.
+- [x] Replace stale pre-plan language carryover with chosen controller-plan language so episodic memory, diagnostics, and traces reflect the actual live hypothesis/plan that won arbitration.
+- [x] Fix the online ARC evaluation harness so the real public slice can run end-to-end under one shared scorecard instead of failing with repeated scorecard-open conflicts.
 - [ ] Stress-test the live repair workspace, induced options, and family-level posterior controller on longer synthetic runs and the real ARC public slice; the architecture gap is closed, but transfer/generalization is still not proven.
 - [x] Record the generalized-reasoning pivot in [docs/PIVOT_GENERAL_REASONING.md](docs/PIVOT_GENERAL_REASONING.md) and treat it as the governing standard for future synthetic/training changes.
 - [x] Record the allocentric spatial-workspace pivot in [docs/PIVOT_GENERAL_REASONING.md](docs/PIVOT_GENERAL_REASONING.md) and treat it as a required substrate for generalized planning under layout/interface shift.
@@ -96,6 +99,7 @@
 - [ ] Produce the same style of held-out diagnostic report for promoted `hidden_modes` checkpoints that foundation now has, including family breakdowns for `selector_unlock` and `delayed_order_unlock`.
 - [ ] Revalidate on the chosen real online 5-game slice only after the richer synthetic retrain completes.
 - [ ] Beat the public online 5-game slice with the clean learned eval path only; current measured state after controller removal and multiple planner/adaptation passes is still `0/5`.
+- [ ] Convert the new real-ARC first-contact activity into reward-bearing semantics: the current online 5-game slice now completes end-to-end with `ar25` at `5` interaction steps, `cn04` emitting `objective_competition`, and `dc22` at `16` interaction steps, but solved count is still `0/5`.
 - [x] Fix pre-retrain planner-state mismatch: imagined selector follow-ups and deeper rollouts now use updated imagined state proxies instead of the stale original structured state/action context.
 - [x] Fix pre-retrain search objective mismatch: `_lookahead(...)` no longer rewards uncertainty directly.
 - [x] Fix graph recency across persisted synthetic episodes: `StateGraph` now uses monotonic recency ticks instead of local episode `step_index`.
