@@ -18,12 +18,14 @@ def build_agent(agent_name: str, checkpoint_path: str | None = None, device: Any
         return RandomHeuristicAgent()
     if normalized == "graph":
         return GraphExplorerAgent()
-    if normalized in {"scientist", "hyper_scientist", "hyper-generalizing-scientist"}:
-        from arcagi.scientist import load_scientist_checkpoint
-        from arcagi.agents.scientist_agent import HyperGeneralizingScientistAgent
+    if normalized in {"scientist", "hyper_scientist", "hyper-generalizing-scientist", "spotlight", "spotlight_scientist"}:
+        from arcagi.agents.scientist_agent import (
+            HyperGeneralizingScientistAgent,
+            load_spotlight_scientist_checkpoint,
+        )
 
         if checkpoint_path and Path(checkpoint_path).exists():
-            return load_scientist_checkpoint(checkpoint_path)
+            return load_spotlight_scientist_checkpoint(checkpoint_path)
         return HyperGeneralizingScientistAgent()
 
     import torch
