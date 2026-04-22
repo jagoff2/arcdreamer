@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 from collections import defaultdict
 from dataclasses import dataclass
+import math
 
 import numpy as np
 import torch
@@ -23,6 +24,7 @@ from arcagi.models.world_model import RecurrentWorldModel
 from arcagi.planning.planner import HybridPlanner
 from arcagi.planning.runtime_rule_controller import RuntimeRuleController
 from arcagi.planning.rule_induction import EpisodeRuleInducer, ObjectSignature, action_target_signatures
+from arcagi.reasoning import EpisodeTheoryManager, HypothesisCompetition, RuleCandidate, TheoryEvent
 
 
 GENERIC_LANGUAGE_TOKENS: frozenset[str] = frozenset(
@@ -158,8 +160,25 @@ CONTENT_LANGUAGE_TOKENS: frozenset[str] = frozenset(
 )
 
 
+def _bounded_memory_confidence(value: float) -> float:
+    return _clamp(math.tanh(0.7 * max(float(value), 0.0)), lower=0.0, upper=1.0)
+
+
 def _clamp(value: float, *, lower: float, upper: float) -> float:
     return float(max(min(value, upper), lower))
+
+
+def _decay_bias_map(mapping: dict[Any, float], *, factor: float, threshold: float = 0.03) -> None:
+    for key in list(mapping.keys()):
+        decayed = float(mapping[key]) * float(factor)
+        if abs(decayed) < threshold:
+            del mapping[key]
+        else:
+            mapping[key] = decayed
+
+
+def _theory_event_magnitude(salience: float) -> float:
+    return 0.18 + (0.42 * _bounded_memory_confidence(float(salience)))
 
 
 def _action_family(action: ActionName) -> str:
@@ -179,6 +198,7 @@ class LearnedAgentConfig:
     use_memory: bool = False
     surprise_threshold: float = 0.35
     use_runtime_controller: bool = False
+    use_theory_manager: bool = False
     use_online_world_model_adaptation: bool = True
     online_world_model_lr: float = 3e-4
     online_world_model_update_steps: int = 1
@@ -253,6 +273,8 @@ class LearnedPlanningAgent(BaseAgent):
         self.last_runtime_thought = None
         self.last_plan_scores: dict[str, float] = {}
         self.recent_actions: list[ActionName] = []
+        self.latest_rule_candidates: tuple[RuleCandidate, ...] = ()
+        self.latest_competitions: tuple[HypothesisCompetition, ...] = ()
         self.online_action_bias: dict[ActionName, float] = {}
         self.online_context_bias: dict[tuple[str, ObjectSignature], float] = {}
         self.local_action_patches: dict[ActionName, LocalModelPatch] = {}
@@ -267,6 +289,7 @@ class LearnedPlanningAgent(BaseAgent):
         self.stable_plan_tokens: tuple[str, ...] = ()
         self.evidence_steps = 0
         self.runtime_rule_controller = RuntimeRuleController() if self.config.use_runtime_controller else None
+        self.theory_manager = EpisodeTheoryManager() if self.config.use_theory_manager else None
         self.rule_inducer = EpisodeRuleInducer()
         self._world_model_base_state = copy.deepcopy(self.world_model.state_dict())
         self.world_model_optimizer = (
@@ -299,6 +322,8 @@ class LearnedPlanningAgent(BaseAgent):
         self.last_runtime_thought = None
         self.last_plan_scores = {}
         self.recent_actions = []
+        self.latest_rule_candidates = ()
+        self.latest_competitions = ()
         self.online_action_bias = {}
         self.online_context_bias = {}
         self.local_action_patches = {}
@@ -322,6 +347,8 @@ class LearnedPlanningAgent(BaseAgent):
         self.stuck_steps = 0
         if self.runtime_rule_controller is not None:
             self.runtime_rule_controller.reset_episode()
+        if self.theory_manager is not None:
+            self.theory_manager.reset_episode()
         self.rule_inducer.clear()
 
     def reset_all(self) -> None:
@@ -340,6 +367,8 @@ class LearnedPlanningAgent(BaseAgent):
         self.last_runtime_thought = None
         self.last_plan_scores = {}
         self.recent_actions = []
+        self.latest_rule_candidates = ()
+        self.latest_competitions = ()
         self.online_action_bias = {}
         self.online_context_bias = {}
         self.local_action_patches = {}
@@ -363,6 +392,8 @@ class LearnedPlanningAgent(BaseAgent):
         self.stuck_steps = 0
         if self.runtime_rule_controller is not None:
             self.runtime_rule_controller.reset_all()
+        if self.theory_manager is not None:
+            self.theory_manager.reset_episode()
         self.rule_inducer.clear()
         if self.episodic_memory is not None:
             self.episodic_memory.clear()
@@ -440,9 +471,10 @@ class LearnedPlanningAgent(BaseAgent):
             )
         return tuple(claims)
 
-    def _episode_family_claims(self) -> tuple[StructuredClaim, ...]:
+    def _episode_family_claims(self, bias_source: dict[str, float] | None = None) -> tuple[StructuredClaim, ...]:
+        source = self.family_bias if bias_source is None else bias_source
         claims: list[StructuredClaim] = []
-        for family, bias in sorted(self.family_bias.items(), key=lambda item: abs(item[1]), reverse=True):
+        for family, bias in sorted(source.items(), key=lambda item: abs(item[1]), reverse=True):
             if abs(bias) < 0.5:
                 continue
             relation = "productive" if bias > 0.0 else "stalled"
@@ -461,6 +493,16 @@ class LearnedPlanningAgent(BaseAgent):
             if len(claims) >= 3:
                 break
         return tuple(claims)
+
+    @staticmethod
+    def _merge_bias_maps(*mappings: dict[Any, float] | None) -> dict[Any, float]:
+        merged: defaultdict[Any, float] = defaultdict(float)
+        for mapping in mappings:
+            if not mapping:
+                continue
+            for key, value in mapping.items():
+                merged[key] += float(value)
+        return {key: _clamp(value, lower=-3.0, upper=3.0) for key, value in merged.items()}
 
     def _combined_patch(
         self,
@@ -501,6 +543,7 @@ class LearnedPlanningAgent(BaseAgent):
                     policy=action_thought.policy + patch.policy_shift,
                     policy_weight=action_thought.policy_weight,
                     predicted_reward=action_thought.predicted_reward,
+                    predicted_return=action_thought.predicted_return,
                     usefulness=action_thought.usefulness + patch.usefulness_shift,
                     selector_followup=action_thought.selector_followup,
                     next_latent=action_thought.next_latent,
@@ -549,7 +592,7 @@ class LearnedPlanningAgent(BaseAgent):
                 "context_id": self.last_state.task_id if self.last_state is not None else "",
                 "recommended_action": proof.action if proof.proof_type == "support" and not proof.exception else None,
                 "avoid_action": proof.action if proof.proof_type == "contradiction" or proof.exception else None,
-                "action_confidence": salience,
+                "action_confidence": _bounded_memory_confidence(salience),
                 "proof": {
                     "proof_type": proof.proof_type,
                     "hypothesis_type": proof.hypothesis_type,
@@ -570,6 +613,66 @@ class LearnedPlanningAgent(BaseAgent):
                 action_history=action_history,
                 reward=0.0,
                 salience=salience,
+                payload=payload,
+            )
+
+    def _write_theory_events(
+        self,
+        events: tuple[TheoryEvent, ...],
+    ) -> None:
+        if (
+            not events
+            or not self.config.use_memory
+            or self.episodic_memory is None
+            or self.last_latent is None
+        ):
+            return
+        context_tokens = _claim_context_tokens(self.latest_claims)
+        action_history = tuple(self.recent_actions)
+        for event in events:
+            rule_candidate = event.rule_candidate
+            payload = {
+                "context_id": self.last_state.task_id if self.last_state is not None else "",
+                "recommended_action": event.recommended_action,
+                "avoid_action": event.avoid_action,
+                "action_confidence": _bounded_memory_confidence(max(event.salience, 0.25)),
+                "theory_event": {
+                    "event_type": event.event_type,
+                    "action": event.action,
+                    "detail": event.detail,
+                    "theory": {
+                        "action_type": event.theory.action_type,
+                        "action_family": event.theory.action_family,
+                        "target_signature": event.theory.target_signature,
+                        "effect_kind": event.theory.effect_kind,
+                        "confidence": event.theory.confidence,
+                        "support": event.theory.support,
+                        "contradiction": event.theory.contradiction,
+                    },
+                },
+            }
+            if rule_candidate is not None:
+                payload["rule_candidate"] = {
+                    "rule_id": rule_candidate.rule_id,
+                    "scope": rule_candidate.scope,
+                    "preconditions": list(rule_candidate.preconditions),
+                    "effects": list(rule_candidate.effects),
+                    "diagnostic_actions": list(rule_candidate.diagnostic_actions),
+                    "confidence": rule_candidate.confidence,
+                    "posterior": rule_candidate.posterior,
+                    "support": rule_candidate.support,
+                    "contradiction": rule_candidate.contradiction,
+                    "tests": rule_candidate.tests,
+                }
+            self.episodic_memory.write(
+                key=self.last_latent.squeeze(0).detach().cpu().numpy(),
+                belief_tokens=tuple(token for token in self.stable_belief_tokens if token not in GENERIC_LANGUAGE_TOKENS),
+                question_tokens=tuple(token for token in self.stable_question_tokens if token not in GENERIC_LANGUAGE_TOKENS),
+                plan_tokens=rule_candidate.as_tokens() if rule_candidate is not None else event.theory.as_tokens(),
+                context_tokens=context_tokens,
+                action_history=action_history,
+                reward=0.0,
+                salience=max(event.salience, event.theory.salience, 0.25),
                 payload=payload,
             )
 
@@ -624,17 +727,29 @@ class LearnedPlanningAgent(BaseAgent):
             language_model=self.language_model if self.config.use_language else None,
         )
         runtime_thought = self._apply_local_model_patches(state, runtime_thought)
+        if self.theory_manager is not None:
+            runtime_thought = self.theory_manager.augment_runtime_thought(
+                state,
+                runtime_thought,
+                rule_inducer=self.rule_inducer,
+            )
+            self.latest_rule_candidates = self.theory_manager.rule_candidates
+            self.latest_competitions = self.theory_manager.competitions
         if self.config.use_runtime_controller:
             assert self.runtime_rule_controller is not None
             runtime_thought = self.runtime_rule_controller.augment_runtime_thought(state, runtime_thought)
         runtime_thought = self._stabilize_runtime_thought(runtime_thought)
         state_claims = self._state_claims(state)
+        merged_family_bias = self._merge_bias_maps(
+            self.family_bias,
+            None if self.theory_manager is None else self.theory_manager.family_bias,
+        )
         runtime_thought = RuntimeThought(
             belief_tokens=runtime_thought.belief_tokens,
             question_tokens=runtime_thought.question_tokens,
             plan_tokens=runtime_thought.plan_tokens,
             actions=runtime_thought.actions,
-            claims=tuple(runtime_thought.claims) + state_claims + self._episode_family_claims(),
+            claims=tuple(runtime_thought.claims) + state_claims + self._episode_family_claims(merged_family_bias),
             world_model_calls=runtime_thought.world_model_calls,
         )
         planner_plan = self.planner.choose_action(
@@ -646,7 +761,10 @@ class LearnedPlanningAgent(BaseAgent):
             language_model=self.language_model if self.config.use_language else None,
             episodic_memory=self.episodic_memory if self.config.use_memory else None,
             rule_inducer=self.rule_inducer,
-            action_bias=self.online_action_bias,
+            action_bias=self._merge_bias_maps(
+                self.online_action_bias,
+                None if self.theory_manager is None else self.theory_manager.action_bias,
+            ),
             action_counts=self.global_action_counts,
             action_delta_sums=self.global_action_delta_sums,
             action_reward_sums=self.global_action_reward_sums,
@@ -654,8 +772,12 @@ class LearnedPlanningAgent(BaseAgent):
             family_counts=self.family_counts,
             family_bins=self.family_bins,
             family_no_effect_counts=self.family_no_effect_counts,
-            family_bias=self.family_bias,
-            context_bias=self.online_context_bias,
+            family_bias=merged_family_bias,
+            context_bias=self._merge_bias_maps(
+                self.online_context_bias,
+                None if self.theory_manager is None else self.theory_manager.context_bias,
+            ),
+            diagnostic_action_scores=None if self.theory_manager is None else self.theory_manager.diagnostic_action_scores,
             stuck_steps=self.stuck_steps,
             last_action=self.last_action,
             thought=runtime_thought,
@@ -761,6 +883,10 @@ class LearnedPlanningAgent(BaseAgent):
             self.runtime_rule_controller.observe_transition(transition)
             runtime_proofs = self.runtime_rule_controller.consume_recent_proofs()
         self.rule_inducer.record(transition)
+        theory_events: tuple[TheoryEvent, ...] = ()
+        if self.theory_manager is not None:
+            self.theory_manager.observe_transition(transition)
+            theory_events = self.theory_manager.consume_recent_events()
         if self.last_latent is None or self.last_prediction is None:
             return
         with torch.no_grad():
@@ -775,8 +901,13 @@ class LearnedPlanningAgent(BaseAgent):
             None,
             state_change,
         )
+        _decay_bias_map(self.online_action_bias, factor=0.92)
+        _decay_bias_map(self.online_context_bias, factor=0.94)
+        _decay_bias_map(self.family_bias, factor=0.94)
         self._update_language_support(transition, state_change=state_change)
         self._write_runtime_proofs(runtime_proofs)
+        self._write_theory_events(theory_events)
+        self._apply_theory_event_control_updates(transition, theory_events)
         self.global_action_counts[transition.action] += 1
         self.global_action_delta_sums[transition.action] += state_change
         self.global_action_reward_sums[transition.action] += float(transition.reward)
@@ -813,7 +944,7 @@ class LearnedPlanningAgent(BaseAgent):
                 "context_id": transition.state.task_id,
                 "recommended_action": transition.action if trusted_action else None,
                 "avoid_action": transition.action if progress_signal <= -0.2 else None,
-                "action_confidence": max(progress_signal, 0.0) if trusted_action else 0.0,
+                "action_confidence": _bounded_memory_confidence(max(progress_signal, 0.0)) if trusted_action else 0.0,
                 "claims": [
                     {
                         "claim_type": claim.claim_type,
@@ -850,6 +981,67 @@ class LearnedPlanningAgent(BaseAgent):
         )
         self._adapt_world_model(transition, state_change=state_change)
 
+    def _apply_theory_event_control_updates(
+        self,
+        transition: Transition,
+        theory_events: tuple[TheoryEvent, ...],
+    ) -> None:
+        if not theory_events:
+            return
+
+        def apply_action_delta(action: ActionName, delta: float) -> None:
+            self.online_action_bias[action] = _clamp(
+                self.online_action_bias.get(action, 0.0) + float(delta),
+                lower=-2.5,
+                upper=2.5,
+            )
+
+        def apply_family_delta(family: str, delta: float) -> None:
+            self.family_bias[family] = _clamp(
+                self.family_bias.get(family, 0.0) + float(delta),
+                lower=-3.0,
+                upper=3.0,
+            )
+
+        def apply_context_delta(action_type: str, target_signature: ObjectSignature | None, delta: float) -> None:
+            if target_signature is None:
+                return
+            key = (action_type, target_signature)
+            self.online_context_bias[key] = _clamp(
+                float(self.online_context_bias.get(key, 0.0)) + float(delta),
+                lower=-2.5,
+                upper=2.5,
+            )
+
+        for event in theory_events:
+            theory = event.theory
+            magnitude = _theory_event_magnitude(event.salience)
+            if event.event_type == "counterfactual":
+                recommended_action = event.recommended_action or event.action
+                apply_action_delta(recommended_action, 0.7 * magnitude)
+                apply_family_delta(theory.action_family, 0.2 * magnitude)
+                apply_context_delta(theory.action_type, theory.target_signature, 0.25 * magnitude)
+                continue
+
+            is_negative_theory = theory.effect_kind in {"setback", "no_effect"}
+            if event.event_type == "contradiction" or (event.event_type == "support" and is_negative_theory):
+                avoid_action = event.avoid_action or event.action
+                apply_action_delta(avoid_action, -1.0 * magnitude)
+                apply_family_delta(theory.action_family, -0.18 * magnitude)
+                apply_context_delta(theory.action_type, theory.target_signature, -0.35 * magnitude)
+                diagnostic_actions = event.rule_candidate.diagnostic_actions if event.rule_candidate is not None else ()
+                for diagnostic_action in diagnostic_actions:
+                    if diagnostic_action == avoid_action:
+                        continue
+                    apply_action_delta(diagnostic_action, 0.22 * magnitude)
+                continue
+
+            if event.event_type == "support" and theory.effect_kind == "reward_gain":
+                recommended_action = event.recommended_action or event.action
+                apply_action_delta(recommended_action, 0.45 * magnitude)
+                apply_family_delta(theory.action_family, 0.14 * magnitude)
+                apply_context_delta(theory.action_type, theory.target_signature, 0.18 * magnitude)
+
     def _update_online_action_bias(self, transition: Transition, state_change: float) -> None:
         baseline = self.online_action_bias.get(transition.action, 0.0)
         progress_signal = transition_usefulness_target(
@@ -871,11 +1063,16 @@ class LearnedPlanningAgent(BaseAgent):
                     lower=-2.5,
                     upper=2.5,
                 )
-        if len(self.recent_actions) >= 2 and progress_signal >= 0.25:
-            previous_action = self.recent_actions[-2]
-            previous_baseline = self.online_action_bias.get(previous_action, 0.0)
-            delayed_credit = 0.35 * progress_signal
-            self.online_action_bias[previous_action] = _clamp(previous_baseline + delayed_credit, lower=-2.5, upper=2.5)
+        if len(self.recent_actions) >= 2 and abs(progress_signal) >= 0.18:
+            trace_signal = 0.3 * signal
+            for distance, previous_action in enumerate(reversed(self.recent_actions[:-1]), start=1):
+                previous_baseline = self.online_action_bias.get(previous_action, 0.0)
+                delayed_credit = trace_signal * (0.55 ** float(distance - 1))
+                self.online_action_bias[previous_action] = _clamp(
+                    previous_baseline + delayed_credit,
+                    lower=-2.5,
+                    upper=2.5,
+                )
 
     def _update_local_model_patches(
         self,
@@ -940,9 +1137,16 @@ class LearnedPlanningAgent(BaseAgent):
                 state=transition.state,
                 hidden=hidden,
             )
+        actual_return_value = getattr(self.last_prediction, "return_value", None)
+        if actual_return_value is None:
+            actual_return_value = torch.zeros_like(self.last_prediction.reward)
+        alternative_return_value = getattr(alternative_prediction, "return_value", None)
+        if alternative_return_value is None:
+            alternative_return_value = torch.zeros_like(alternative_prediction.reward)
         actual_score = float(
             (
                 self.last_prediction.reward
+                + (0.35 * actual_return_value)
                 + (0.5 * self.last_prediction.usefulness)
                 + (0.25 * self.last_prediction.policy)
                 - (0.1 * self.last_prediction.uncertainty)
@@ -951,6 +1155,7 @@ class LearnedPlanningAgent(BaseAgent):
         rule_scores = [self.rule_inducer.action_score(transition.state, action) for action in alternatives]
         predicted_scores = (
             alternative_prediction.reward
+            + (0.35 * alternative_return_value)
             + (0.5 * alternative_prediction.usefulness)
             + (0.25 * alternative_prediction.policy)
             - (0.1 * alternative_prediction.uncertainty)
@@ -1014,7 +1219,7 @@ class LearnedPlanningAgent(BaseAgent):
                 "context_id": transition.state.task_id,
                 "recommended_action": None,
                 "avoid_action": transition.action,
-                "action_confidence": min(max(score_gap, 0.2), 2.0),
+                "action_confidence": _bounded_memory_confidence(min(max(score_gap, 0.2), 2.0)),
                 "counterfactual": True,
                 "claims": [
                     {
@@ -1028,6 +1233,18 @@ class LearnedPlanningAgent(BaseAgent):
                 ],
             },
         )
+        if self.theory_manager is not None:
+            predicted_delta_norm = float(torch.norm(alternative_prediction.delta[best_index]).item())
+            self.theory_manager.observe_counterfactual(
+                state=transition.state,
+                action=best_action,
+                predicted_reward=float(alternative_prediction.reward[best_index].item()),
+                predicted_usefulness=float(alternative_prediction.usefulness[best_index].item()),
+                predicted_uncertainty=float(alternative_prediction.uncertainty[best_index].item()),
+                predicted_delta_norm=predicted_delta_norm,
+                score_gap=score_gap,
+            )
+            self._write_theory_events(self.theory_manager.consume_recent_events())
 
     def _action_context_keys(self, state, action: ActionName) -> tuple[tuple[str, ObjectSignature], ...]:
         context = build_action_schema_context(state.affordances, dict(state.action_roles))
@@ -1054,6 +1271,7 @@ class LearnedPlanningAgent(BaseAgent):
             state_change,
         )
         reward_target = torch.tensor([transition.reward], dtype=torch.float32, device=self.device)
+        return_target = torch.tensor([transition.reward], dtype=torch.float32, device=self.device)
         delta_target = torch.tensor(
             transition.next_state.transition_vector() - transition.state.transition_vector(),
             dtype=torch.float32,
@@ -1084,6 +1302,7 @@ class LearnedPlanningAgent(BaseAgent):
                 hidden=hidden,
                 next_latent_target=next_encoded.latent.detach(),
                 reward_target=reward_target,
+                return_target=return_target,
                 delta_target=delta_target,
                 usefulness_target=usefulness_target,
             )
@@ -1121,7 +1340,12 @@ class RecurrentAblationAgent(LearnedPlanningAgent):
             planner=planner,
             language_model=None,
             episodic_memory=None,
-            config=LearnedAgentConfig(use_language=False, use_memory=False, use_runtime_controller=False),
+            config=LearnedAgentConfig(
+                use_language=False,
+                use_memory=False,
+                use_runtime_controller=False,
+                use_theory_manager=False,
+            ),
             device=device,
         )
 
@@ -1142,7 +1366,12 @@ class LanguageNoMemoryAgent(LearnedPlanningAgent):
             planner=planner,
             language_model=language_model,
             episodic_memory=None,
-            config=LearnedAgentConfig(use_language=True, use_memory=False, use_runtime_controller=False),
+            config=LearnedAgentConfig(
+                use_language=True,
+                use_memory=False,
+                use_runtime_controller=False,
+                use_theory_manager=False,
+            ),
             device=device,
         )
 
@@ -1164,6 +1393,11 @@ class HybridAgent(LearnedPlanningAgent):
             planner=planner,
             language_model=language_model,
             episodic_memory=episodic_memory,
-            config=LearnedAgentConfig(use_language=True, use_memory=True, use_runtime_controller=True),
+            config=LearnedAgentConfig(
+                use_language=True,
+                use_memory=True,
+                use_runtime_controller=True,
+                use_theory_manager=True,
+            ),
             device=device,
         )

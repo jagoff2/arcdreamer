@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import json
 import logging
+import multiprocessing as mp
 from pathlib import Path
+import queue
 from statistics import mean
 from time import perf_counter
 
@@ -14,6 +16,7 @@ import torch
 from arcagi.agents.graph_agent import GraphExplorerAgent
 from arcagi.core.action_schema import build_action_schema, build_action_schema_context
 from arcagi.core.progress_signals import (
+    hindsight_supervision,
     PolicySupervision,
     action_family as _shared_action_family,
     transition_policy_supervision,
@@ -25,11 +28,17 @@ from arcagi.envs.synthetic import DEFAULT_SYNTHETIC_FAMILY_MODES, HiddenRuleEnv,
 from arcagi.models.encoder import StructuredStateEncoder
 from arcagi.models.language import GroundedLanguageModel
 from arcagi.models.world_model import RecurrentWorldModel
+from arcagi.memory.episodic import EpisodicMemory
 from arcagi.perception.object_encoder import extract_structured_state
 from arcagi.planning.planner import HybridPlanner, PlannerConfig
 from arcagi.training.synthetic_oracle import oracle_action
 
 logger = logging.getLogger(__name__)
+
+_GRAPH_COLLECTION_POLICIES: frozenset[str] = frozenset({"explore", "graph"})
+_LEARNED_COLLECTION_POLICIES: frozenset[str] = frozenset({"mixed", "bootstrap", "oracle", "learned", "hybrid"})
+_ALLOWED_SYNTHETIC_BEHAVIOR_POLICIES: frozenset[str] = _GRAPH_COLLECTION_POLICIES | _LEARNED_COLLECTION_POLICIES
+_ALLOWED_CURRICULA: frozenset[str] = frozenset({"staged", "gated", "fixed_staged", "flat"})
 
 
 @dataclass(frozen=True)
@@ -41,13 +50,18 @@ class SyntheticTrainingConfig:
     learning_rate: float = 3e-4
     seed: int = 7
     checkpoint_path: str = "artifacts/synthetic_hybrid.pt"
-    behavior_policy: str = "explore"
+    train_device: str = ""
+    async_eval_device: str = ""
+    behavior_policy: str = "mixed"
     size_options: tuple[int, ...] = (7, 8, 9)
     init_checkpoint_path: str = ""
+    resume_checkpoint_path: str = ""
+    allow_weights_only_init_from_training_checkpoint: bool = False
     curriculum: str = "staged"
     log_every_episodes: int = 16
     holdout_eval_every_epochs: int = 4
     holdout_episodes_per_variant: int = 2
+    regression_holdout_every_evals: int = 1
     promotion_consecutive_evals: int = 2
     frontier_replay_weight: int = 3
     previous_stage_replay_weight: int = 1
@@ -66,6 +80,7 @@ class SyntheticTrainingConfig:
     teacher_takeover_prob_initial: float = 0.5
     teacher_takeover_prob_floor: float = 0.2
     teacher_relabel_weight: float = 0.8
+    trajectory_credit_discount: float = 0.94
     dream_batches_per_epoch: int = 8
     dream_batch_size: int = 8
     dream_horizon: int = 3
@@ -78,6 +93,25 @@ class SyntheticTrainingConfig:
     holdout_trace_top_actions: int = 3
     enhancement_gate_target: float = 0.3
     enhancement_gate_weight: float = 0.05
+
+
+@dataclass
+class _AsyncHoldoutRuntime:
+    request_queue: object
+    result_queue: object
+    process: mp.Process
+    next_request_index: int = 1
+    next_result_index: int = 1
+    pending_count: int = 0
+    buffered_results: dict[int, dict[str, object]] = field(default_factory=dict)
+
+
+@dataclass
+class _SecondaryTrainingRuntime:
+    device: torch.device
+    encoder: StructuredStateEncoder
+    world_model: RecurrentWorldModel
+    language_model: GroundedLanguageModel
 
 
 @dataclass(frozen=True)
@@ -106,6 +140,226 @@ def build_default_modules(device: torch.device | None = None) -> tuple[
     language_model = GroundedLanguageModel().to(device)
     planner = HybridPlanner()
     return encoder, world_model, language_model, planner
+
+
+def _trainable_parameters(
+    encoder: StructuredStateEncoder,
+    world_model: RecurrentWorldModel,
+    language_model: GroundedLanguageModel,
+) -> list[torch.nn.Parameter]:
+    return list(encoder.parameters()) + list(world_model.parameters()) + list(language_model.parameters())
+
+
+def _build_secondary_training_runtime(
+    encoder: StructuredStateEncoder,
+    world_model: RecurrentWorldModel,
+    language_model: GroundedLanguageModel,
+    *,
+    device: torch.device,
+) -> _SecondaryTrainingRuntime:
+    secondary_encoder, secondary_world_model, secondary_language_model, _ = build_default_modules(device=device)
+    secondary_encoder.load_state_dict(encoder.state_dict())
+    secondary_world_model.load_state_dict(world_model.state_dict())
+    secondary_language_model.load_state_dict(language_model.state_dict())
+    secondary_encoder.train(mode=encoder.training)
+    secondary_world_model.train(mode=world_model.training)
+    secondary_language_model.train(mode=language_model.training)
+    return _SecondaryTrainingRuntime(
+        device=device,
+        encoder=secondary_encoder,
+        world_model=secondary_world_model,
+        language_model=secondary_language_model,
+    )
+
+
+def _sync_secondary_training_runtime(
+    runtime: _SecondaryTrainingRuntime,
+    encoder: StructuredStateEncoder,
+    world_model: RecurrentWorldModel,
+    language_model: GroundedLanguageModel,
+) -> None:
+    runtime.encoder.load_state_dict(encoder.state_dict())
+    runtime.world_model.load_state_dict(world_model.state_dict())
+    runtime.language_model.load_state_dict(language_model.state_dict())
+    runtime.encoder.train(mode=encoder.training)
+    runtime.world_model.train(mode=world_model.training)
+    runtime.language_model.train(mode=language_model.training)
+
+
+def _zero_module_grads(*modules: torch.nn.Module) -> None:
+    for module in modules:
+        module.zero_grad(set_to_none=True)
+
+
+def _merge_secondary_gradients(
+    encoder: StructuredStateEncoder,
+    world_model: RecurrentWorldModel,
+    language_model: GroundedLanguageModel,
+    secondary_runtime: _SecondaryTrainingRuntime,
+    *,
+    contributors: int,
+) -> None:
+    if contributors <= 1:
+        return
+    primary_parameters = _trainable_parameters(encoder, world_model, language_model)
+    secondary_parameters = _trainable_parameters(
+        secondary_runtime.encoder,
+        secondary_runtime.world_model,
+        secondary_runtime.language_model,
+    )
+    scale = 1.0 / float(contributors)
+    for primary_parameter, secondary_parameter in zip(primary_parameters, secondary_parameters, strict=True):
+        secondary_grad = secondary_parameter.grad
+        if secondary_grad is None:
+            if primary_parameter.grad is not None:
+                primary_parameter.grad.mul_(scale)
+            continue
+        moved_secondary = secondary_grad.detach().to(primary_parameter.device)
+        if primary_parameter.grad is None:
+            primary_parameter.grad = moved_secondary.mul(scale)
+            continue
+        primary_parameter.grad.mul_(scale)
+        primary_parameter.grad.add_(moved_secondary, alpha=scale)
+
+
+def _validate_synthetic_training_config(config: SyntheticTrainingConfig) -> None:
+    if int(config.epochs) <= 0:
+        raise ValueError("epochs must be positive")
+    if int(config.episodes_per_epoch) <= 0:
+        raise ValueError("episodes_per_epoch must be positive")
+    if int(config.max_steps) <= 0:
+        raise ValueError("max_steps must be positive")
+    if float(config.learning_rate) <= 0.0:
+        raise ValueError("learning_rate must be positive")
+    if str(config.behavior_policy) not in _ALLOWED_SYNTHETIC_BEHAVIOR_POLICIES:
+        raise ValueError(
+            f"unsupported behavior_policy: {config.behavior_policy}. "
+            f"expected one of {sorted(_ALLOWED_SYNTHETIC_BEHAVIOR_POLICIES)}"
+        )
+    if str(config.curriculum) not in _ALLOWED_CURRICULA:
+        raise ValueError(f"unsupported curriculum: {config.curriculum}. expected one of {sorted(_ALLOWED_CURRICULA)}")
+    if not config.size_options:
+        raise ValueError("size_options must not be empty")
+    if float(config.teacher_episode_fraction_initial) < 0.0 or float(config.teacher_episode_fraction_initial) > 1.0:
+        raise ValueError("teacher_episode_fraction_initial must be within [0, 1]")
+    if float(config.teacher_episode_fraction_floor) < 0.0 or float(config.teacher_episode_fraction_floor) > 1.0:
+        raise ValueError("teacher_episode_fraction_floor must be within [0, 1]")
+    if float(config.teacher_takeover_prob_initial) < 0.0 or float(config.teacher_takeover_prob_initial) > 1.0:
+        raise ValueError("teacher_takeover_prob_initial must be within [0, 1]")
+    if float(config.teacher_takeover_prob_floor) < 0.0 or float(config.teacher_takeover_prob_floor) > 1.0:
+        raise ValueError("teacher_takeover_prob_floor must be within [0, 1]")
+    if float(config.trajectory_credit_discount) < 0.0 or float(config.trajectory_credit_discount) > 1.0:
+        raise ValueError("trajectory_credit_discount must be within [0, 1]")
+    if config.init_checkpoint_path and config.resume_checkpoint_path:
+        raise ValueError("init_checkpoint_path and resume_checkpoint_path are mutually exclusive")
+
+
+def _clone_collection_modules(
+    encoder: StructuredStateEncoder,
+    world_model: RecurrentWorldModel,
+    language_model: GroundedLanguageModel,
+    *,
+    device: torch.device,
+) -> tuple[StructuredStateEncoder, RecurrentWorldModel, GroundedLanguageModel]:
+    cloned_encoder, cloned_world_model, cloned_language_model, _ = build_default_modules(device=device)
+    cloned_encoder.load_state_dict(encoder.state_dict())
+    cloned_world_model.load_state_dict(world_model.state_dict())
+    cloned_language_model.load_state_dict(language_model.state_dict())
+    cloned_encoder.eval()
+    cloned_world_model.eval()
+    cloned_language_model.eval()
+    return cloned_encoder, cloned_world_model, cloned_language_model
+
+
+def _build_collection_agent(
+    config: SyntheticTrainingConfig,
+    *,
+    encoder: StructuredStateEncoder | None = None,
+    world_model: RecurrentWorldModel | None = None,
+    language_model: GroundedLanguageModel | None = None,
+    device: torch.device | None = None,
+) -> tuple[object, str, bool]:
+    policy = str(config.behavior_policy)
+    if policy in _GRAPH_COLLECTION_POLICIES or encoder is None or world_model is None or language_model is None:
+        return GraphExplorerAgent(), "graph", False
+    from arcagi.agents.learned_agent import HybridAgent
+
+    collector_device = device or torch.device("cpu")
+    collection_encoder, collection_world_model, collection_language_model = _clone_collection_modules(
+        encoder,
+        world_model,
+        language_model,
+        device=collector_device,
+    )
+    planner = HybridPlanner(
+        PlannerConfig(search_depth=2, search_root_width=2, search_branch_width=1, max_world_model_calls=48)
+        if collector_device.type == "cpu"
+        else PlannerConfig(search_depth=2, search_root_width=2, search_branch_width=1, max_world_model_calls=32)
+    )
+    return (
+        HybridAgent(
+            encoder=collection_encoder,
+            world_model=collection_world_model,
+            planner=planner,
+            language_model=collection_language_model,
+            episodic_memory=EpisodicMemory(),
+            device=collector_device,
+        ),
+        "hybrid",
+        True,
+    )
+
+
+def _latest_regression_snapshot(holdout_history: list[dict[str, object]]) -> dict[str, object] | None:
+    for item in reversed(holdout_history):
+        regression = item.get("regression")
+        if regression is not None:
+            return dict(regression)
+    return None
+
+
+def _load_resume_state(
+    checkpoint_path: str,
+    *,
+    encoder: StructuredStateEncoder,
+    world_model: RecurrentWorldModel,
+    language_model: GroundedLanguageModel,
+    device: torch.device,
+) -> dict[str, object]:
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    _load_compatible_state_dict(encoder, checkpoint["encoder"], module_name="encoder")
+    _load_compatible_state_dict(world_model, checkpoint["world_model"], module_name="world_model")
+    _load_compatible_state_dict(language_model, checkpoint["language_model"], module_name="language_model")
+    history = list(checkpoint.get("history", []))
+    holdout_history = list(checkpoint.get("holdout_history", []))
+    training_state = dict(checkpoint.get("training_state", {}))
+    last_holdout_result = checkpoint.get("last_holdout_result") or None
+    completed_epochs = int(training_state.get("completed_epochs", len(history)))
+    return {
+        "history": history,
+        "holdout_history": holdout_history,
+        "training_state": training_state,
+        "last_holdout_result": last_holdout_result,
+        "current_epoch": max(-1, completed_epochs - 1),
+        "start_epoch": completed_epochs,
+        "stage_index": int(training_state.get("stage_index", 0)),
+        "stage_epoch_count": int(training_state.get("stage_epoch_count", 0)),
+        "consecutive_holdout_passes": int(training_state.get("consecutive_holdout_passes", 0)),
+        "cached_regression_holdout": _latest_regression_snapshot(holdout_history),
+    }
+
+
+def _checkpoint_contains_resume_metadata(checkpoint: dict[str, object]) -> bool:
+    history = checkpoint.get("history", [])
+    holdout_history = checkpoint.get("holdout_history", [])
+    training_state = checkpoint.get("training_state", {})
+    if history or holdout_history:
+        return True
+    if not isinstance(training_state, dict):
+        return False
+    completed_epochs = int(training_state.get("completed_epochs", 0) or 0)
+    stage_epoch_count = int(training_state.get("stage_epoch_count", 0) or 0)
+    return completed_epochs > 0 or stage_epoch_count > 0 or bool(training_state.get("stage_name"))
 
 
 def _load_compatible_state_dict(
@@ -181,10 +435,62 @@ def _make_sample(
         "sibling_move_weight": policy_supervision.sibling_move_weight,
         "same_type_target": policy_supervision.same_type_target,
         "same_type_weight": policy_supervision.same_type_weight,
+        "replay_weight": 1.0,
+        "discounted_return": reward,
+        "future_progress": 0.0,
+        "future_setback": 0.0,
+        "outcome_signal": 0.0,
         "belief_tokens": _grounded_belief_tokens(state),
         "question_tokens": _grounded_question_tokens(state),
         "plan_tokens": _grounded_plan_tokens(state, plan_action),
     }
+
+
+def _apply_episode_hindsight(
+    config: SyntheticTrainingConfig,
+    episode_samples: list[dict[str, object]],
+) -> None:
+    if not episode_samples:
+        return
+    discount = float(config.trajectory_credit_discount)
+    trailing_return = 0.0
+    trailing_progress = 0.0
+    trailing_setback = 0.0
+    for sample in reversed(episode_samples):
+        reward = float(sample["reward"])
+        base_usefulness = float(sample["usefulness"])
+        base_policy = PolicySupervision(
+            target=float(sample["policy_target"]),
+            weight=float(sample["policy_weight"]),
+            sibling_move_target=float(sample["sibling_move_target"]),
+            sibling_move_weight=float(sample["sibling_move_weight"]),
+            same_type_target=float(sample["same_type_target"]),
+            same_type_weight=float(sample["same_type_weight"]),
+        )
+        discounted_return = reward + (discount * trailing_return)
+        hindsight = hindsight_supervision(
+            base_usefulness=base_usefulness,
+            base_policy=base_policy,
+            discounted_return=discounted_return,
+            future_progress=trailing_progress,
+            future_setback=trailing_setback,
+            teacher_weight=float(sample.get("teacher_weight", 0.0)),
+            teacher_disagrees=bool(sample.get("teacher_action")) and str(sample.get("teacher_action")) != str(sample.get("action")),
+        )
+        sample["usefulness"] = hindsight.usefulness
+        sample["policy_target"] = hindsight.policy_target
+        sample["policy_weight"] = hindsight.policy_weight
+        sample["sibling_move_weight"] = hindsight.sibling_move_weight
+        sample["same_type_weight"] = hindsight.same_type_weight
+        sample["teacher_weight"] = hindsight.teacher_weight
+        sample["replay_weight"] = hindsight.replay_weight
+        sample["discounted_return"] = hindsight.discounted_return
+        sample["future_progress"] = hindsight.future_progress
+        sample["future_setback"] = hindsight.future_setback
+        sample["outcome_signal"] = hindsight.outcome_signal
+        trailing_return = discounted_return
+        trailing_progress = max(0.0, base_usefulness) + (discount * trailing_progress)
+        trailing_setback = max(0.0, -base_usefulness) + (discount * trailing_setback)
 
 
 def _dream_sequence_windows(
@@ -227,6 +533,9 @@ def _dream_window_weight(dataset: list[dict[str, object]], window: list[int]) ->
         weight += float(sample["usefulness"])
         weight += 0.5 * float(sample["delta_norm"])
         weight += float(sample.get("teacher_weight", 0.0))
+        weight += float(sample.get("replay_weight", 1.0)) - 1.0
+        weight += 0.25 * float(sample.get("future_progress", 0.0))
+        weight += 0.35 * float(sample.get("future_setback", 0.0))
     return float(max(weight, 1e-3))
 
 
@@ -249,6 +558,27 @@ def _sample_dream_sequences(
     sample_count = min(len(windows), total_sequences)
     chosen = rng.choice(len(windows), size=sample_count, replace=len(windows) < sample_count, p=probabilities)
     return [windows[int(index)] for index in chosen]
+
+
+def _dataset_episode_sequences(dataset: list[dict[str, object]]) -> list[list[dict[str, object]]]:
+    sequences: list[list[dict[str, object]]] = []
+    current_sequence: list[dict[str, object]] = []
+    current_episode_id: str | None = None
+    for sample in dataset:
+        state = sample["state"]
+        if current_sequence and state.episode_id != current_episode_id:
+            sequences.append(current_sequence)
+            current_sequence = []
+        current_episode_id = state.episode_id
+        current_sequence.append(sample)
+    if current_sequence:
+        sequences.append(current_sequence)
+    return sequences
+
+
+def _append_replay_metrics(metric_lists: dict[str, list[float]], metrics: dict[str, float]) -> None:
+    for key, value in metrics.items():
+        metric_lists[key].append(float(value))
 
 
 def _checkpoint_variant_path(checkpoint_path: Path, variant: str) -> Path:
@@ -334,6 +664,13 @@ def _teacher_takeover_probability(
     guidance_state = _teacher_guidance_state(config, history)
     alpha = float(guidance_state["alpha"])
     return high + ((low - high) * alpha)
+
+
+def _dense_teacher_supervision_active(config: SyntheticTrainingConfig, epoch_index: int) -> bool:
+    return (
+        str(config.behavior_policy) in {"mixed", "bootstrap"}
+        and int(epoch_index) < max(0, int(config.oracle_imitation_epochs))
+    )
 
 
 def _teacher_policy_supervision(action: str, *, weight: float) -> PolicySupervision:
@@ -972,6 +1309,8 @@ def _build_checkpoint_snapshot(
     training_state: dict[str, float | int | bool],
     last_holdout_result: dict[str, object] | None = None,
 ) -> dict[str, object]:
+    completed_epochs = int(training_state.get("completed_epochs", len(history)))
+    active_epoch = int(training_state.get("active_epoch", completed_epochs - 1 if completed_epochs > 0 else -1))
     return {
         "config": asdict(config),
         "encoder": encoder.state_dict(),
@@ -981,6 +1320,8 @@ def _build_checkpoint_snapshot(
         "holdout_history": holdout_history,
         "training_state": training_state,
         "last_holdout_result": last_holdout_result or {},
+        "completed_epochs": completed_epochs,
+        "current_epoch": active_epoch,
     }
 
 
@@ -1010,8 +1351,19 @@ def collect_dataset(
     epoch_index: int = 0,
     stage_index: int | None = None,
     history: list[dict[str, object]] | None = None,
+    encoder: StructuredStateEncoder | None = None,
+    world_model: RecurrentWorldModel | None = None,
+    language_model: GroundedLanguageModel | None = None,
+    device: torch.device | None = None,
 ) -> tuple[list[dict[str, object]], dict[str, object]]:
-    explorer = GraphExplorerAgent()
+    _validate_synthetic_training_config(config)
+    collector, collector_agent_name, reset_collection_agent_all = _build_collection_agent(
+        config,
+        encoder=encoder,
+        world_model=world_model,
+        language_model=language_model,
+        device=device,
+    )
     dataset: list[dict[str, object]] = []
     epoch_seed_base = _epoch_seed_base(config, epoch_index)
     seed_cursor = epoch_seed_base
@@ -1051,11 +1403,8 @@ def collect_dataset(
     bootstrap_steps, bootstrap_stride = _bootstrap_schedule(config, epoch_index, history)
     scheduled_teacher_episode_fraction = _teacher_episode_fraction(config, history)
     teacher_takeover_prob = _teacher_takeover_probability(config, history)
-    teacher_episode_fraction = (
-        1.0
-        if config.behavior_policy in {"mixed", "bootstrap"} and epoch_index < max(0, config.oracle_imitation_epochs)
-        else scheduled_teacher_episode_fraction
-    )
+    dense_teacher_supervision = _dense_teacher_supervision_active(config, epoch_index)
+    teacher_episode_fraction = scheduled_teacher_episode_fraction
     guidance_rng = np.random.default_rng(epoch_seed_base + 17_941)
     teacher_episode_count = 0
     teacher_controlled_steps = 0
@@ -1069,36 +1418,36 @@ def collect_dataset(
         variant = variants[(family_variant_offsets[family_mode] + family_occurrence) % len(variants)]
         family_variant_counts[family_mode] = family_occurrence + 1
         size = size_options[(size_offset + epoch_episode) % len(size_options)]
+        episode_seed = seed_cursor
         env = HiddenRuleEnv(
             size=size,
             family_mode=family_mode,
             family_variant=variant,
             max_steps=config.max_steps,
-            seed=seed_cursor,
+            seed=episode_seed,
         )
         seed_cursor += 1
-        observation = env.reset(seed=seed_cursor)
-        explorer.reset_episode()
+        observation = env.reset(seed=episode_seed)
+        if reset_collection_agent_all:
+            collector.reset_all()
+        else:
+            collector.reset_episode()
         done = False
         episode_return = 0.0
         episode_step_count = 0
         episode_success = False
         episode_interaction_count = 0
-        dense_teacher_episode = (
-            config.behavior_policy in {"mixed", "bootstrap"}
-            and epoch_index < max(0, config.oracle_imitation_epochs)
-        )
+        episode_samples: list[dict[str, object]] = []
         sampled_teacher_episode = (
             config.behavior_policy in {"mixed", "bootstrap"}
-            and not dense_teacher_episode
             and bool(guidance_rng.random() < teacher_episode_fraction)
         )
-        teacher_episode = dense_teacher_episode or sampled_teacher_episode or config.behavior_policy == "oracle"
+        teacher_episode = sampled_teacher_episode or config.behavior_policy == "oracle"
         if teacher_episode:
             teacher_episode_count += 1
         while not done:
             state: StructuredState
-            use_bootstrap_oracle = (
+            bootstrap_takeover_candidate = (
                 config.behavior_policy in {"mixed", "bootstrap"}
                 and not teacher_episode
                 and env._step < bootstrap_steps
@@ -1108,37 +1457,54 @@ def collect_dataset(
             teacher_action = ""
             prefetched_state: StructuredState | None = None
             if config.behavior_policy in {"mixed", "bootstrap", "oracle"}:
-                prefetched_state = explorer.observe(observation)
+                prefetched_state = collector.observe(observation)
                 teacher_action = oracle_action(env)
-                explorer.last_state = prefetched_state
-            if teacher_episode or use_bootstrap_oracle:
-                state = prefetched_state if prefetched_state is not None else explorer.observe(observation)
+                collector.last_state = prefetched_state
+            if teacher_episode:
+                state = prefetched_state if prefetched_state is not None else collector.observe(observation)
                 action = teacher_action
-                explorer.last_state = state
-                explorer.last_action = action
+                collector.last_state = state
+                collector.last_action = action
                 teacher_controlled_steps += 1
             else:
-                action = explorer.act(observation)
-                state = explorer.last_state
+                learner_action = collector.act(observation)
+                state = collector.last_state
                 assert state is not None
+                use_bootstrap_oracle = (
+                    bootstrap_takeover_candidate
+                    and teacher_action
+                    and learner_action != teacher_action
+                )
+                if use_bootstrap_oracle:
+                    action = teacher_action
+                    collector.last_state = state
+                    collector.last_action = action
+                    teacher_controlled_steps += 1
+                else:
+                    action = learner_action
             teacher_label_action = ""
             teacher_label_weight = 0.0
-            if (
-                teacher_action
-                and action != teacher_action
-                and config.behavior_policy in {"mixed", "bootstrap"}
-            ):
-                teacher_label_action = teacher_action
-                teacher_label_weight = float(config.teacher_relabel_weight)
-                teacher_labeled_steps += 1
+            if teacher_action and config.behavior_policy in {"mixed", "bootstrap"}:
+                should_attach_teacher_label = (
+                    dense_teacher_supervision
+                    and not teacher_episode
+                    and action != teacher_action
+                ) or (
+                    not dense_teacher_supervision
+                    and action != teacher_action
+                )
+                if should_attach_teacher_label:
+                    teacher_label_action = teacher_action
+                    teacher_label_weight = float(max(config.teacher_relabel_weight, 1.0 if dense_teacher_supervision else 0.0))
+                    teacher_labeled_steps += 1
             result = env.step(action)
-            next_state = explorer.update_after_step(
+            next_state = collector.update_after_step(
                 next_observation=result.observation,
                 reward=result.reward,
                 terminated=result.terminated or result.truncated,
                 info=result.info,
             )
-            dataset.append(
+            episode_samples.append(
                 _make_sample(
                     state,
                     next_state,
@@ -1158,6 +1524,8 @@ def collect_dataset(
                 episode_success = True
             observation = result.observation
             done = result.terminated or result.truncated
+        _apply_episode_hindsight(config, episode_samples)
+        dataset.extend(episode_samples)
         episode_returns.append(float(episode_return))
         episode_steps.append(float(episode_step_count))
         episode_successes.append(1.0 if episode_success else 0.0)
@@ -1213,11 +1581,13 @@ def collect_dataset(
                         "bootstrap_stride": bootstrap_stride,
                         "teacher_guidance_ready_streak": guidance_state["ready_streak"],
                         "teacher_guidance_alpha": guidance_state["alpha"],
+                        "dense_teacher_supervision": dense_teacher_supervision,
                         "teacher_episode_fraction": teacher_episode_fraction,
                         "teacher_takeover_prob": teacher_takeover_prob,
                         "teacher_episode_count": teacher_episode_count,
                         "teacher_step_fraction": (float(teacher_controlled_steps) / float(max(total_steps, 1))),
                         "teacher_relabel_fraction": (float(teacher_labeled_steps) / float(max(total_steps, 1))),
+                        "collector_agent": collector_agent_name,
                     }
                 ),
                 flush=True,
@@ -1242,11 +1612,544 @@ def collect_dataset(
         "bootstrap_ready_streak": float(guidance_state["ready_streak"]),
         "teacher_guidance_ready_streak": float(guidance_state["ready_streak"]),
         "teacher_guidance_alpha": float(guidance_state["alpha"]),
+        "dense_teacher_supervision": bool(dense_teacher_supervision),
         "teacher_episode_fraction": float(teacher_episode_fraction),
         "teacher_takeover_prob": float(teacher_takeover_prob),
         "teacher_episode_count": float(teacher_episode_count),
         "teacher_step_fraction": float(teacher_controlled_steps) / float(max(total_steps, 1)),
         "teacher_relabel_fraction": float(teacher_labeled_steps) / float(max(total_steps, 1)),
+        "collector_agent": collector_agent_name,
+    }
+
+
+def _prepare_replay_training_step(
+    config: SyntheticTrainingConfig,
+    sample: dict[str, object],
+    *,
+    encoder: StructuredStateEncoder,
+    world_model: RecurrentWorldModel,
+    language_model: GroundedLanguageModel,
+    sequence_hidden: torch.Tensor | None,
+    device: torch.device,
+) -> tuple[torch.Tensor, dict[str, float], torch.Tensor, StructuredState, str]:
+    state = sample["state"]
+    next_state = sample["next_state"]
+    action = sample["action"]
+    available_actions = sample["available_actions"]
+    reward = float(sample["reward"])
+    delta = sample["delta"]
+    usefulness = float(sample["usefulness"])
+    teacher_action = str(sample.get("teacher_action", ""))
+    teacher_weight = float(sample.get("teacher_weight", 0.0))
+    replay_weight = float(sample.get("replay_weight", 1.0))
+    policy_target = float(sample["policy_target"])
+    policy_weight = float(sample["policy_weight"])
+    sibling_move_target = float(sample["sibling_move_target"])
+    sibling_move_weight = float(sample["sibling_move_weight"])
+    same_type_target = float(sample["same_type_target"])
+    same_type_weight = float(sample["same_type_weight"])
+    belief_tokens = sample["belief_tokens"]
+    question_tokens = sample["question_tokens"]
+    plan_tokens = sample["plan_tokens"]
+
+    encoded = encoder.encode_state(state, device=device)
+    with torch.no_grad():
+        next_encoded = encoder.encode_state(next_state, device=device)
+    reward_target = torch.tensor([reward], dtype=torch.float32, device=device)
+    return_target = torch.tensor([float(sample.get("discounted_return", reward))], dtype=torch.float32, device=device)
+    delta_target = torch.tensor(delta, dtype=torch.float32, device=device).unsqueeze(0)
+    usefulness_target = torch.tensor([usefulness], dtype=torch.float32, device=device)
+    world_loss, world_metrics = world_model.loss(
+        latent=encoded.latent,
+        actions=[action],
+        state=state,
+        hidden=sequence_hidden,
+        next_latent_target=next_encoded.latent.detach(),
+        reward_target=reward_target,
+        return_target=return_target,
+        delta_target=delta_target,
+        usefulness_target=usefulness_target,
+    )
+    belief_loss = language_model.teacher_forcing_loss(
+        encoded.latent,
+        [belief_tokens or ("goal", "unknown")],
+        mode="belief",
+    )
+    question_loss = language_model.teacher_forcing_loss(
+        encoded.latent,
+        [question_tokens or ("need", "explore")],
+        mode="question",
+    )
+    plan_loss = language_model.teacher_forcing_loss(
+        encoded.latent,
+        [plan_tokens or ("plan", "action", "unknown")],
+        mode="plan",
+    )
+    repeated_latent = encoded.latent.repeat(len(available_actions), 1)
+    repeated_hidden = None
+    if sequence_hidden is not None:
+        repeated_hidden = sequence_hidden.repeat(len(available_actions), 1)
+    all_prediction = world_model.step(
+        repeated_latent,
+        actions=available_actions,
+        state=state,
+        hidden=repeated_hidden,
+    )
+    policy_targets = torch.zeros(len(available_actions), dtype=torch.float32, device=device)
+    policy_weights = torch.ones(len(available_actions), dtype=torch.float32, device=device)
+    schema_context = build_action_schema_context(available_actions, dict(state.action_roles))
+    candidate_schemas = [build_action_schema(candidate, schema_context) for candidate in available_actions]
+
+    def apply_policy_supervision(reference_action: str, supervision: PolicySupervision) -> None:
+        if not reference_action:
+            return
+        if (
+            supervision.weight <= 0.0
+            and supervision.sibling_move_weight <= 0.0
+            and supervision.same_type_weight <= 0.0
+        ):
+            return
+        reference_schema = build_action_schema(reference_action, schema_context)
+        for index, candidate in enumerate(available_actions):
+            candidate_schema = candidate_schemas[index]
+            if candidate == reference_action:
+                policy_targets[index] = max(float(policy_targets[index].item()), supervision.target)
+                policy_weights[index] = max(float(policy_weights[index].item()), supervision.weight)
+                continue
+            if (
+                reference_schema.action_type == "move"
+                and candidate_schema.action_type == "move"
+                and supervision.sibling_move_target > 0.0
+            ):
+                policy_targets[index] = max(
+                    float(policy_targets[index].item()),
+                    supervision.sibling_move_target,
+                )
+                policy_weights[index] = max(
+                    float(policy_weights[index].item()),
+                    supervision.sibling_move_weight,
+                )
+            if (
+                candidate_schema.action_type == reference_schema.action_type
+                and supervision.same_type_target > 0.0
+            ):
+                policy_targets[index] = max(
+                    float(policy_targets[index].item()),
+                    supervision.same_type_target,
+                )
+                policy_weights[index] = max(
+                    float(policy_weights[index].item()),
+                    supervision.same_type_weight,
+                )
+
+    apply_policy_supervision(
+        action,
+        PolicySupervision(
+            target=policy_target,
+            weight=policy_weight,
+            sibling_move_target=sibling_move_target,
+            sibling_move_weight=sibling_move_weight,
+            same_type_target=same_type_target,
+            same_type_weight=same_type_weight,
+        ),
+    )
+    apply_policy_supervision(
+        teacher_action,
+        _teacher_policy_supervision(teacher_action, weight=teacher_weight),
+    )
+    policy_raw = torch.nn.functional.binary_cross_entropy_with_logits(
+        all_prediction.policy,
+        policy_targets,
+        reduction="none",
+    )
+    policy_loss = (policy_raw * policy_weights).mean()
+    positive_mask = policy_targets > 0.5
+    negative_mask = ~positive_mask
+    if positive_mask.any():
+        positive_policy_loss = (policy_raw[positive_mask] * policy_weights[positive_mask]).mean()
+    else:
+        positive_policy_loss = torch.tensor(0.0, device=device)
+    if negative_mask.any():
+        negative_policy_loss = (policy_raw[negative_mask] * policy_weights[negative_mask]).mean()
+    else:
+        negative_policy_loss = torch.tensor(0.0, device=device)
+    gate_target = torch.tensor(config.enhancement_gate_target, dtype=torch.float32, device=device)
+    gate_value = torch.tanh(encoder.enhancement_gate)
+    gate_loss = config.enhancement_gate_weight * torch.square(gate_value - gate_target)
+    sample_scale = 0.75 + (0.25 * replay_weight)
+    weighted_core_loss = sample_scale * (
+        world_loss
+        + 0.25 * belief_loss
+        + 0.25 * question_loss
+        + 0.25 * plan_loss
+        + 0.5 * policy_loss
+    )
+    loss = weighted_core_loss + gate_loss
+    replay_metrics = {
+        "epoch_losses": float(loss.detach().cpu()),
+        "epoch_uncertainty": float(world_metrics["uncertainty"]),
+        "epoch_world_total_losses": float(world_metrics["loss_total"]),
+        "epoch_latent_losses": float(world_metrics["loss_latent"]),
+        "epoch_reward_losses": float(world_metrics["loss_reward"]),
+        "epoch_delta_losses": float(world_metrics["loss_delta"]),
+        "epoch_usefulness_losses": float(world_metrics["loss_usefulness"]),
+        "epoch_belief_losses": float(belief_loss.detach().cpu()),
+        "epoch_question_losses": float(question_loss.detach().cpu()),
+        "epoch_plan_losses": float(plan_loss.detach().cpu()),
+        "epoch_policy_losses": float(policy_loss.detach().cpu()),
+        "epoch_positive_policy_losses": float(positive_policy_loss.detach().cpu()),
+        "epoch_negative_policy_losses": float(negative_policy_loss.detach().cpu()),
+        "epoch_gate_losses": float(gate_loss.detach().cpu()),
+    }
+    return loss, replay_metrics, encoded.latent.detach(), state, action
+
+
+def _advance_sequence_hidden(
+    world_model: RecurrentWorldModel,
+    *,
+    latent: torch.Tensor,
+    action: str,
+    state: StructuredState,
+    sequence_hidden: torch.Tensor | None,
+) -> torch.Tensor:
+    with torch.no_grad():
+        return world_model.step(
+            latent,
+            actions=[action],
+            state=state,
+            hidden=sequence_hidden,
+        ).hidden.detach()
+
+
+def _run_multidevice_replay_phase(
+    config: SyntheticTrainingConfig,
+    *,
+    dataset: list[dict[str, object]],
+    encoder: StructuredStateEncoder,
+    world_model: RecurrentWorldModel,
+    language_model: GroundedLanguageModel,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    secondary_runtime: _SecondaryTrainingRuntime,
+    metric_lists: dict[str, list[float]],
+) -> dict[str, float]:
+    episode_sequences = _dataset_episode_sequences(dataset)
+    primary_parameters = _trainable_parameters(encoder, world_model, language_model)
+    _sync_secondary_training_runtime(secondary_runtime, encoder, world_model, language_model)
+    secondary_replay_samples = 0
+    train_started = perf_counter()
+    for episode_index in range(0, len(episode_sequences), 2):
+        primary_episode = episode_sequences[episode_index]
+        secondary_episode = episode_sequences[episode_index + 1] if episode_index + 1 < len(episode_sequences) else []
+        primary_hidden: torch.Tensor | None = None
+        secondary_hidden: torch.Tensor | None = None
+        max_steps = max(len(primary_episode), len(secondary_episode))
+        for step_index in range(max_steps):
+            optimizer.zero_grad(set_to_none=True)
+            _zero_module_grads(
+                secondary_runtime.encoder,
+                secondary_runtime.world_model,
+                secondary_runtime.language_model,
+            )
+            contributors = 0
+            primary_prepared: tuple[torch.Tensor, dict[str, float], torch.Tensor, StructuredState, str] | None = None
+            secondary_prepared: tuple[torch.Tensor, dict[str, float], torch.Tensor, StructuredState, str] | None = None
+            if step_index < len(primary_episode):
+                primary_prepared = _prepare_replay_training_step(
+                    config,
+                    primary_episode[step_index],
+                    encoder=encoder,
+                    world_model=world_model,
+                    language_model=language_model,
+                    sequence_hidden=primary_hidden,
+                    device=device,
+                )
+                primary_prepared[0].backward()
+                _append_replay_metrics(metric_lists, primary_prepared[1])
+                contributors += 1
+            if step_index < len(secondary_episode):
+                secondary_prepared = _prepare_replay_training_step(
+                    config,
+                    secondary_episode[step_index],
+                    encoder=secondary_runtime.encoder,
+                    world_model=secondary_runtime.world_model,
+                    language_model=secondary_runtime.language_model,
+                    sequence_hidden=secondary_hidden,
+                    device=secondary_runtime.device,
+                )
+                secondary_prepared[0].backward()
+                _append_replay_metrics(metric_lists, secondary_prepared[1])
+                contributors += 1
+                secondary_replay_samples += 1
+            _merge_secondary_gradients(
+                encoder,
+                world_model,
+                language_model,
+                secondary_runtime,
+                contributors=contributors,
+            )
+            torch.nn.utils.clip_grad_norm_(primary_parameters, max_norm=1.0)
+            optimizer.step()
+            _sync_secondary_training_runtime(secondary_runtime, encoder, world_model, language_model)
+            if primary_prepared is not None:
+                primary_hidden = _advance_sequence_hidden(
+                    world_model,
+                    latent=primary_prepared[2],
+                    action=primary_prepared[4],
+                    state=primary_prepared[3],
+                    sequence_hidden=primary_hidden,
+                )
+            if secondary_prepared is not None:
+                secondary_hidden = _advance_sequence_hidden(
+                    secondary_runtime.world_model,
+                    latent=secondary_prepared[2],
+                    action=secondary_prepared[4],
+                    state=secondary_prepared[3],
+                    sequence_hidden=secondary_hidden,
+                )
+    return {
+        "train_seconds": perf_counter() - train_started,
+        "secondary_replay_samples": float(secondary_replay_samples),
+        "secondary_device": str(secondary_runtime.device),
+    }
+
+
+def _prepare_dream_window(
+    config: SyntheticTrainingConfig,
+    *,
+    dataset: list[dict[str, object]],
+    window: list[int],
+    encoder: StructuredStateEncoder,
+    world_model: RecurrentWorldModel,
+    language_model: GroundedLanguageModel,
+    device: torch.device,
+) -> tuple[torch.Tensor | None, dict[str, float]]:
+    anchor_sample = dataset[window[0]]
+    anchor_state = anchor_sample["state"]
+    latent = encoder.encode_state(anchor_state, device=device).latent
+    hidden: torch.Tensor | None = None
+    sequence_terms: list[torch.Tensor] = []
+    sequence_world_terms: list[torch.Tensor] = []
+    sequence_belief_terms: list[torch.Tensor] = []
+    sequence_question_terms: list[torch.Tensor] = []
+    sequence_plan_terms: list[torch.Tensor] = []
+    total_steps = 0
+    for position, index in enumerate(window):
+        sample = dataset[index]
+        state = sample["state"]
+        next_state = sample["next_state"]
+        action = sample["action"]
+        with torch.no_grad():
+            next_encoded = encoder.encode_state(next_state, device=device)
+        reward_target = torch.tensor([float(sample["reward"])], dtype=torch.float32, device=device)
+        return_target = torch.tensor([float(sample.get("discounted_return", sample["reward"]))], dtype=torch.float32, device=device)
+        delta_target = torch.tensor(sample["delta"], dtype=torch.float32, device=device).unsqueeze(0)
+        usefulness_target = torch.tensor([float(sample["usefulness"])], dtype=torch.float32, device=device)
+        world_loss, _metrics = world_model.loss(
+            latent=latent,
+            actions=[action],
+            state=state,
+            hidden=hidden,
+            next_latent_target=next_encoded.latent.detach(),
+            reward_target=reward_target,
+            return_target=return_target,
+            delta_target=delta_target,
+            usefulness_target=usefulness_target,
+        )
+        prediction = world_model.step(
+            latent,
+            actions=[action],
+            state=state,
+            hidden=hidden,
+        )
+        belief_loss = language_model.teacher_forcing_loss(
+            prediction.next_latent_mean,
+            [_grounded_belief_tokens(next_state)],
+            mode="belief",
+        )
+        question_loss = language_model.teacher_forcing_loss(
+            prediction.next_latent_mean,
+            [_grounded_question_tokens(next_state)],
+            mode="question",
+        )
+        if position + 1 < len(window):
+            next_plan_tokens = tuple(dataset[window[position + 1]].get("plan_tokens", ()))
+        else:
+            next_plan_tokens = _grounded_plan_tokens(
+                next_state,
+                str(sample.get("teacher_action") or sample["action"]),
+            )
+        plan_loss = language_model.teacher_forcing_loss(
+            prediction.next_latent_mean,
+            [next_plan_tokens or ("plan", "action", "unknown")],
+            mode="plan",
+        )
+        sequence_world_terms.append(world_loss)
+        sequence_belief_terms.append(belief_loss)
+        sequence_question_terms.append(question_loss)
+        sequence_plan_terms.append(plan_loss)
+        sequence_terms.append(
+            world_loss
+            + (float(config.dream_belief_weight) * belief_loss)
+            + (float(config.dream_question_weight) * question_loss)
+            + (float(config.dream_plan_weight) * plan_loss)
+        )
+        hidden = prediction.hidden
+        latent = prediction.next_latent_mean
+        total_steps += 1
+    if not sequence_terms:
+        return None, {
+            "dream_sequences": 0.0,
+            "dream_steps": 0.0,
+            "dream_loss": 0.0,
+            "dream_world_loss": 0.0,
+            "dream_belief_loss": 0.0,
+            "dream_question_loss": 0.0,
+            "dream_plan_loss": 0.0,
+        }
+    dream_loss = float(config.dream_loss_weight) * torch.stack(sequence_terms).mean()
+    return dream_loss, {
+        "dream_sequences": 1.0,
+        "dream_steps": float(total_steps),
+        "dream_loss": float(dream_loss.detach().cpu()),
+        "dream_world_loss": float(torch.stack(sequence_world_terms).mean().detach().cpu()),
+        "dream_belief_loss": float(torch.stack(sequence_belief_terms).mean().detach().cpu()),
+        "dream_question_loss": float(torch.stack(sequence_question_terms).mean().detach().cpu()),
+        "dream_plan_loss": float(torch.stack(sequence_plan_terms).mean().detach().cpu()),
+    }
+
+
+def _run_multidevice_dream_phase(
+    config: SyntheticTrainingConfig,
+    *,
+    dataset: list[dict[str, object]],
+    epoch_index: int,
+    encoder: StructuredStateEncoder,
+    world_model: RecurrentWorldModel,
+    language_model: GroundedLanguageModel,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    secondary_runtime: _SecondaryTrainingRuntime,
+) -> dict[str, float]:
+    if config.dream_batches_per_epoch <= 0 or config.dream_batch_size <= 0 or config.dream_horizon <= 1:
+        return {
+            "dream_sequences": 0.0,
+            "dream_steps": 0.0,
+            "dream_loss": 0.0,
+            "dream_world_loss": 0.0,
+            "dream_belief_loss": 0.0,
+            "dream_question_loss": 0.0,
+            "dream_plan_loss": 0.0,
+            "dream_seconds": 0.0,
+            "secondary_dream_sequences": 0.0,
+            "secondary_device": str(secondary_runtime.device),
+        }
+    total_sequences = int(config.dream_batches_per_epoch) * int(config.dream_batch_size)
+    windows = _sample_dream_sequences(
+        dataset,
+        horizon=int(config.dream_horizon),
+        total_sequences=total_sequences,
+        seed=_epoch_seed_base(config, epoch_index) + 911_731,
+    )
+    if not windows:
+        return {
+            "dream_sequences": 0.0,
+            "dream_steps": 0.0,
+            "dream_loss": 0.0,
+            "dream_world_loss": 0.0,
+            "dream_belief_loss": 0.0,
+            "dream_question_loss": 0.0,
+            "dream_plan_loss": 0.0,
+            "dream_seconds": 0.0,
+            "secondary_dream_sequences": 0.0,
+            "secondary_device": str(secondary_runtime.device),
+        }
+    encoder.train()
+    world_model.train()
+    language_model.train()
+    secondary_runtime.encoder.train()
+    secondary_runtime.world_model.train()
+    secondary_runtime.language_model.train()
+    _sync_secondary_training_runtime(secondary_runtime, encoder, world_model, language_model)
+    primary_parameters = _trainable_parameters(encoder, world_model, language_model)
+    dream_started = perf_counter()
+    losses: list[float] = []
+    world_losses: list[float] = []
+    belief_losses: list[float] = []
+    question_losses: list[float] = []
+    plan_losses: list[float] = []
+    total_steps = 0
+    secondary_dream_sequences = 0
+    for window_index in range(0, len(windows), 2):
+        primary_window = windows[window_index]
+        secondary_window = windows[window_index + 1] if window_index + 1 < len(windows) else None
+        optimizer.zero_grad(set_to_none=True)
+        _zero_module_grads(
+            secondary_runtime.encoder,
+            secondary_runtime.world_model,
+            secondary_runtime.language_model,
+        )
+        contributors = 0
+        primary_prepared = _prepare_dream_window(
+            config,
+            dataset=dataset,
+            window=primary_window,
+            encoder=encoder,
+            world_model=world_model,
+            language_model=language_model,
+            device=device,
+        )
+        if primary_prepared[0] is not None:
+            primary_prepared[0].backward()
+            contributors += 1
+            losses.append(float(primary_prepared[1]["dream_loss"]))
+            world_losses.append(float(primary_prepared[1]["dream_world_loss"]))
+            belief_losses.append(float(primary_prepared[1]["dream_belief_loss"]))
+            question_losses.append(float(primary_prepared[1]["dream_question_loss"]))
+            plan_losses.append(float(primary_prepared[1]["dream_plan_loss"]))
+            total_steps += int(primary_prepared[1]["dream_steps"])
+        secondary_prepared: tuple[torch.Tensor | None, dict[str, float]] | None = None
+        if secondary_window is not None:
+            secondary_prepared = _prepare_dream_window(
+                config,
+                dataset=dataset,
+                window=secondary_window,
+                encoder=secondary_runtime.encoder,
+                world_model=secondary_runtime.world_model,
+                language_model=secondary_runtime.language_model,
+                device=secondary_runtime.device,
+            )
+            if secondary_prepared[0] is not None:
+                secondary_prepared[0].backward()
+                contributors += 1
+                secondary_dream_sequences += 1
+                losses.append(float(secondary_prepared[1]["dream_loss"]))
+                world_losses.append(float(secondary_prepared[1]["dream_world_loss"]))
+                belief_losses.append(float(secondary_prepared[1]["dream_belief_loss"]))
+                question_losses.append(float(secondary_prepared[1]["dream_question_loss"]))
+                plan_losses.append(float(secondary_prepared[1]["dream_plan_loss"]))
+                total_steps += int(secondary_prepared[1]["dream_steps"])
+        _merge_secondary_gradients(
+            encoder,
+            world_model,
+            language_model,
+            secondary_runtime,
+            contributors=contributors,
+        )
+        torch.nn.utils.clip_grad_norm_(primary_parameters, max_norm=1.0)
+        optimizer.step()
+        _sync_secondary_training_runtime(secondary_runtime, encoder, world_model, language_model)
+    return {
+        "dream_sequences": float(len(losses)),
+        "dream_steps": float(total_steps),
+        "dream_loss": mean(losses) if losses else 0.0,
+        "dream_world_loss": mean(world_losses) if world_losses else 0.0,
+        "dream_belief_loss": mean(belief_losses) if belief_losses else 0.0,
+        "dream_question_loss": mean(question_losses) if question_losses else 0.0,
+        "dream_plan_loss": mean(plan_losses) if plan_losses else 0.0,
+        "dream_seconds": perf_counter() - dream_started,
+        "secondary_dream_sequences": float(secondary_dream_sequences),
+        "secondary_device": str(secondary_runtime.device),
     }
 
 
@@ -1271,6 +2174,8 @@ def _run_dream_phase(
             "dream_question_loss": 0.0,
             "dream_plan_loss": 0.0,
             "dream_seconds": 0.0,
+            "secondary_dream_sequences": 0.0,
+            "secondary_device": "",
         }
     total_sequences = int(config.dream_batches_per_epoch) * int(config.dream_batch_size)
     windows = _sample_dream_sequences(
@@ -1289,6 +2194,8 @@ def _run_dream_phase(
             "dream_question_loss": 0.0,
             "dream_plan_loss": 0.0,
             "dream_seconds": 0.0,
+            "secondary_dream_sequences": 0.0,
+            "secondary_device": "",
         }
     dream_started = perf_counter()
     losses: list[float] = []
@@ -1318,6 +2225,7 @@ def _run_dream_phase(
             with torch.no_grad():
                 next_encoded = encoder.encode_state(next_state, device=device)
             reward_target = torch.tensor([float(sample["reward"])], dtype=torch.float32, device=device)
+            return_target = torch.tensor([float(sample.get("discounted_return", sample["reward"]))], dtype=torch.float32, device=device)
             delta_target = torch.tensor(sample["delta"], dtype=torch.float32, device=device).unsqueeze(0)
             usefulness_target = torch.tensor([float(sample["usefulness"])], dtype=torch.float32, device=device)
             world_loss, _metrics = world_model.loss(
@@ -1327,6 +2235,7 @@ def _run_dream_phase(
                 hidden=hidden,
                 next_latent_target=next_encoded.latent.detach(),
                 reward_target=reward_target,
+                return_target=return_target,
                 delta_target=delta_target,
                 usefulness_target=usefulness_target,
             )
@@ -1396,6 +2305,8 @@ def _run_dream_phase(
         "dream_question_loss": mean(question_losses) if question_losses else 0.0,
         "dream_plan_loss": mean(plan_losses) if plan_losses else 0.0,
         "dream_seconds": perf_counter() - dream_started,
+        "secondary_dream_sequences": 0.0,
+        "secondary_device": "",
     }
 
 
@@ -1413,6 +2324,9 @@ def _build_eval_agent(
     eval_encoder.load_state_dict(encoder.state_dict())
     eval_world_model.load_state_dict(world_model.state_dict())
     eval_language_model.load_state_dict(language_model.state_dict())
+    eval_encoder.eval()
+    eval_world_model.eval()
+    eval_language_model.eval()
     planner = HybridPlanner(
         PlannerConfig(search_depth=2, search_root_width=2, search_branch_width=1, max_world_model_calls=48)
         if device.type == "cpu"
@@ -1499,14 +2413,11 @@ def _run_eval_episode(
 
 def _evaluate_holdout(
     config: SyntheticTrainingConfig,
-    encoder: StructuredStateEncoder,
-    world_model: RecurrentWorldModel,
-    language_model: GroundedLanguageModel,
+    agent,
     *,
     family_modes: tuple[str, ...],
     size_options: tuple[int, ...],
     seed_base: int,
-    device: torch.device,
 ) -> dict[str, object]:
     if not family_modes:
         return {
@@ -1518,7 +2429,6 @@ def _evaluate_holdout(
             "later_episode_success": 0.0,
             "family_modes": (),
         }
-    agent = _build_eval_agent(encoder, world_model, language_model, device=device)
     all_episodes: list[dict[str, object]] = []
     first_episode_success: list[float] = []
     later_episode_success: list[float] = []
@@ -1530,73 +2440,89 @@ def _evaluate_holdout(
     failure_examples: list[dict[str, object]] = []
     seed_cursor = seed_base
     size_cycle = size_options or config.size_options
-    for family_mode in family_modes:
-        for variant_index, variant in enumerate(family_variants_for_mode(family_mode)):
-            agent.reset_all()
-            variant_episodes: list[dict[str, object]] = []
-            for episode_index in range(config.holdout_episodes_per_variant):
-                size = size_cycle[(variant_index + episode_index) % len(size_cycle)]
-                env = HiddenRuleEnv(
-                    size=size,
-                    max_steps=config.max_steps,
-                    family_mode=family_mode,
-                    family_variant=variant,
-                    seed=seed_cursor,
-                )
-                episode = _run_eval_episode(
-                    agent,
-                    env,
-                    seed=seed_cursor,
-                    trace_steps=min(config.holdout_trace_steps, config.max_steps),
-                    trace_top_actions=config.holdout_trace_top_actions,
-                )
-                variant_episodes.append(episode)
-                records_by_family.setdefault(family_mode, []).append(episode)
-                records_by_variant.setdefault(f"{family_mode}/{variant}", []).append(episode)
-                records_by_size.setdefault(str(size), []).append(episode)
-                termination_reasons.append(str(episode["termination_reason"]))
-                for action_family, count in dict(episode["action_family_counts"]).items():
-                    action_family_totals[action_family] = action_family_totals.get(action_family, 0) + int(count)
-                if (
-                    not bool(episode["success"])
-                    and len(failure_examples) < config.holdout_failure_examples
-                ):
-                    failure_examples.append(
-                        {
-                            "family_mode": family_mode,
-                            "family_variant": variant,
-                            "size": size,
-                            "return": float(episode["return"]),
-                            "steps": float(episode["steps"]),
-                            "interaction_steps": float(episode["interaction_steps"]),
-                            "action_family_counts": dict(episode["action_family_counts"]),
-                            "termination_reason": str(episode["termination_reason"]),
-                            "event_counts": dict(episode["event_counts"]),
-                            "max_repeated_action_run": int(episode["max_repeated_action_run"]),
-                            "failure_signatures": _failure_signatures(
-                                family_mode=family_mode,
-                                family_variant=variant,
-                                episode=episode,
-                                step_trace=list(episode["step_trace"]),
-                            ),
-                            "step_trace": list(episode["step_trace"]),
-                        }
+    use_inference_mode = not bool(getattr(agent, "gradient_world_model_adaptation", False))
+
+    def run_family_sweep() -> None:
+        nonlocal seed_cursor
+        for family_mode in family_modes:
+            for variant_index, variant in enumerate(family_variants_for_mode(family_mode)):
+                agent.reset_all()
+                variant_episodes: list[dict[str, object]] = []
+                for episode_index in range(config.holdout_episodes_per_variant):
+                    size = size_cycle[(variant_index + episode_index) % len(size_cycle)]
+                    env = HiddenRuleEnv(
+                        size=size,
+                        max_steps=config.max_steps,
+                        family_mode=family_mode,
+                        family_variant=variant,
+                        seed=seed_cursor,
                     )
-                seed_cursor += 1
-            all_episodes.extend(variant_episodes)
-            first_episode_success.append(float(variant_episodes[0]["success"]))
-            later_episode_success.extend(float(item["success"]) for item in variant_episodes[1:])
+                    episode = _run_eval_episode(
+                        agent,
+                        env,
+                        seed=seed_cursor,
+                        trace_steps=min(config.holdout_trace_steps, config.max_steps),
+                        trace_top_actions=config.holdout_trace_top_actions,
+                    )
+                    variant_episodes.append(episode)
+                    records_by_family.setdefault(family_mode, []).append(episode)
+                    records_by_variant.setdefault(f"{family_mode}/{variant}", []).append(episode)
+                    records_by_size.setdefault(str(size), []).append(episode)
+                    termination_reasons.append(str(episode["termination_reason"]))
+                    for action_family, count in dict(episode["action_family_counts"]).items():
+                        action_family_totals[action_family] = action_family_totals.get(action_family, 0) + int(count)
+                    if (
+                        not bool(episode["success"])
+                        and len(failure_examples) < config.holdout_failure_examples
+                    ):
+                        failure_examples.append(
+                            {
+                                "family_mode": family_mode,
+                                "family_variant": variant,
+                                "size": size,
+                                "return": float(episode["return"]),
+                                "steps": float(episode["steps"]),
+                                "interaction_steps": float(episode["interaction_steps"]),
+                                "action_family_counts": dict(episode["action_family_counts"]),
+                                "termination_reason": str(episode["termination_reason"]),
+                                "event_counts": dict(episode["event_counts"]),
+                                "max_repeated_action_run": int(episode["max_repeated_action_run"]),
+                                "failure_signatures": _failure_signatures(
+                                    family_mode=family_mode,
+                                    family_variant=variant,
+                                    episode=episode,
+                                    step_trace=list(episode["step_trace"]),
+                                ),
+                                "step_trace": list(episode["step_trace"]),
+                            }
+                        )
+                    seed_cursor += 1
+                all_episodes.extend(variant_episodes)
+                first_episode_success.append(float(variant_episodes[0]["success"]))
+                later_episode_success.extend(float(item["success"]) for item in variant_episodes[1:])
+    if use_inference_mode:
+        with torch.inference_mode():
+            run_family_sweep()
+    else:
+        run_family_sweep()
     action_family_rate = {
         key: value / max(len(all_episodes), 1)
         for key, value in sorted(action_family_totals.items())
     }
+    first_success_value = mean(first_episode_success) if first_episode_success else 0.0
+    later_success_value = (
+        mean(later_episode_success)
+        if later_episode_success
+        else first_success_value
+    )
     return {
         "success_rate": mean(float(item["success"]) for item in all_episodes) if all_episodes else 0.0,
         "avg_return": mean(float(item["return"]) for item in all_episodes) if all_episodes else 0.0,
         "avg_steps": mean(float(item["steps"]) for item in all_episodes) if all_episodes else 0.0,
         "avg_interactions": mean(float(item["interaction_steps"]) for item in all_episodes) if all_episodes else 0.0,
-        "first_episode_success": mean(first_episode_success) if first_episode_success else 0.0,
-        "later_episode_success": mean(later_episode_success) if later_episode_success else 0.0,
+        "first_episode_success": first_success_value,
+        "later_episode_success": later_success_value,
+        "later_episode_count": float(len(later_episode_success)),
         "family_modes": family_modes,
         "size_options": size_cycle,
         "family_breakdown": _sorted_metric_breakdown(records_by_family),
@@ -1638,27 +2564,346 @@ def _holdout_passed(
     return True
 
 
+def _should_run_regression_holdout(
+    config: SyntheticTrainingConfig,
+    *,
+    holdout_eval_index: int,
+    cached_regression_metrics: dict[str, object] | None,
+) -> bool:
+    cadence = max(1, int(config.regression_holdout_every_evals))
+    if cached_regression_metrics is None:
+        return True
+    return holdout_eval_index % cadence == 0
+
+
+def _evaluate_loaded_holdout(
+    config: SyntheticTrainingConfig,
+    encoder: StructuredStateEncoder,
+    world_model: RecurrentWorldModel,
+    language_model: GroundedLanguageModel,
+    *,
+    stage_index: int,
+    stage_epoch_count: int,
+    holdout_eval_index: int,
+    device: torch.device,
+    cached_regression_holdout: dict[str, object] | None = None,
+) -> dict[str, object]:
+    stages = _curriculum_stages(config)
+    current_stage = stages[min(max(int(stage_index), 0), len(stages) - 1)]
+    regression_families = _stage_regression_families(stages, int(stage_index))
+    holdout_started = perf_counter()
+    eval_agent = _build_eval_agent(
+        encoder,
+        world_model,
+        language_model,
+        device=device,
+    )
+    frontier_started = perf_counter()
+    frontier_holdout = _evaluate_holdout(
+        config,
+        eval_agent,
+        family_modes=current_stage.frontier_families,
+        size_options=current_stage.holdout_size_options,
+        seed_base=config.seed + 100_000 + (int(stage_index) * 10_000),
+    )
+    frontier_holdout_seconds = perf_counter() - frontier_started
+    regression_reference = "none"
+    regression_holdout_seconds = 0.0
+    regression_holdout_current: dict[str, object] | None = None
+    if regression_families and _should_run_regression_holdout(
+        config,
+        holdout_eval_index=holdout_eval_index,
+        cached_regression_metrics=cached_regression_holdout,
+    ):
+        regression_started = perf_counter()
+        regression_holdout_current = _evaluate_holdout(
+            config,
+            eval_agent,
+            family_modes=regression_families,
+            size_options=current_stage.holdout_size_options,
+            seed_base=config.seed + 200_000 + (int(stage_index) * 10_000),
+        )
+        regression_holdout_seconds = perf_counter() - regression_started
+        regression_reference = "current"
+    elif regression_families and cached_regression_holdout is not None:
+        regression_reference = "cached"
+    regression_holdout = regression_holdout_current or cached_regression_holdout
+    holdout_seconds = perf_counter() - holdout_started
+    return {
+        "epoch": 0,
+        "stage_index": int(stage_index),
+        "stage_name": current_stage.name,
+        "stage_epoch_count": int(stage_epoch_count),
+        "holdout_eval_index": int(holdout_eval_index),
+        "frontier": frontier_holdout,
+        "regression": regression_holdout,
+        "threshold_passed": _holdout_passed(current_stage, frontier_holdout, regression_holdout),
+        "failure_reasons": _holdout_failure_reasons(current_stage, frontier_holdout, regression_holdout),
+        "holdout_seconds": holdout_seconds,
+        "frontier_holdout_seconds": frontier_holdout_seconds,
+        "regression_holdout_seconds": regression_holdout_seconds,
+        "regression_reference": regression_reference,
+    }
+
+
+def _evaluate_checkpoint_holdout(
+    checkpoint_path: str,
+    config: SyntheticTrainingConfig,
+    *,
+    epoch: int,
+    stage_index: int,
+    stage_epoch_count: int,
+    holdout_eval_index: int,
+    device: torch.device,
+    cached_regression_holdout: dict[str, object] | None = None,
+) -> dict[str, object]:
+    encoder, world_model, language_model = load_checkpoint(checkpoint_path, device=device)
+    result = _evaluate_loaded_holdout(
+        config,
+        encoder,
+        world_model,
+        language_model,
+        stage_index=stage_index,
+        stage_epoch_count=stage_epoch_count,
+        holdout_eval_index=holdout_eval_index,
+        device=device,
+        cached_regression_holdout=cached_regression_holdout,
+    )
+    result["epoch"] = int(epoch)
+    result["checkpoint_path"] = str(checkpoint_path)
+    return result
+
+
+def _finalize_holdout_result(
+    config: SyntheticTrainingConfig,
+    result: dict[str, object],
+    *,
+    current_stage_index: int,
+    consecutive_holdout_passes: int,
+) -> tuple[dict[str, object], int]:
+    stale_for_stage = int(result["stage_index"]) != int(current_stage_index)
+    gated_passed = bool(result["threshold_passed"]) and int(result["stage_epoch_count"]) >= max(
+        1,
+        int(config.holdout_eval_every_epochs),
+    )
+    if stale_for_stage:
+        next_consecutive = int(consecutive_holdout_passes)
+    else:
+        next_consecutive = int(consecutive_holdout_passes) + 1 if gated_passed else 0
+    holdout_result = {
+        "epoch": int(result["epoch"]),
+        "stage_index": int(result["stage_index"]),
+        "stage_name": str(result["stage_name"]),
+        "stage_epoch_count": int(result["stage_epoch_count"]),
+        "holdout_eval_index": int(result["holdout_eval_index"]),
+        "frontier": result["frontier"],
+        "regression": result["regression"],
+        "passed": gated_passed,
+        "threshold_passed": bool(result["threshold_passed"]),
+        "failure_reasons": list(result["failure_reasons"]),
+        "consecutive_passes": next_consecutive,
+        "required_consecutive_passes": int(config.promotion_consecutive_evals),
+        "holdout_seconds": float(result["holdout_seconds"]),
+        "frontier_holdout_seconds": float(result["frontier_holdout_seconds"]),
+        "regression_holdout_seconds": float(result["regression_holdout_seconds"]),
+        "regression_reference": str(result["regression_reference"]),
+        "stale_for_stage": stale_for_stage,
+        "checkpoint_path": str(result.get("checkpoint_path", "")),
+    }
+    return holdout_result, next_consecutive
+
+
+def _update_history_entry_from_holdout(history: list[dict[str, object]], holdout_result: dict[str, object]) -> None:
+    epoch = int(holdout_result["epoch"])
+    if epoch < 0 or epoch >= len(history):
+        return
+    entry = history[epoch]
+    entry["holdout_passed"] = bool(holdout_result["passed"])
+    entry["holdout_evaluated"] = True
+    entry["holdout_frontier_success"] = float(holdout_result["frontier"]["success_rate"])
+    entry["holdout_consecutive_passes"] = float(holdout_result["consecutive_passes"])
+    entry["holdout_seconds"] = float(holdout_result["holdout_seconds"])
+    entry["frontier_holdout_seconds"] = float(holdout_result["frontier_holdout_seconds"])
+    entry["regression_holdout_seconds"] = float(holdout_result["regression_holdout_seconds"])
+    entry["regression_reference"] = str(holdout_result["regression_reference"])
+
+
+def _async_holdout_worker_loop(request_queue: object, result_queue: object) -> None:
+    cached_regression_holdout: dict[str, object] | None = None
+    cached_stage_index: int | None = None
+    while True:
+        request = request_queue.get()
+        if request is None:
+            break
+        try:
+            config = SyntheticTrainingConfig(**dict(request["config"]))
+            stage_index = int(request["stage_index"])
+            if cached_stage_index != stage_index:
+                cached_regression_holdout = None
+                cached_stage_index = stage_index
+            device = torch.device(str(request["device"]))
+            if device.type == "cuda" and torch.cuda.is_available():
+                torch.cuda.set_device(device)
+            result = _evaluate_checkpoint_holdout(
+                str(request["checkpoint_path"]),
+                config,
+                epoch=int(request["epoch"]),
+                stage_index=stage_index,
+                stage_epoch_count=int(request["stage_epoch_count"]),
+                holdout_eval_index=int(request["holdout_eval_index"]),
+                device=device,
+                cached_regression_holdout=cached_regression_holdout,
+            )
+            if str(result["regression_reference"]) == "current":
+                cached_regression_holdout = result["regression"]
+            result_queue.put({"ok": True, **result})
+        except Exception as exc:
+            result_queue.put(
+                {
+                    "ok": False,
+                    "epoch": int(request.get("epoch", -1)),
+                    "stage_index": int(request.get("stage_index", -1)),
+                    "holdout_eval_index": int(request.get("holdout_eval_index", -1)),
+                    "error": repr(exc),
+                }
+            )
+
+
+def _start_async_holdout_runtime(config: SyntheticTrainingConfig) -> _AsyncHoldoutRuntime:
+    context = mp.get_context("spawn")
+    request_queue = context.Queue()
+    result_queue = context.Queue()
+    process = context.Process(
+        target=_async_holdout_worker_loop,
+        args=(request_queue, result_queue),
+        daemon=True,
+    )
+    process.start()
+    return _AsyncHoldoutRuntime(
+        request_queue=request_queue,
+        result_queue=result_queue,
+        process=process,
+    )
+
+
+def _submit_async_holdout_request(
+    runtime: _AsyncHoldoutRuntime,
+    config: SyntheticTrainingConfig,
+    *,
+    checkpoint_path: str,
+    epoch: int,
+    stage_index: int,
+    stage_epoch_count: int,
+) -> int:
+    holdout_eval_index = int(runtime.next_request_index)
+    runtime.next_request_index += 1
+    runtime.pending_count += 1
+    runtime.request_queue.put(
+        {
+            "config": asdict(config),
+            "checkpoint_path": str(checkpoint_path),
+            "epoch": int(epoch),
+            "stage_index": int(stage_index),
+            "stage_epoch_count": int(stage_epoch_count),
+            "holdout_eval_index": holdout_eval_index,
+            "device": str(config.async_eval_device),
+        }
+    )
+    return holdout_eval_index
+
+
+def _collect_ready_async_holdout_results(
+    runtime: _AsyncHoldoutRuntime,
+    *,
+    block: bool = False,
+    timeout_seconds: float = 0.1,
+) -> list[dict[str, object]]:
+    ready: list[dict[str, object]] = []
+    if block and runtime.pending_count > 0:
+        try:
+            first = runtime.result_queue.get(timeout=timeout_seconds)
+        except queue.Empty:
+            first = None
+        if first is not None:
+            runtime.pending_count = max(0, runtime.pending_count - 1)
+            runtime.buffered_results[int(first["holdout_eval_index"])] = first
+    while True:
+        try:
+            item = runtime.result_queue.get_nowait()
+        except queue.Empty:
+            break
+        runtime.pending_count = max(0, runtime.pending_count - 1)
+        runtime.buffered_results[int(item["holdout_eval_index"])] = item
+    while runtime.next_result_index in runtime.buffered_results:
+        ready.append(runtime.buffered_results.pop(runtime.next_result_index))
+        runtime.next_result_index += 1
+    if runtime.pending_count > 0 and not runtime.process.is_alive() and not ready:
+        raise RuntimeError("async holdout worker exited before returning all pending results")
+    return ready
+
+
+def _stop_async_holdout_runtime(runtime: _AsyncHoldoutRuntime, *, wait: bool) -> None:
+    runtime.request_queue.put(None)
+    join_timeout = 300.0 if wait else 0.1
+    runtime.process.join(timeout=join_timeout)
+    if runtime.process.is_alive() and not wait:
+        runtime.process.terminate()
+        runtime.process.join(timeout=1.0)
+
+
 def train_synthetic(
     config: SyntheticTrainingConfig,
     device: torch.device | None = None,
 ) -> dict[str, object]:
+    _validate_synthetic_training_config(config)
     seed_everything(config.seed)
-    device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device is not None:
+        device = torch.device(str(device))
+    elif config.train_device:
+        device = torch.device(config.train_device)
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     encoder, world_model, language_model, _planner = build_default_modules(device=device)
     stages = _curriculum_stages(config)
-    if config.init_checkpoint_path and Path(config.init_checkpoint_path).exists():
+    resume_state: dict[str, object] | None = None
+    startup_mode = "scratch"
+    startup_checkpoint_path = ""
+    if config.resume_checkpoint_path and Path(config.resume_checkpoint_path).exists():
+        resume_state = _load_resume_state(
+            config.resume_checkpoint_path,
+            encoder=encoder,
+            world_model=world_model,
+            language_model=language_model,
+            device=device,
+        )
+        startup_mode = "resume"
+        startup_checkpoint_path = str(config.resume_checkpoint_path)
+    elif config.init_checkpoint_path and Path(config.init_checkpoint_path).exists():
         checkpoint = torch.load(config.init_checkpoint_path, map_location=device)
+        if _checkpoint_contains_resume_metadata(checkpoint) and not bool(
+            config.allow_weights_only_init_from_training_checkpoint
+        ):
+            raise ValueError(
+                "init_checkpoint_path points to a checkpoint with saved training state; "
+                "use resume_checkpoint_path to continue curriculum/state or set "
+                "allow_weights_only_init_from_training_checkpoint=True for an explicit weights-only load"
+            )
         _load_compatible_state_dict(encoder, checkpoint["encoder"], module_name="encoder")
         _load_compatible_state_dict(world_model, checkpoint["world_model"], module_name="world_model")
         _load_compatible_state_dict(language_model, checkpoint["language_model"], module_name="language_model")
+        startup_mode = "weights_only_init"
+        startup_checkpoint_path = str(config.init_checkpoint_path)
     optimizer = torch.optim.Adam(
         list(encoder.parameters()) + list(world_model.parameters()) + list(language_model.parameters()),
         lr=config.learning_rate,
     )
-    history: list[dict[str, float | int | bool]] = []
+    history: list[dict[str, float | int | bool]] = list(
+        resume_state["history"] if resume_state is not None else []
+    )
     checkpoint_path = Path(config.checkpoint_path)
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-    current_epoch = -1
+    current_epoch = int(resume_state["current_epoch"]) if resume_state is not None else -1
+    start_epoch = int(resume_state["start_epoch"]) if resume_state is not None else 0
     current_collection_metrics: dict[str, object] = {}
     epoch_losses: list[float] = []
     epoch_uncertainty: list[float] = []
@@ -1675,20 +2920,163 @@ def train_synthetic(
     epoch_negative_policy_losses: list[float] = []
     epoch_gate_losses: list[float] = []
     dream_metrics: dict[str, float] = {}
-    if config.curriculum in {"staged", "gated"}:
+    secondary_train_device = ""
+    secondary_replay_samples = 0.0
+    if resume_state is not None:
+        current_stage_index = int(resume_state["stage_index"])
+    elif config.curriculum in {"staged", "gated"}:
         current_stage_index = 0
     elif config.curriculum == "fixed_staged":
         current_stage_index = _fixed_stage_index_for_epoch(config, 0)
     else:
         current_stage_index = 0
-    stage_epoch_count = 0
-    consecutive_holdout_passes = 0
-    holdout_history: list[dict[str, object]] = []
-    last_holdout_result: dict[str, object] | None = None
+    stage_epoch_count = int(resume_state["stage_epoch_count"]) if resume_state is not None else 0
+    consecutive_holdout_passes = int(resume_state["consecutive_holdout_passes"]) if resume_state is not None else 0
+    holdout_history: list[dict[str, object]] = list(
+        resume_state["holdout_history"] if resume_state is not None else []
+    )
+    last_holdout_result: dict[str, object] | None = (
+        dict(resume_state["last_holdout_result"]) if resume_state is not None and resume_state["last_holdout_result"] else None
+    )
+    cached_regression_holdout: dict[str, object] | None = (
+        dict(resume_state["cached_regression_holdout"]) if resume_state is not None and resume_state["cached_regression_holdout"] else None
+    )
+    async_holdout_runtime: _AsyncHoldoutRuntime | None = None
+    secondary_training_runtime: _SecondaryTrainingRuntime | None = None
+    if config.async_eval_device:
+        async_eval_device = torch.device(config.async_eval_device)
+        if async_eval_device == device:
+            raise ValueError("async_eval_device must differ from the training device")
+        if device.type == "cuda" and async_eval_device.type == "cuda" and torch.cuda.is_available():
+            secondary_training_runtime = _build_secondary_training_runtime(
+                encoder,
+                world_model,
+                language_model,
+                device=async_eval_device,
+            )
+            print(
+                json.dumps(
+                    {
+                        "type": "secondary_training_enabled",
+                        "primary_device": str(device),
+                        "secondary_device": str(async_eval_device),
+                        "async_holdout_enabled": False,
+                    }
+                ),
+                flush=True,
+            )
+        else:
+            async_holdout_runtime = _start_async_holdout_runtime(config)
+
+    current_stage = stages[min(max(current_stage_index, 0), len(stages) - 1)] if stages else None
+    print(
+        json.dumps(
+            {
+                "type": "training_start",
+                "mode": startup_mode,
+                "checkpoint_path": startup_checkpoint_path,
+                "start_epoch": start_epoch,
+                "stage_index": current_stage_index,
+                "stage_name": current_stage.name if current_stage is not None else "",
+                "stage_epoch_count": stage_epoch_count,
+                "frontier_families": current_stage.frontier_families if current_stage is not None else (),
+                "train_size_options": current_stage.train_size_options if current_stage is not None else config.size_options,
+                "holdout_size_options": current_stage.holdout_size_options if current_stage is not None else config.size_options,
+                "device": str(device),
+                "secondary_device": secondary_train_device or str(config.async_eval_device or ""),
+            }
+        ),
+        flush=True,
+    )
+
+    def consume_async_holdout_results(*, block: bool, report_epoch: int) -> None:
+        nonlocal current_stage_index
+        nonlocal stage_epoch_count
+        nonlocal consecutive_holdout_passes
+        nonlocal last_holdout_result
+        if async_holdout_runtime is None:
+            return
+        timeout_seconds = 3600.0 if block else 0.0
+        ready_results = _collect_ready_async_holdout_results(
+            async_holdout_runtime,
+            block=block,
+            timeout_seconds=timeout_seconds,
+        )
+        for raw_result in ready_results:
+            if not bool(raw_result.get("ok", False)):
+                raise RuntimeError(
+                    "async holdout worker failed for "
+                    f"epoch={raw_result.get('epoch')} index={raw_result.get('holdout_eval_index')}: "
+                    f"{raw_result.get('error')}"
+                )
+            holdout_result, consecutive_holdout_passes = _finalize_holdout_result(
+                config,
+                raw_result,
+                current_stage_index=current_stage_index,
+                consecutive_holdout_passes=consecutive_holdout_passes,
+            )
+            holdout_history.append(holdout_result)
+            last_holdout_result = holdout_result
+            _update_history_entry_from_holdout(history, holdout_result)
+            print(
+                json.dumps(
+                    {
+                        "type": "holdout_eval",
+                        "async": True,
+                        "reported_epoch": report_epoch,
+                        "epoch": holdout_result["epoch"],
+                        "stage_index": holdout_result["stage_index"],
+                        "stage_name": holdout_result["stage_name"],
+                        "stage_epoch_count": holdout_result["stage_epoch_count"],
+                        "holdout_eval_index": holdout_result["holdout_eval_index"],
+                        "frontier": holdout_result["frontier"],
+                        "regression": holdout_result["regression"],
+                        "passed": holdout_result["passed"],
+                        "threshold_passed": holdout_result["threshold_passed"],
+                        "failure_reasons": holdout_result["failure_reasons"],
+                        "consecutive_passes": holdout_result["consecutive_passes"],
+                        "required_consecutive_passes": holdout_result["required_consecutive_passes"],
+                        "holdout_seconds": holdout_result["holdout_seconds"],
+                        "frontier_holdout_seconds": holdout_result["frontier_holdout_seconds"],
+                        "regression_holdout_seconds": holdout_result["regression_holdout_seconds"],
+                        "regression_reference": holdout_result["regression_reference"],
+                        "stale_for_stage": holdout_result["stale_for_stage"],
+                        "checkpoint_path": holdout_result["checkpoint_path"],
+                    }
+                ),
+                flush=True,
+            )
+            if (
+                not bool(holdout_result["stale_for_stage"])
+                and bool(holdout_result["passed"])
+                and consecutive_holdout_passes >= config.promotion_consecutive_evals
+                and current_stage_index < len(stages) - 1
+            ):
+                previous_stage_name = stages[current_stage_index].name
+                current_stage_index += 1
+                stage_epoch_count = 0
+                consecutive_holdout_passes = 0
+                print(
+                    json.dumps(
+                        {
+                            "type": "stage_advance",
+                            "async": True,
+                            "reported_epoch": report_epoch,
+                            "epoch": holdout_result["epoch"],
+                            "from_stage_index": current_stage_index - 1,
+                            "from_stage_name": previous_stage_name,
+                            "to_stage_index": current_stage_index,
+                            "to_stage_name": stages[current_stage_index].name,
+                            "reason": "async_heldout_thresholds_cleared",
+                        }
+                    ),
+                    flush=True,
+                )
     try:
-        for epoch in range(config.epochs):
+        for epoch in range(start_epoch, start_epoch + config.epochs):
             current_epoch = epoch
             epoch_started = perf_counter()
+            consume_async_holdout_results(block=False, report_epoch=epoch)
             if config.curriculum == "fixed_staged":
                 current_stage_index = _fixed_stage_index_for_epoch(config, epoch)
             dataset, current_collection_metrics = collect_dataset(
@@ -1696,219 +3084,117 @@ def train_synthetic(
                 epoch_index=epoch,
                 stage_index=current_stage_index if config.curriculum in {"staged", "gated"} else None,
                 history=history,
+                encoder=encoder,
+                world_model=world_model,
+                language_model=language_model,
+                device=device,
             )
-            epoch_losses = []
-            epoch_uncertainty = []
-            epoch_world_total_losses = []
-            epoch_latent_losses = []
-            epoch_reward_losses = []
-            epoch_delta_losses = []
-            epoch_usefulness_losses = []
-            epoch_belief_losses = []
-            epoch_question_losses = []
-            epoch_plan_losses = []
-            epoch_policy_losses = []
-            epoch_positive_policy_losses = []
-            epoch_negative_policy_losses = []
-            epoch_gate_losses = []
+            metric_lists: dict[str, list[float]] = {
+                "epoch_losses": [],
+                "epoch_uncertainty": [],
+                "epoch_world_total_losses": [],
+                "epoch_latent_losses": [],
+                "epoch_reward_losses": [],
+                "epoch_delta_losses": [],
+                "epoch_usefulness_losses": [],
+                "epoch_belief_losses": [],
+                "epoch_question_losses": [],
+                "epoch_plan_losses": [],
+                "epoch_policy_losses": [],
+                "epoch_positive_policy_losses": [],
+                "epoch_negative_policy_losses": [],
+                "epoch_gate_losses": [],
+            }
+            epoch_losses = metric_lists["epoch_losses"]
+            epoch_uncertainty = metric_lists["epoch_uncertainty"]
+            epoch_world_total_losses = metric_lists["epoch_world_total_losses"]
+            epoch_latent_losses = metric_lists["epoch_latent_losses"]
+            epoch_reward_losses = metric_lists["epoch_reward_losses"]
+            epoch_delta_losses = metric_lists["epoch_delta_losses"]
+            epoch_usefulness_losses = metric_lists["epoch_usefulness_losses"]
+            epoch_belief_losses = metric_lists["epoch_belief_losses"]
+            epoch_question_losses = metric_lists["epoch_question_losses"]
+            epoch_plan_losses = metric_lists["epoch_plan_losses"]
+            epoch_policy_losses = metric_lists["epoch_policy_losses"]
+            epoch_positive_policy_losses = metric_lists["epoch_positive_policy_losses"]
+            epoch_negative_policy_losses = metric_lists["epoch_negative_policy_losses"]
+            epoch_gate_losses = metric_lists["epoch_gate_losses"]
             dream_metrics = {}
             encoder.train()
             world_model.train()
             language_model.train()
-            sequence_episode_id: str | None = None
-            sequence_hidden: torch.Tensor | None = None
-            train_started = perf_counter()
-            for sample in dataset:
-                state = sample["state"]
-                next_state = sample["next_state"]
-                action = sample["action"]
-                available_actions = sample["available_actions"]
-                reward = sample["reward"]
-                delta = sample["delta"]
-                usefulness = sample["usefulness"]
-                teacher_action = str(sample.get("teacher_action", ""))
-                teacher_weight = float(sample.get("teacher_weight", 0.0))
-                policy_target = float(sample["policy_target"])
-                policy_weight = float(sample["policy_weight"])
-                sibling_move_target = float(sample["sibling_move_target"])
-                sibling_move_weight = float(sample["sibling_move_weight"])
-                same_type_target = float(sample["same_type_target"])
-                same_type_weight = float(sample["same_type_weight"])
-                belief_tokens = sample["belief_tokens"]
-                question_tokens = sample["question_tokens"]
-                plan_tokens = sample["plan_tokens"]
-                if sequence_episode_id != state.episode_id or state.step_index == 0:
-                    sequence_episode_id = state.episode_id
-                    sequence_hidden = None
-                encoded = encoder.encode_state(state, device=device)
-                with torch.no_grad():
-                    next_encoded = encoder.encode_state(next_state, device=device)
-                reward_target = torch.tensor([reward], dtype=torch.float32, device=device)
-                delta_target = torch.tensor(delta, dtype=torch.float32, device=device).unsqueeze(0)
-                usefulness_target = torch.tensor([usefulness], dtype=torch.float32, device=device)
-                world_loss, metrics = world_model.loss(
-                    latent=encoded.latent,
-                    actions=[action],
-                    state=state,
-                    hidden=sequence_hidden,
-                    next_latent_target=next_encoded.latent.detach(),
-                    reward_target=reward_target,
-                    delta_target=delta_target,
-                    usefulness_target=usefulness_target,
+            secondary_replay_samples = 0.0
+            secondary_train_device = ""
+            if secondary_training_runtime is not None:
+                replay_metrics = _run_multidevice_replay_phase(
+                    config,
+                    dataset=dataset,
+                    encoder=encoder,
+                    world_model=world_model,
+                    language_model=language_model,
+                    optimizer=optimizer,
+                    device=device,
+                    secondary_runtime=secondary_training_runtime,
+                    metric_lists=metric_lists,
                 )
-                belief_loss = language_model.teacher_forcing_loss(
-                    encoded.latent,
-                    [belief_tokens or ("goal", "unknown")],
-                    mode="belief",
+                train_seconds = float(replay_metrics["train_seconds"])
+                secondary_replay_samples = float(replay_metrics["secondary_replay_samples"])
+                secondary_train_device = str(replay_metrics["secondary_device"])
+                dream_metrics = _run_multidevice_dream_phase(
+                    config,
+                    dataset=dataset,
+                    epoch_index=epoch,
+                    encoder=encoder,
+                    world_model=world_model,
+                    language_model=language_model,
+                    optimizer=optimizer,
+                    device=device,
+                    secondary_runtime=secondary_training_runtime,
                 )
-                question_loss = language_model.teacher_forcing_loss(
-                    encoded.latent,
-                    [question_tokens or ("need", "explore")],
-                    mode="question",
+            else:
+                sequence_episode_id: str | None = None
+                sequence_hidden: torch.Tensor | None = None
+                train_started = perf_counter()
+                for sample in dataset:
+                    state = sample["state"]
+                    if sequence_episode_id != state.episode_id or state.step_index == 0:
+                        sequence_episode_id = state.episode_id
+                        sequence_hidden = None
+                    prepared = _prepare_replay_training_step(
+                        config,
+                        sample,
+                        encoder=encoder,
+                        world_model=world_model,
+                        language_model=language_model,
+                        sequence_hidden=sequence_hidden,
+                        device=device,
+                    )
+                    optimizer.zero_grad(set_to_none=True)
+                    prepared[0].backward()
+                    torch.nn.utils.clip_grad_norm_(
+                        _trainable_parameters(encoder, world_model, language_model),
+                        max_norm=1.0,
+                    )
+                    optimizer.step()
+                    sequence_hidden = _advance_sequence_hidden(
+                        world_model,
+                        latent=prepared[2],
+                        action=prepared[4],
+                        state=prepared[3],
+                        sequence_hidden=sequence_hidden,
+                    )
+                    _append_replay_metrics(metric_lists, prepared[1])
+                train_seconds = perf_counter() - train_started
+                dream_metrics = _run_dream_phase(
+                    config,
+                    dataset=dataset,
+                    epoch_index=epoch,
+                    encoder=encoder,
+                    world_model=world_model,
+                    language_model=language_model,
+                    optimizer=optimizer,
+                    device=device,
                 )
-                plan_loss = language_model.teacher_forcing_loss(
-                    encoded.latent,
-                    [plan_tokens or ("plan", "action", "unknown")],
-                    mode="plan",
-                )
-                repeated_latent = encoded.latent.repeat(len(available_actions), 1)
-                repeated_hidden = None
-                if sequence_hidden is not None:
-                    repeated_hidden = sequence_hidden.repeat(len(available_actions), 1)
-                all_prediction = world_model.step(
-                    repeated_latent,
-                    actions=available_actions,
-                    state=state,
-                    hidden=repeated_hidden,
-                )
-                policy_targets = torch.zeros(len(available_actions), dtype=torch.float32, device=device)
-                policy_weights = torch.ones(len(available_actions), dtype=torch.float32, device=device)
-                schema_context = build_action_schema_context(available_actions, dict(state.action_roles))
-                candidate_schemas = [build_action_schema(candidate, schema_context) for candidate in available_actions]
-
-                def apply_policy_supervision(reference_action: str, supervision: PolicySupervision) -> None:
-                    if not reference_action:
-                        return
-                    if (
-                        supervision.weight <= 0.0
-                        and supervision.sibling_move_weight <= 0.0
-                        and supervision.same_type_weight <= 0.0
-                    ):
-                        return
-                    reference_schema = build_action_schema(reference_action, schema_context)
-                    for index, candidate in enumerate(available_actions):
-                        candidate_schema = candidate_schemas[index]
-                        if candidate == reference_action:
-                            policy_targets[index] = max(float(policy_targets[index].item()), supervision.target)
-                            policy_weights[index] = max(float(policy_weights[index].item()), supervision.weight)
-                            continue
-                        if (
-                            reference_schema.action_type == "move"
-                            and candidate_schema.action_type == "move"
-                            and supervision.sibling_move_target > 0.0
-                        ):
-                            policy_targets[index] = max(
-                                float(policy_targets[index].item()),
-                                supervision.sibling_move_target,
-                            )
-                            policy_weights[index] = max(
-                                float(policy_weights[index].item()),
-                                supervision.sibling_move_weight,
-                            )
-                        if (
-                            candidate_schema.action_type == reference_schema.action_type
-                            and supervision.same_type_target > 0.0
-                        ):
-                            policy_targets[index] = max(
-                                float(policy_targets[index].item()),
-                                supervision.same_type_target,
-                            )
-                            policy_weights[index] = max(
-                                float(policy_weights[index].item()),
-                                supervision.same_type_weight,
-                            )
-
-                apply_policy_supervision(
-                    action,
-                    PolicySupervision(
-                        target=policy_target,
-                        weight=policy_weight,
-                        sibling_move_target=sibling_move_target,
-                        sibling_move_weight=sibling_move_weight,
-                        same_type_target=same_type_target,
-                        same_type_weight=same_type_weight,
-                    ),
-                )
-                apply_policy_supervision(
-                    teacher_action,
-                    _teacher_policy_supervision(teacher_action, weight=teacher_weight),
-                )
-                policy_raw = torch.nn.functional.binary_cross_entropy_with_logits(
-                    all_prediction.policy,
-                    policy_targets,
-                    reduction="none",
-                )
-                policy_loss = (policy_raw * policy_weights).mean()
-                positive_mask = policy_targets > 0.5
-                negative_mask = ~positive_mask
-                if positive_mask.any():
-                    positive_policy_loss = (policy_raw[positive_mask] * policy_weights[positive_mask]).mean()
-                else:
-                    positive_policy_loss = torch.tensor(0.0, device=device)
-                if negative_mask.any():
-                    negative_policy_loss = (policy_raw[negative_mask] * policy_weights[negative_mask]).mean()
-                else:
-                    negative_policy_loss = torch.tensor(0.0, device=device)
-                gate_target = torch.tensor(config.enhancement_gate_target, dtype=torch.float32, device=device)
-                gate_value = torch.tanh(encoder.enhancement_gate)
-                gate_loss = config.enhancement_gate_weight * torch.square(gate_value - gate_target)
-                loss = (
-                    world_loss
-                    + 0.25 * belief_loss
-                    + 0.25 * question_loss
-                    + 0.25 * plan_loss
-                    + 0.5 * policy_loss
-                    + gate_loss
-                )
-                optimizer.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(
-                    list(encoder.parameters()) + list(world_model.parameters()) + list(language_model.parameters()),
-                    max_norm=1.0,
-                )
-                optimizer.step()
-                with torch.no_grad():
-                    sequence_hidden = world_model.step(
-                        encoded.latent.detach(),
-                        actions=[action],
-                        state=state,
-                        hidden=sequence_hidden,
-                    ).hidden.detach()
-                epoch_losses.append(float(loss.detach().cpu()))
-                epoch_uncertainty.append(metrics["uncertainty"])
-                epoch_world_total_losses.append(metrics["loss_total"])
-                epoch_latent_losses.append(metrics["loss_latent"])
-                epoch_reward_losses.append(metrics["loss_reward"])
-                epoch_delta_losses.append(metrics["loss_delta"])
-                epoch_usefulness_losses.append(metrics["loss_usefulness"])
-                epoch_belief_losses.append(float(belief_loss.detach().cpu()))
-                epoch_question_losses.append(float(question_loss.detach().cpu()))
-                epoch_plan_losses.append(float(plan_loss.detach().cpu()))
-                epoch_policy_losses.append(float(policy_loss.detach().cpu()))
-                epoch_positive_policy_losses.append(float(positive_policy_loss.detach().cpu()))
-                epoch_negative_policy_losses.append(float(negative_policy_loss.detach().cpu()))
-                epoch_gate_losses.append(float(gate_loss.detach().cpu()))
-            train_seconds = perf_counter() - train_started
-            dream_metrics = _run_dream_phase(
-                config,
-                dataset=dataset,
-                epoch_index=epoch,
-                encoder=encoder,
-                world_model=world_model,
-                language_model=language_model,
-                optimizer=optimizer,
-                device=device,
-            )
             stage_epoch_count += 1
             current_stage = stages[min(max(current_stage_index, 0), len(stages) - 1)]
             epoch_stage_index = current_stage_index
@@ -1916,6 +3202,10 @@ def train_synthetic(
             epoch_stage_epoch_count = stage_epoch_count
             regression_families = _stage_regression_families(stages, current_stage_index)
             holdout_result: dict[str, object] | None = None
+            holdout_seconds = 0.0
+            frontier_holdout_seconds = 0.0
+            regression_holdout_seconds = 0.0
+            enqueue_async_holdout = False
             should_run_holdout = (
                 config.curriculum in {"staged", "gated"}
                 and config.holdout_eval_every_epochs > 0
@@ -1926,90 +3216,82 @@ def train_synthetic(
                 )
             )
             if should_run_holdout:
-                frontier_holdout = _evaluate_holdout(
-                    config,
-                    encoder,
-                    world_model,
-                    language_model,
-                    family_modes=current_stage.frontier_families,
-                    size_options=current_stage.holdout_size_options,
-                    seed_base=config.seed + 100_000 + (current_stage_index * 10_000),
-                    device=device,
-                )
-                regression_holdout = (
-                    _evaluate_holdout(
+                if async_holdout_runtime is None:
+                    sync_holdout_result = _evaluate_loaded_holdout(
                         config,
                         encoder,
                         world_model,
                         language_model,
-                        family_modes=regression_families,
-                        size_options=current_stage.holdout_size_options,
-                        seed_base=config.seed + 200_000 + (current_stage_index * 10_000),
-                        device=device,
+                        stage_index=current_stage_index,
+                        stage_epoch_count=stage_epoch_count,
+                        holdout_eval_index=len(holdout_history) + 1,
+                        device=secondary_training_runtime.device if secondary_training_runtime is not None else device,
+                        cached_regression_holdout=cached_regression_holdout,
                     )
-                    if regression_families
-                    else None
-                )
-                failure_reasons = _holdout_failure_reasons(current_stage, frontier_holdout, regression_holdout)
-                passed_holdout = (
-                    stage_epoch_count >= max(1, config.holdout_eval_every_epochs)
-                    and _holdout_passed(current_stage, frontier_holdout, regression_holdout)
-                )
-                consecutive_holdout_passes = consecutive_holdout_passes + 1 if passed_holdout else 0
-                holdout_result = {
-                    "epoch": epoch,
-                    "stage_index": current_stage_index,
-                    "stage_name": current_stage.name,
-                    "frontier": frontier_holdout,
-                    "regression": regression_holdout,
-                    "passed": passed_holdout,
-                    "failure_reasons": failure_reasons,
-                    "consecutive_passes": consecutive_holdout_passes,
-                    "required_consecutive_passes": config.promotion_consecutive_evals,
-                }
-                holdout_history.append(holdout_result)
-                last_holdout_result = holdout_result
-                print(
-                    json.dumps(
-                        {
-                            "type": "holdout_eval",
-                            "epoch": epoch,
-                            "stage_index": current_stage_index,
-                            "stage_name": current_stage.name,
-                            "stage_epoch_count": stage_epoch_count,
-                            "frontier": frontier_holdout,
-                            "regression": regression_holdout,
-                            "passed": passed_holdout,
-                            "failure_reasons": failure_reasons,
-                            "consecutive_passes": consecutive_holdout_passes,
-                            "required_consecutive_passes": config.promotion_consecutive_evals,
-                        }
-                    ),
-                    flush=True,
-                )
-                if (
-                    passed_holdout
-                    and consecutive_holdout_passes >= config.promotion_consecutive_evals
-                    and current_stage_index < len(stages) - 1
-                ):
-                    previous_stage_name = current_stage.name
-                    current_stage_index += 1
-                    stage_epoch_count = 0
-                    consecutive_holdout_passes = 0
+                    if str(sync_holdout_result["regression_reference"]) == "current":
+                        cached_regression_holdout = sync_holdout_result["regression"]
+                    sync_holdout_result["epoch"] = epoch
+                    holdout_result, consecutive_holdout_passes = _finalize_holdout_result(
+                        config,
+                        sync_holdout_result,
+                        current_stage_index=current_stage_index,
+                        consecutive_holdout_passes=consecutive_holdout_passes,
+                    )
+                    holdout_history.append(holdout_result)
+                    last_holdout_result = holdout_result
                     print(
                         json.dumps(
                             {
-                                "type": "stage_advance",
+                                "type": "holdout_eval",
+                                "async": False,
                                 "epoch": epoch,
-                                "from_stage_index": current_stage_index - 1,
-                                "from_stage_name": previous_stage_name,
-                                "to_stage_index": current_stage_index,
-                                "to_stage_name": stages[current_stage_index].name,
-                                "reason": "heldout_thresholds_cleared",
+                                "stage_index": holdout_result["stage_index"],
+                                "stage_name": holdout_result["stage_name"],
+                                "stage_epoch_count": holdout_result["stage_epoch_count"],
+                                "holdout_eval_index": holdout_result["holdout_eval_index"],
+                                "frontier": holdout_result["frontier"],
+                                "regression": holdout_result["regression"],
+                                "passed": holdout_result["passed"],
+                                "threshold_passed": holdout_result["threshold_passed"],
+                                "failure_reasons": holdout_result["failure_reasons"],
+                                "consecutive_passes": holdout_result["consecutive_passes"],
+                                "required_consecutive_passes": holdout_result["required_consecutive_passes"],
+                                "holdout_seconds": holdout_result["holdout_seconds"],
+                                "frontier_holdout_seconds": holdout_result["frontier_holdout_seconds"],
+                                "regression_holdout_seconds": holdout_result["regression_holdout_seconds"],
+                                "regression_reference": holdout_result["regression_reference"],
+                                "stale_for_stage": holdout_result["stale_for_stage"],
                             }
                         ),
                         flush=True,
                     )
+                    if (
+                        not bool(holdout_result["stale_for_stage"])
+                        and bool(holdout_result["passed"])
+                        and consecutive_holdout_passes >= config.promotion_consecutive_evals
+                        and current_stage_index < len(stages) - 1
+                    ):
+                        previous_stage_name = current_stage.name
+                        current_stage_index += 1
+                        stage_epoch_count = 0
+                        consecutive_holdout_passes = 0
+                        cached_regression_holdout = None
+                        print(
+                            json.dumps(
+                                {
+                                    "type": "stage_advance",
+                                    "epoch": epoch,
+                                    "from_stage_index": current_stage_index - 1,
+                                    "from_stage_name": previous_stage_name,
+                                    "to_stage_index": current_stage_index,
+                                    "to_stage_name": stages[current_stage_index].name,
+                                    "reason": "heldout_thresholds_cleared",
+                                }
+                            ),
+                            flush=True,
+                        )
+                else:
+                    enqueue_async_holdout = True
             history.append(
                 {
                     "epoch": float(epoch),
@@ -2023,6 +3305,7 @@ def train_synthetic(
                     "stage_name": current_collection_metrics.get("stage_name", epoch_stage_name),
                     "stage_epoch_count": float(epoch_stage_epoch_count),
                     "frontier_families": tuple(current_collection_metrics.get("frontier_families", ())),
+                    "collector_agent": str(current_collection_metrics.get("collector_agent", "graph")),
                     "family_counts": current_collection_metrics.get("family_counts", {}),
                     "family_breakdown": current_collection_metrics.get("family_breakdown", {}),
                     "variant_breakdown": current_collection_metrics.get("variant_breakdown", {}),
@@ -2030,6 +3313,8 @@ def train_synthetic(
                     "epoch_seed_base": current_collection_metrics.get("epoch_seed_base", 0.0),
                     "collect_seconds": current_collection_metrics.get("collect_seconds", 0.0),
                     "train_seconds": train_seconds,
+                    "secondary_train_device": secondary_train_device,
+                    "secondary_replay_samples": secondary_replay_samples,
                     "epoch_seconds": perf_counter() - epoch_started,
                     "world_loss": mean(epoch_world_total_losses) if epoch_world_total_losses else 0.0,
                     "latent_loss": mean(epoch_latent_losses) if epoch_latent_losses else 0.0,
@@ -2053,12 +3338,25 @@ def train_synthetic(
                     "holdout_consecutive_passes": float(holdout_result["consecutive_passes"])
                     if holdout_result is not None
                     else float(consecutive_holdout_passes),
+                    "holdout_seconds": float(holdout_result["holdout_seconds"])
+                    if holdout_result is not None
+                    else 0.0,
+                    "frontier_holdout_seconds": float(holdout_result["frontier_holdout_seconds"])
+                    if holdout_result is not None
+                    else 0.0,
+                    "regression_holdout_seconds": float(holdout_result["regression_holdout_seconds"])
+                    if holdout_result is not None
+                    else 0.0,
+                    "regression_reference": str(holdout_result["regression_reference"])
+                    if holdout_result is not None
+                    else "none",
                     "bootstrap_steps": current_collection_metrics.get("bootstrap_steps", 0.0),
                     "bootstrap_stride": current_collection_metrics.get("bootstrap_stride", 1.0),
                     "bootstrap_release_epoch": current_collection_metrics.get("bootstrap_release_epoch", -1.0),
                     "bootstrap_ready_streak": current_collection_metrics.get("bootstrap_ready_streak", 0.0),
                     "teacher_guidance_ready_streak": current_collection_metrics.get("teacher_guidance_ready_streak", 0.0),
                     "teacher_guidance_alpha": current_collection_metrics.get("teacher_guidance_alpha", 0.0),
+                    "dense_teacher_supervision": current_collection_metrics.get("dense_teacher_supervision", False),
                     "teacher_episode_fraction": current_collection_metrics.get("teacher_episode_fraction", 0.0),
                     "teacher_takeover_prob": current_collection_metrics.get("teacher_takeover_prob", 0.0),
                     "teacher_episode_count": current_collection_metrics.get("teacher_episode_count", 0.0),
@@ -2072,6 +3370,7 @@ def train_synthetic(
                     "dream_question_loss": dream_metrics.get("dream_question_loss", 0.0),
                     "dream_plan_loss": dream_metrics.get("dream_plan_loss", 0.0),
                     "dream_seconds": dream_metrics.get("dream_seconds", 0.0),
+                    "secondary_dream_sequences": dream_metrics.get("secondary_dream_sequences", 0.0),
                 }
             )
             training_state = {
@@ -2083,17 +3382,23 @@ def train_synthetic(
                 "stage_name": stages[current_stage_index].name if stages else "",
                 "stage_epoch_count": stage_epoch_count,
                 "consecutive_holdout_passes": consecutive_holdout_passes,
+                "holdout_seconds": history[-1]["holdout_seconds"],
+                "frontier_holdout_seconds": history[-1]["frontier_holdout_seconds"],
+                "regression_holdout_seconds": history[-1]["regression_holdout_seconds"],
+                "regression_reference": history[-1]["regression_reference"],
                 "bootstrap_steps": current_collection_metrics.get("bootstrap_steps", 0.0),
                 "bootstrap_stride": current_collection_metrics.get("bootstrap_stride", 1.0),
                 "bootstrap_release_epoch": current_collection_metrics.get("bootstrap_release_epoch", -1.0),
                 "bootstrap_ready_streak": current_collection_metrics.get("bootstrap_ready_streak", 0.0),
                 "teacher_guidance_ready_streak": current_collection_metrics.get("teacher_guidance_ready_streak", 0.0),
                 "teacher_guidance_alpha": current_collection_metrics.get("teacher_guidance_alpha", 0.0),
+                "dense_teacher_supervision": current_collection_metrics.get("dense_teacher_supervision", False),
                 "teacher_episode_fraction": current_collection_metrics.get("teacher_episode_fraction", 0.0),
                 "teacher_takeover_prob": current_collection_metrics.get("teacher_takeover_prob", 0.0),
                 "teacher_episode_count": current_collection_metrics.get("teacher_episode_count", 0.0),
                 "teacher_step_fraction": current_collection_metrics.get("teacher_step_fraction", 0.0),
                 "teacher_relabel_fraction": current_collection_metrics.get("teacher_relabel_fraction", 0.0),
+                "collector_agent": current_collection_metrics.get("collector_agent", "graph"),
                 "dream_sequences": dream_metrics.get("dream_sequences", 0.0),
                 "dream_steps": dream_metrics.get("dream_steps", 0.0),
                 "dream_loss": dream_metrics.get("dream_loss", 0.0),
@@ -2102,6 +3407,9 @@ def train_synthetic(
                 "dream_question_loss": dream_metrics.get("dream_question_loss", 0.0),
                 "dream_plan_loss": dream_metrics.get("dream_plan_loss", 0.0),
                 "dream_seconds": dream_metrics.get("dream_seconds", 0.0),
+                "secondary_train_device": secondary_train_device,
+                "secondary_replay_samples": secondary_replay_samples,
+                "secondary_dream_sequences": dream_metrics.get("secondary_dream_sequences", 0.0),
             }
             snapshot = _build_checkpoint_snapshot(
                 config,
@@ -2114,6 +3422,34 @@ def train_synthetic(
                 last_holdout_result,
             )
             saved_paths = _save_checkpoint(checkpoint_path, snapshot, epoch=epoch)
+            if enqueue_async_holdout and async_holdout_runtime is not None:
+                holdout_eval_index = _submit_async_holdout_request(
+                    async_holdout_runtime,
+                    config,
+                    checkpoint_path=str(saved_paths.get("epoch_checkpoint_path", saved_paths["latest_checkpoint_path"])),
+                    epoch=epoch,
+                    stage_index=epoch_stage_index,
+                    stage_epoch_count=epoch_stage_epoch_count,
+                )
+                print(
+                    json.dumps(
+                        {
+                            "type": "holdout_enqueued",
+                            "async": True,
+                            "epoch": epoch,
+                            "stage_index": epoch_stage_index,
+                            "stage_name": current_collection_metrics.get("stage_name", epoch_stage_name),
+                            "stage_epoch_count": epoch_stage_epoch_count,
+                            "holdout_eval_index": holdout_eval_index,
+                            "checkpoint_path": str(
+                                saved_paths.get("epoch_checkpoint_path", saved_paths["latest_checkpoint_path"])
+                            ),
+                            "device": config.async_eval_device,
+                        }
+                    ),
+                    flush=True,
+                )
+                consume_async_holdout_results(block=False, report_epoch=epoch)
             print(
                 json.dumps(
                     {
@@ -2126,6 +3462,7 @@ def train_synthetic(
                         "stage_name": current_collection_metrics.get("stage_name", epoch_stage_name),
                         "stage_epoch_count": epoch_stage_epoch_count,
                         "frontier_families": current_collection_metrics.get("frontier_families", ()),
+                        "collector_agent": history[-1]["collector_agent"],
                         "collect_avg_return": history[-1]["collect_avg_return"],
                         "collect_avg_steps": history[-1]["collect_avg_steps"],
                         "collect_success_rate": history[-1]["collect_success_rate"],
@@ -2136,7 +3473,13 @@ def train_synthetic(
                         "epoch_seed_base": current_collection_metrics.get("epoch_seed_base", 0.0),
                         "collect_seconds": history[-1]["collect_seconds"],
                         "train_seconds": history[-1]["train_seconds"],
+                        "secondary_train_device": history[-1]["secondary_train_device"],
+                        "secondary_replay_samples": history[-1]["secondary_replay_samples"],
                         "epoch_seconds": history[-1]["epoch_seconds"],
+                        "holdout_seconds": history[-1]["holdout_seconds"],
+                        "frontier_holdout_seconds": history[-1]["frontier_holdout_seconds"],
+                        "regression_holdout_seconds": history[-1]["regression_holdout_seconds"],
+                        "regression_reference": history[-1]["regression_reference"],
                         "world_loss": history[-1]["world_loss"],
                         "latent_loss": history[-1]["latent_loss"],
                         "reward_loss": history[-1]["reward_loss"],
@@ -2166,12 +3509,15 @@ def train_synthetic(
                         "dream_question_loss": history[-1]["dream_question_loss"],
                         "dream_plan_loss": history[-1]["dream_plan_loss"],
                         "dream_seconds": history[-1]["dream_seconds"],
+                        "secondary_dream_sequences": history[-1]["secondary_dream_sequences"],
                         **saved_paths,
                     }
                 ),
                 flush=True,
             )
     except KeyboardInterrupt:
+        if async_holdout_runtime is not None:
+            _stop_async_holdout_runtime(async_holdout_runtime, wait=False)
         training_state = {
             "completed_epochs": len(history),
             "active_epoch": current_epoch,
@@ -2197,6 +3543,9 @@ def train_synthetic(
             "dream_question_loss": float(dream_metrics.get("dream_question_loss", 0.0)),
             "dream_plan_loss": float(dream_metrics.get("dream_plan_loss", 0.0)),
             "dream_seconds": float(dream_metrics.get("dream_seconds", 0.0)),
+            "secondary_train_device": secondary_train_device,
+            "secondary_replay_samples": float(secondary_replay_samples),
+            "secondary_dream_sequences": float(dream_metrics.get("secondary_dream_sequences", 0.0)),
         }
         snapshot = _build_checkpoint_snapshot(
             config,
@@ -2235,8 +3584,65 @@ def train_synthetic(
             "loss_last_epoch": history[-1]["loss"] if history else 0.0,
             "uncertainty_last_epoch": history[-1]["uncertainty"] if history else 0.0,
             "last_holdout_result": last_holdout_result or {},
+            "collector_agent": history[-1]["collector_agent"] if history else "",
             **interrupt_paths,
         }
+    if async_holdout_runtime is not None:
+        while async_holdout_runtime.pending_count > 0:
+            consume_async_holdout_results(block=True, report_epoch=current_epoch)
+        _stop_async_holdout_runtime(async_holdout_runtime, wait=True)
+        final_training_state = {
+            "completed_epochs": len(history),
+            "active_epoch": current_epoch,
+            "interrupted": False,
+            "last_epoch_samples": history[-1]["samples"] if history else 0.0,
+            "stage_index": current_stage_index,
+            "stage_name": stages[current_stage_index].name if stages else "",
+            "stage_epoch_count": stage_epoch_count,
+            "consecutive_holdout_passes": consecutive_holdout_passes,
+            "holdout_seconds": history[-1]["holdout_seconds"] if history else 0.0,
+            "frontier_holdout_seconds": history[-1]["frontier_holdout_seconds"] if history else 0.0,
+            "regression_holdout_seconds": history[-1]["regression_holdout_seconds"] if history else 0.0,
+            "regression_reference": history[-1]["regression_reference"] if history else "none",
+            "bootstrap_steps": current_collection_metrics.get("bootstrap_steps", 0.0),
+            "bootstrap_stride": current_collection_metrics.get("bootstrap_stride", 1.0),
+            "bootstrap_release_epoch": current_collection_metrics.get("bootstrap_release_epoch", -1.0),
+            "bootstrap_ready_streak": current_collection_metrics.get("bootstrap_ready_streak", 0.0),
+            "teacher_guidance_ready_streak": current_collection_metrics.get("teacher_guidance_ready_streak", 0.0),
+            "teacher_guidance_alpha": current_collection_metrics.get("teacher_guidance_alpha", 0.0),
+            "dense_teacher_supervision": current_collection_metrics.get("dense_teacher_supervision", False),
+            "teacher_episode_fraction": current_collection_metrics.get("teacher_episode_fraction", 0.0),
+            "teacher_takeover_prob": current_collection_metrics.get("teacher_takeover_prob", 0.0),
+            "teacher_episode_count": current_collection_metrics.get("teacher_episode_count", 0.0),
+            "teacher_step_fraction": current_collection_metrics.get("teacher_step_fraction", 0.0),
+            "teacher_relabel_fraction": current_collection_metrics.get("teacher_relabel_fraction", 0.0),
+            "dream_sequences": dream_metrics.get("dream_sequences", 0.0),
+            "dream_steps": dream_metrics.get("dream_steps", 0.0),
+            "dream_loss": dream_metrics.get("dream_loss", 0.0),
+            "dream_world_loss": dream_metrics.get("dream_world_loss", 0.0),
+            "dream_belief_loss": dream_metrics.get("dream_belief_loss", 0.0),
+            "dream_question_loss": dream_metrics.get("dream_question_loss", 0.0),
+            "dream_plan_loss": dream_metrics.get("dream_plan_loss", 0.0),
+            "dream_seconds": dream_metrics.get("dream_seconds", 0.0),
+            "secondary_train_device": secondary_train_device,
+            "secondary_replay_samples": secondary_replay_samples,
+            "secondary_dream_sequences": dream_metrics.get("secondary_dream_sequences", 0.0),
+        }
+        final_snapshot = _build_checkpoint_snapshot(
+            config,
+            encoder,
+            world_model,
+            language_model,
+            history,
+            holdout_history,
+            final_training_state,
+            last_holdout_result,
+        )
+        _save_checkpoint(
+            checkpoint_path,
+            final_snapshot,
+            epoch=len(history) - 1 if history else None,
+        )
     return {
         "interrupted": False,
         "epochs": float(config.epochs),
@@ -2247,6 +3653,10 @@ def train_synthetic(
         "loss_last_epoch": history[-1]["loss"] if history else 0.0,
         "uncertainty_last_epoch": history[-1]["uncertainty"] if history else 0.0,
         "last_holdout_result": last_holdout_result or {},
+        "collector_agent": history[-1]["collector_agent"] if history else "",
+        "secondary_train_device": history[-1]["secondary_train_device"] if history else "",
+        "secondary_replay_samples": history[-1]["secondary_replay_samples"] if history else 0.0,
+        "secondary_dream_sequences": history[-1]["secondary_dream_sequences"] if history else 0.0,
         "latest_checkpoint_path": str(checkpoint_path),
         "last_epoch_checkpoint_path": str(_checkpoint_variant_path(checkpoint_path, f"epoch_{len(history) - 1:04d}"))
         if history
@@ -2277,9 +3687,33 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--checkpoint-path", type=str, default="artifacts/synthetic_hybrid.pt")
     parser.add_argument("--init-checkpoint-path", type=str, default="")
+    parser.add_argument("--resume-checkpoint-path", type=str, default="")
+    parser.add_argument(
+        "--allow-weights-only-init-from-training-checkpoint",
+        action="store_true",
+        help="allow init-checkpoint-path to load weights from a checkpoint that also contains saved training state",
+    )
+    parser.add_argument("--device", type=str, default="")
+    parser.add_argument(
+        "--async-eval-device",
+        type=str,
+        default="",
+        help="secondary device for mirrored replay/dream training when CUDA is available; otherwise async holdout fallback",
+    )
+    parser.add_argument(
+        "--secondary-device",
+        type=str,
+        default="",
+        help="alias for --async-eval-device",
+    )
     parser.add_argument("--seed", type=int, default=7)
-    parser.add_argument("--behavior-policy", type=str, default="mixed")
-    parser.add_argument("--curriculum", type=str, default="staged")
+    parser.add_argument(
+        "--behavior-policy",
+        type=str,
+        default="mixed",
+        choices=sorted(_ALLOWED_SYNTHETIC_BEHAVIOR_POLICIES),
+    )
+    parser.add_argument("--curriculum", type=str, default="staged", choices=sorted(_ALLOWED_CURRICULA))
     parser.add_argument("--oracle-imitation-epochs", type=int, default=2)
     parser.add_argument("--oracle-bootstrap-steps", type=int, default=16)
     parser.add_argument("--oracle-bootstrap-stride", type=int, default=1)
@@ -2295,6 +3729,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--teacher-takeover-prob-initial", type=float, default=0.5)
     parser.add_argument("--teacher-takeover-prob-floor", type=float, default=0.2)
     parser.add_argument("--teacher-relabel-weight", type=float, default=0.8)
+    parser.add_argument("--trajectory-credit-discount", type=float, default=0.94)
     parser.add_argument("--dream-batches-per-epoch", type=int, default=8)
     parser.add_argument("--dream-batch-size", type=int, default=8)
     parser.add_argument("--dream-horizon", type=int, default=3)
@@ -2305,6 +3740,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--log-every-episodes", type=int, default=16)
     parser.add_argument("--holdout-eval-every-epochs", type=int, default=4)
     parser.add_argument("--holdout-episodes-per-variant", type=int, default=2)
+    parser.add_argument("--regression-holdout-every-evals", type=int, default=1)
     parser.add_argument("--promotion-consecutive-evals", type=int, default=2)
     parser.add_argument("--frontier-replay-weight", type=int, default=3)
     parser.add_argument("--previous-stage-replay-weight", type=int, default=1)
@@ -2317,14 +3753,20 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    mp.freeze_support()
     parser = build_parser()
     args = parser.parse_args()
+    secondary_device = args.secondary_device or args.async_eval_device
     config = SyntheticTrainingConfig(
         epochs=args.epochs,
         episodes_per_epoch=args.episodes_per_epoch,
         learning_rate=args.learning_rate,
         checkpoint_path=args.checkpoint_path,
         init_checkpoint_path=args.init_checkpoint_path,
+        resume_checkpoint_path=args.resume_checkpoint_path,
+        allow_weights_only_init_from_training_checkpoint=args.allow_weights_only_init_from_training_checkpoint,
+        train_device=args.device,
+        async_eval_device=secondary_device,
         seed=args.seed,
         behavior_policy=args.behavior_policy,
         curriculum=args.curriculum,
@@ -2343,6 +3785,7 @@ def main() -> int:
         teacher_takeover_prob_initial=args.teacher_takeover_prob_initial,
         teacher_takeover_prob_floor=args.teacher_takeover_prob_floor,
         teacher_relabel_weight=args.teacher_relabel_weight,
+        trajectory_credit_discount=args.trajectory_credit_discount,
         dream_batches_per_epoch=args.dream_batches_per_epoch,
         dream_batch_size=args.dream_batch_size,
         dream_horizon=args.dream_horizon,
@@ -2353,6 +3796,7 @@ def main() -> int:
         log_every_episodes=args.log_every_episodes,
         holdout_eval_every_epochs=args.holdout_eval_every_epochs,
         holdout_episodes_per_variant=args.holdout_episodes_per_variant,
+        regression_holdout_every_evals=args.regression_holdout_every_evals,
         promotion_consecutive_evals=args.promotion_consecutive_evals,
         frontier_replay_weight=args.frontier_replay_weight,
         previous_stage_replay_weight=args.previous_stage_replay_weight,
@@ -2362,7 +3806,7 @@ def main() -> int:
         enhancement_gate_target=args.enhancement_gate_target,
         enhancement_gate_weight=args.enhancement_gate_weight,
     )
-    metrics = train_synthetic(config)
+    metrics = train_synthetic(config, device=torch.device(args.device) if args.device else None)
     print(json.dumps(metrics, indent=2))
     return 0
 

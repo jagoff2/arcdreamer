@@ -14,7 +14,13 @@ def test_only_full_hybrid_constructs_runtime_controller() -> None:
 
     assert recurrent.config.use_runtime_controller is False
     assert recurrent.runtime_rule_controller is None
+    assert recurrent.config.use_theory_manager is False
+    assert recurrent.theory_manager is None
     assert language.config.use_runtime_controller is False
     assert language.runtime_rule_controller is None
+    assert language.config.use_theory_manager is False
+    assert language.theory_manager is None
     assert hybrid.config.use_runtime_controller is True
     assert hybrid.runtime_rule_controller is not None
+    assert hybrid.config.use_theory_manager is True
+    assert hybrid.theory_manager is not None

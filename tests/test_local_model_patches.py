@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 from arcagi.agents.learned_agent import LocalModelPatch
-from arcagi.core.types import ActionThought, GridObservation, RuntimeThought
+from arcagi.core.types import ActionThought, GridObservation, RuntimeThought, Transition
 from arcagi.evaluation.harness import build_agent
 from arcagi.perception.object_encoder import extract_structured_state
 
@@ -62,3 +62,25 @@ def test_hybrid_agent_applies_local_model_patches_to_runtime_thought() -> None:
     assert right.usefulness > left.usefulness
     assert right.uncertainty < left.uncertainty
     assert any(claim.claim_type == "local_patch" and claim.subject == "right" for claim in patched.claims)
+
+
+def test_hybrid_agent_propagates_online_bias_across_recent_action_trace() -> None:
+    agent = build_agent("hybrid", device=torch.device("cpu"))
+    state = extract_structured_state(_observation())
+    agent.recent_actions = ["left", "right", "interact"]
+
+    agent._update_online_action_bias(
+        Transition(
+            state=state,
+            action="interact",
+            reward=0.0,
+            next_state=state,
+            terminated=False,
+            info={"event": "empty_interaction"},
+        ),
+        state_change=0.0,
+    )
+
+    assert agent.online_action_bias["interact"] < 0.0
+    assert agent.online_action_bias["right"] < 0.0
+    assert agent.online_action_bias["left"] < 0.0

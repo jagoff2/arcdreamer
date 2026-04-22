@@ -100,6 +100,12 @@ Notes:
 
 The synthetic trainer now supports long manual runs with live JSON progress, interrupt-safe checkpoints, and held-out gated stage promotion.
 
+Current training-default corrections:
+
+- the trainer default is now `behavior_policy=mixed` in both CLI and programmatic config construction
+- `mixed` / `bootstrap` collection now use the current hybrid agent as the learner-side collector, not the graph baseline, while teacher episodes and teacher relabeling still provide scaffold data
+- `--secondary-device` is now the preferred name for the second GPU; it mirrors replay and dream optimization each epoch, and only falls back to async holdout when it cannot be used for real training work
+
 Observed long-run milestone on `2026-04-20`:
 
 - a manual run with `25,000` episodes per epoch advanced into `hidden_modes` by epoch `4`
@@ -120,6 +126,8 @@ python -m arcagi.training.synthetic \
   --checkpoint-path artifacts/manual_stage1.pt \
   --init-checkpoint-path artifacts/mixed_policy_hybrid.pt \
   --behavior-policy mixed \
+  --device cuda:0 \
+  --secondary-device cuda:1 \
   --curriculum staged \
   --log-every-episodes 16 \
   --holdout-eval-every-epochs 4 \

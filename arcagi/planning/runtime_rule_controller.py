@@ -2952,6 +2952,11 @@ class RuntimeRuleController:
             if not self._is_interaction_candidate_object(target_object, mover_signatures, state.grid_shape):
                 continue
             target_signature = object_signature(target_object)
+            if self._is_interface_only_target_object(target_object) and not self._target_has_reward_evidence(
+                self.current_mode_key,
+                target_signature,
+            ):
+                continue
             for mover_signature in mover_scores:
                 objective = self.objective_hypotheses.get((self.current_mode_key, mover_signature, target_signature))
                 if objective is None or objective.successful_interactions == 0:
@@ -3286,6 +3291,39 @@ class RuntimeRuleController:
             return False
         return self._is_candidate_target_object(obj, moving_signatures, grid_shape) and obj.area <= 4
 
+    def _is_interface_only_target_object(self, obj: ObjectState) -> bool:
+        interface_tags = {"clickable", "interface_target", "selector_candidate"}
+        reward_tags = {"target", "repaired_goal", "interactable", "repaired_control", "active"}
+        return any(tag in obj.tags for tag in interface_tags) and not any(tag in obj.tags for tag in reward_tags)
+
+    def _target_has_reward_evidence(
+        self,
+        mode_key: str,
+        target_signature: ObjectSignature,
+    ) -> bool:
+        for (candidate_mode, _mover_signature, candidate_target), objective in self.objective_hypotheses.items():
+            if candidate_mode != mode_key or candidate_target != target_signature:
+                continue
+            if (
+                objective.evidence.support > 0
+                or objective.reward_hits > 0
+                or objective.goal_activations > 0
+                or objective.successful_interactions > 0
+                or objective.reward_sum > 0.0
+            ):
+                return True
+        for (candidate_mode, _mover_signature, candidate_target, _family), hypothesis in self.objective_family_hypotheses.items():
+            if candidate_mode != mode_key or candidate_target != target_signature:
+                continue
+            if (
+                hypothesis.evidence.support > 0
+                or hypothesis.reward_sum > 0.0
+                or hypothesis.goal_hits > 0
+                or hypothesis.interaction_hits > 0
+            ):
+                return True
+        return False
+
     def _clear_active_exploit(self) -> None:
         self.active_goal_anchor = None
         self.active_exploit_action = None
@@ -3415,8 +3453,12 @@ class RuntimeRuleController:
         grid_area = grid_shape[0] * grid_shape[1]
         if obj.area >= max(int(0.45 * grid_area), 36):
             return False
-        if any(tag in obj.tags for tag in ("repaired_goal", "target", "clickable", "interface_target", "selector_candidate")):
+        if any(tag in obj.tags for tag in ("repaired_goal", "target")):
             return True
+        if any(tag in obj.tags for tag in ("interactable", "repaired_control")):
+            return True
+        if self._is_interface_only_target_object(obj):
+            return self._target_has_reward_evidence(self.current_mode_key, signature)
         height = (obj.bbox[2] - obj.bbox[0]) + 1
         width = (obj.bbox[3] - obj.bbox[1]) + 1
         touches_top = obj.bbox[0] == 0

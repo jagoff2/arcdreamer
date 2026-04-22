@@ -18,7 +18,9 @@ from arcagi.envs.arc_adapter import ArcToolkitEnv, arc_operation_mode, arc_toolk
 from arcagi.models.encoder import StructuredStateEncoder
 from arcagi.models.language import GroundedLanguageModel
 from arcagi.models.world_model import RecurrentWorldModel
+from arcagi.memory.episodic import EpisodicMemory
 from arcagi.perception.object_encoder import extract_structured_state
+from arcagi.planning.planner import HybridPlanner, PlannerConfig
 from arcagi.training.synthetic import build_default_modules, load_checkpoint
 
 
@@ -31,19 +33,97 @@ class ArcPublicTrainingConfig:
     epochs: int = 2
     learning_rate: float = 1e-4
     seed: int = 17
+    device: str = ""
     checkpoint_path: str = "artifacts/arc_public_hybrid.pt"
     init_checkpoint_path: str = "artifacts/mixed_policy_hybrid.pt"
-    behavior_policies: tuple[str, ...] = ("graph", "random")
+    behavior_policies: tuple[str, ...] = ("graph", "learned", "random")
     policy_positive_threshold: float = 0.15
     freeze_encoder: bool = True
     language_loss_weight: float = 0.2
 
 
-def _behavior_agent(name: str):
+_ALLOWED_ARC_PUBLIC_BEHAVIOR_POLICIES: frozenset[str] = frozenset({"graph", "random", "learned", "hybrid"})
+
+
+def _validate_arc_public_training_config(config: ArcPublicTrainingConfig) -> None:
+    if int(config.game_limit) <= 0:
+        raise ValueError("game_limit must be positive")
+    if int(config.episodes_per_game) <= 0:
+        raise ValueError("episodes_per_game must be positive")
+    if int(config.max_steps) <= 0:
+        raise ValueError("max_steps must be positive")
+    if int(config.epochs) <= 0:
+        raise ValueError("epochs must be positive")
+    if float(config.learning_rate) <= 0.0:
+        raise ValueError("learning_rate must be positive")
+    if not config.behavior_policies:
+        raise ValueError("behavior_policies must not be empty")
+    invalid = [policy for policy in config.behavior_policies if policy not in _ALLOWED_ARC_PUBLIC_BEHAVIOR_POLICIES]
+    if invalid:
+        raise ValueError(
+            f"unsupported ARC public behavior policies: {invalid}. "
+            f"expected a subset of {sorted(_ALLOWED_ARC_PUBLIC_BEHAVIOR_POLICIES)}"
+        )
+
+
+def _clone_modules(
+    encoder: StructuredStateEncoder,
+    world_model: RecurrentWorldModel,
+    language_model: GroundedLanguageModel,
+    *,
+    device: torch.device,
+) -> tuple[StructuredStateEncoder, RecurrentWorldModel, GroundedLanguageModel]:
+    cloned_encoder, cloned_world_model, cloned_language_model, _ = build_default_modules(device=device)
+    cloned_encoder.load_state_dict(encoder.state_dict())
+    cloned_world_model.load_state_dict(world_model.state_dict())
+    cloned_language_model.load_state_dict(language_model.state_dict())
+    cloned_encoder.eval()
+    cloned_world_model.eval()
+    cloned_language_model.eval()
+    return cloned_encoder, cloned_world_model, cloned_language_model
+
+
+def _behavior_agent(
+    name: str,
+    *,
+    encoder: StructuredStateEncoder | None = None,
+    world_model: RecurrentWorldModel | None = None,
+    language_model: GroundedLanguageModel | None = None,
+    device: torch.device | None = None,
+):
     if name == "graph":
-        return GraphExplorerAgent()
+        return GraphExplorerAgent(), False
     if name == "random":
-        return RandomHeuristicAgent()
+        return RandomHeuristicAgent(), False
+    if name in {"learned", "hybrid"}:
+        from arcagi.agents.learned_agent import HybridAgent
+
+        collector_device = device or torch.device("cpu")
+        if encoder is None or world_model is None or language_model is None:
+            collection_encoder, collection_world_model, collection_language_model, _ = build_default_modules(device=collector_device)
+        else:
+            collection_encoder, collection_world_model, collection_language_model = _clone_modules(
+                encoder,
+                world_model,
+                language_model,
+                device=collector_device,
+            )
+        planner = HybridPlanner(
+            PlannerConfig(search_depth=2, search_root_width=2, search_branch_width=1, max_world_model_calls=48)
+            if collector_device.type == "cpu"
+            else PlannerConfig(search_depth=2, search_root_width=2, search_branch_width=1, max_world_model_calls=32)
+        )
+        return (
+            HybridAgent(
+                encoder=collection_encoder,
+                world_model=collection_world_model,
+                planner=planner,
+                language_model=collection_language_model,
+                episodic_memory=EpisodicMemory(),
+                device=collector_device,
+            ),
+            True,
+        )
     raise ValueError(f"unsupported behavior policy: {name}")
 
 
@@ -149,38 +229,62 @@ def _plan_tokens(
 
 def collect_arc_public_dataset(
     config: ArcPublicTrainingConfig,
+    *,
+    encoder: StructuredStateEncoder | None = None,
+    world_model: RecurrentWorldModel | None = None,
+    language_model: GroundedLanguageModel | None = None,
+    device: torch.device | None = None,
 ) -> list[dict[str, object]]:
+    _validate_arc_public_training_config(config)
     if not arc_toolkit_available():
         raise RuntimeError("ARC toolkit is not installed in this environment.")
     operation_mode = arc_operation_mode(config.mode)
     games = list_arc_games(operation_mode=operation_mode)[: config.game_limit]
     dataset: list[dict[str, object]] = []
     seed_cursor = config.seed
+    agents: dict[str, object] = {}
+    reset_all_flags: dict[str, bool] = {}
     for game_index, game_id in enumerate(games):
         for episode_index in range(config.episodes_per_game):
             policy_name = config.behavior_policies[(game_index + episode_index) % len(config.behavior_policies)]
-            agent = _behavior_agent(policy_name)
-            env = ArcToolkitEnv(game_id, operation_mode=operation_mode)
-            observation = env.reset(seed=seed_cursor)
-            seed_cursor += 1
-            agent.reset_episode()
-            steps = 0
-            done = False
-            while not done and steps < config.max_steps:
-                state = extract_structured_state(observation)
-                action = agent.act(observation)
-                result = env.step(action)
-                next_state = extract_structured_state(result.observation)
-                dataset.append(_make_sample(state, next_state, action, result.reward))
-                agent.update_after_step(
-                    next_observation=result.observation,
-                    reward=result.reward,
-                    terminated=result.terminated or result.truncated,
-                    info=result.info,
+            if policy_name not in agents:
+                agent, reset_all = _behavior_agent(
+                    policy_name,
+                    encoder=encoder,
+                    world_model=world_model,
+                    language_model=language_model,
+                    device=device,
                 )
-                observation = result.observation
-                done = result.terminated or result.truncated
-                steps += 1
+                agents[policy_name] = agent
+                reset_all_flags[policy_name] = reset_all
+            agent = agents[policy_name]
+            if reset_all_flags[policy_name]:
+                agent.reset_all()
+            else:
+                agent.reset_episode()
+            env = ArcToolkitEnv(game_id, operation_mode=operation_mode)
+            try:
+                observation = env.reset(seed=seed_cursor)
+                seed_cursor += 1
+                steps = 0
+                done = False
+                while not done and steps < config.max_steps:
+                    state = extract_structured_state(observation)
+                    action = agent.act(observation)
+                    result = env.step(action)
+                    next_state = extract_structured_state(result.observation)
+                    dataset.append(_make_sample(state, next_state, action, result.reward))
+                    agent.update_after_step(
+                        next_observation=result.observation,
+                        reward=result.reward,
+                        terminated=result.terminated or result.truncated,
+                        info=result.info,
+                    )
+                    observation = result.observation
+                    done = result.terminated or result.truncated
+                    steps += 1
+            finally:
+                env.close()
     return dataset
 
 
@@ -188,10 +292,16 @@ def train_arc_public(
     config: ArcPublicTrainingConfig,
     device: torch.device | None = None,
 ) -> dict[str, float]:
+    _validate_arc_public_training_config(config)
     seed_everything(config.seed)
     if not arc_toolkit_available():
         raise RuntimeError("ARC toolkit is not installed in this environment.")
-    device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device is not None:
+        device = torch.device(str(device))
+    elif config.device:
+        device = torch.device(config.device)
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if config.init_checkpoint_path and Path(config.init_checkpoint_path).exists():
         encoder, world_model, language_model = load_checkpoint(config.init_checkpoint_path, device=device)
     else:
@@ -208,7 +318,13 @@ def train_arc_public(
     )
     history: list[dict[str, float]] = []
     for epoch in range(config.epochs):
-        dataset = collect_arc_public_dataset(config)
+        dataset = collect_arc_public_dataset(
+            config,
+            encoder=encoder,
+            world_model=world_model,
+            language_model=language_model,
+            device=device,
+        )
         encoder.train()
         world_model.train()
         language_model.train()
@@ -239,6 +355,7 @@ def train_arc_public(
             with torch.no_grad():
                 next_encoded = encoder.encode_state(next_state, device=device)
             reward_target = torch.tensor([reward], dtype=torch.float32, device=device)
+            return_target = torch.tensor([float(sample.get("discounted_return", reward))], dtype=torch.float32, device=device)
             delta_target = torch.tensor(delta, dtype=torch.float32, device=device).unsqueeze(0)
             usefulness_target = torch.tensor([usefulness], dtype=torch.float32, device=device)
             world_loss, metrics = world_model.loss(
@@ -248,6 +365,7 @@ def train_arc_public(
                 hidden=sequence_hidden,
                 next_latent_target=next_encoded.latent.detach(),
                 reward_target=reward_target,
+                return_target=return_target,
                 delta_target=delta_target,
                 usefulness_target=usefulness_target,
             )
@@ -344,9 +462,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-steps", type=int, default=96)
     parser.add_argument("--epochs", type=int, default=2)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
+    parser.add_argument("--device", type=str, default="")
     parser.add_argument("--checkpoint-path", type=str, default="artifacts/arc_public_hybrid.pt")
     parser.add_argument("--init-checkpoint-path", type=str, default="artifacts/mixed_policy_hybrid.pt")
     parser.add_argument("--seed", type=int, default=17)
+    parser.add_argument(
+        "--behavior-policies",
+        type=str,
+        default="graph,learned,random",
+        help="comma-separated collector policies from {graph,random,learned}",
+    )
     parser.add_argument("--unfreeze-encoder", action="store_true")
     return parser
 
@@ -361,9 +486,11 @@ def main() -> int:
         max_steps=args.max_steps,
         epochs=args.epochs,
         learning_rate=args.learning_rate,
+        device=args.device,
         checkpoint_path=args.checkpoint_path,
         init_checkpoint_path=args.init_checkpoint_path,
         seed=args.seed,
+        behavior_policies=tuple(policy.strip() for policy in args.behavior_policies.split(",") if policy.strip()),
         freeze_encoder=not args.unfreeze_encoder,
     )
     metrics = train_arc_public(config)

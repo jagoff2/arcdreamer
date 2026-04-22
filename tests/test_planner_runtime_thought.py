@@ -5,8 +5,9 @@ from dataclasses import replace
 import numpy as np
 import torch
 
-from arcagi.core.types import GridObservation, ObjectState, RuntimeThought, StructuredState
+from arcagi.core.types import ActionThought, GridObservation, ObjectState, RuntimeThought, StructuredState
 from arcagi.envs.synthetic import HiddenRuleEnv
+from arcagi.memory.episodic import EpisodicMemory
 from arcagi.memory.graph import StateGraph
 from arcagi.models.world_model import WorldModelPrediction
 from arcagi.perception.object_encoder import extract_structured_state
@@ -129,6 +130,7 @@ class _FakeWorldModel:
             next_latent_mean=latent.clone(),
             next_latent_std=torch.zeros_like(latent),
             reward=torch.tensor([reward], dtype=torch.float32, device=latent.device),
+            return_value=torch.tensor([reward], dtype=torch.float32, device=latent.device),
             usefulness=torch.tensor([usefulness], dtype=torch.float32, device=latent.device),
             policy=torch.tensor([policy], dtype=torch.float32, device=latent.device),
             delta=torch.zeros((1, 25), dtype=torch.float32, device=latent.device),
@@ -168,6 +170,7 @@ class _ProxySensitiveWorldModel:
             next_latent_mean=latent.clone(),
             next_latent_std=torch.zeros_like(latent),
             reward=torch.tensor([reward], dtype=torch.float32, device=latent.device),
+            return_value=torch.tensor([reward], dtype=torch.float32, device=latent.device),
             usefulness=torch.tensor([usefulness], dtype=torch.float32, device=latent.device),
             policy=torch.tensor([policy], dtype=torch.float32, device=latent.device),
             delta=torch.ones((1, 25), dtype=torch.float32, device=latent.device) * 0.1,
@@ -207,6 +210,7 @@ class _UncertaintyTrapWorldModel:
             next_latent_mean=latent.clone(),
             next_latent_std=torch.zeros_like(latent),
             reward=torch.tensor([reward], dtype=torch.float32, device=latent.device),
+            return_value=torch.tensor([reward], dtype=torch.float32, device=latent.device),
             usefulness=torch.tensor([usefulness], dtype=torch.float32, device=latent.device),
             policy=torch.tensor([policy], dtype=torch.float32, device=latent.device),
             delta=torch.zeros((1, 25), dtype=torch.float32, device=latent.device),
@@ -237,6 +241,7 @@ class _PolicyTrapWorldModel:
             next_latent_mean=latent.clone(),
             next_latent_std=torch.zeros_like(latent),
             reward=torch.tensor([reward], dtype=torch.float32, device=latent.device),
+            return_value=torch.tensor([reward], dtype=torch.float32, device=latent.device),
             usefulness=torch.tensor([usefulness], dtype=torch.float32, device=latent.device),
             policy=torch.tensor([policy], dtype=torch.float32, device=latent.device),
             delta=torch.zeros((1, 25), dtype=torch.float32, device=latent.device),
@@ -435,6 +440,83 @@ def test_planner_uses_context_bias_for_targeted_interaction() -> None:
 
     assert plan.action == "interact_right"
     assert plan.scores["context_online_bias"] > 0.0
+
+
+def test_planner_treats_diagnostic_action_scores_as_first_class_signal() -> None:
+    state, _left, _right = _interaction_state()
+    planner = HybridPlanner(PlannerConfig(search_depth=1))
+    graph = StateGraph()
+    graph.visit(state)
+
+    plan = planner.choose_action(
+        state=state,
+        latent=None,
+        graph=graph,
+        world_model=None,
+        hidden=None,
+        language_model=None,
+        diagnostic_action_scores={
+            "interact_right": 1.5,
+            "interact_left": 0.0,
+            "wait": -0.5,
+        },
+        thought=RuntimeThought(question_tokens=("need", "test", "rule")),
+    )
+
+    assert plan.action == "interact_right"
+    assert plan.scores["diagnostic_bonus"] > 0.0
+
+
+def test_planner_bounds_memory_bonus_and_does_not_let_it_override_clear_negative_value() -> None:
+    state = extract_structured_state(
+        _observation(
+            np.array(
+                [
+                    [0, 0, 0],
+                    [0, 2, 0],
+                    [0, 0, 3],
+                ],
+                dtype=np.int64,
+            ),
+            actions=("1", "2"),
+        )
+    )
+    planner = HybridPlanner(PlannerConfig(search_depth=1))
+    graph = StateGraph()
+    graph.visit(state)
+    memory = EpisodicMemory()
+    latent = np.ones(4, dtype=np.float32)
+    memory.write(
+        key=latent,
+        belief_tokens=("rule", "target"),
+        question_tokens=("need", "test"),
+        plan_tokens=("plan", "action", "move"),
+        context_tokens=("rule",),
+        action_history=("2",),
+        reward=1.0,
+        salience=500.0,
+        payload={"recommended_action": "2", "action_confidence": 500.0},
+    )
+
+    plan = planner.choose_action(
+        state=state,
+        latent=torch.tensor([latent], dtype=torch.float32),
+        graph=graph,
+        world_model=None,
+        hidden=None,
+        language_model=None,
+        episodic_memory=memory,
+        thought=RuntimeThought(
+            question_tokens=("need", "test", "rule"),
+            actions=(
+                ActionThought(action="1", value=1.2, policy=0.0, usefulness=0.1),
+                ActionThought(action="2", value=-1.2, policy=0.0, usefulness=-0.1),
+            ),
+        ),
+    )
+
+    assert abs(plan.scores["memory"]) <= 2.0
+    assert plan.action == "1"
 
 
 def test_budgeted_search_reuses_root_predictions_and_prunes_rollouts() -> None:

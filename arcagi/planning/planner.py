@@ -126,6 +126,38 @@ def _policy_bonus(
     return effective_weight * policy_prior
 
 
+def _predicted_outcome_value(
+    predicted_reward: float,
+    usefulness: float,
+    predicted_return: float,
+    policy_prior: float,
+    policy_weight: float,
+) -> float:
+    return (
+        predicted_reward
+        + (0.5 * usefulness)
+        + (0.35 * predicted_return)
+        + _policy_bonus(
+            predicted_reward,
+            usefulness,
+            policy_prior,
+            policy_weight,
+        )
+    )
+
+
+def _memory_entry_signal(
+    *,
+    score: float,
+    salience: float,
+    action_confidence: float,
+) -> float:
+    bounded_score = math.tanh(1.5 * float(score))
+    bounded_salience = math.tanh(0.2 * max(float(salience), 0.0))
+    bounded_confidence = math.tanh(0.7 * max(float(action_confidence), 0.0))
+    return bounded_score * (0.5 + (0.5 * bounded_salience)) * (0.25 + (0.75 * bounded_confidence))
+
+
 def _belief_inventory_value(state: StructuredState, key: str, default: str = "") -> str:
     return state.inventory_dict().get(key, default)
 
@@ -304,6 +336,7 @@ class HybridPlanner:
         family_no_effect_counts: dict[str, int] | None = None,
         family_bias: dict[str, float] | None = None,
         context_bias: dict[tuple[str, ObjectSignature], float] | None = None,
+        diagnostic_action_scores: dict[ActionName, float] | None = None,
         stuck_steps: int = 0,
         last_action: ActionName | None = None,
         thought: RuntimeThought | None = None,
@@ -332,6 +365,7 @@ class HybridPlanner:
             family_no_effect_counts=family_no_effect_counts,
             family_bias=family_bias,
             context_bias=context_bias,
+            diagnostic_action_scores=diagnostic_action_scores,
             stuck_steps=stuck_steps,
             last_action=last_action,
         )
@@ -380,6 +414,7 @@ class HybridPlanner:
                 schema=schema,
                 context_bias=context_bias,
             )
+            diagnostic_bonus = 0.0 if diagnostic_action_scores is None else float(diagnostic_action_scores.get(action, 0.0))
             plan_alignment = _plan_alignment_bonus(
                 state,
                 action,
@@ -408,10 +443,12 @@ class HybridPlanner:
                 policy_prior = float(prediction.policy.item())
                 policy_weight = 0.35 / float(graph_stats.visits + 1)
                 predicted_reward = float(prediction.reward.item())
+                predicted_return = float(prediction.return_value.item())
                 usefulness = float(prediction.usefulness.item())
-                value = predicted_reward + (0.5 * usefulness) + _policy_bonus(
+                value = _predicted_outcome_value(
                     predicted_reward,
                     usefulness,
+                    predicted_return,
                     policy_prior,
                     policy_weight,
                 )
@@ -449,33 +486,57 @@ class HybridPlanner:
                     search_budget = budget_ref[0]
             memory_bonus = 0.0
             if episodic_memory is not None and memory_query_tokens:
+                memory_support = 0.0
+                memory_avoid = 0.0
                 for score, entry in episodic_memory.query(latent_np, query_tokens=memory_query_tokens, top_k=3):
+                    signal = _memory_entry_signal(
+                        score=score,
+                        salience=entry.salience,
+                        action_confidence=float(entry.payload.get("action_confidence", 0.0)),
+                    )
                     if (
                         entry.payload.get("recommended_action") == action
                         and not bool(entry.payload.get("counterfactual", False))
                     ):
-                        memory_bonus += score * float(entry.payload.get("action_confidence", 1.0))
+                        memory_support += signal
                     if entry.payload.get("avoid_action") == action:
-                        memory_bonus -= abs(score) * (1.0 + float(entry.payload.get("action_confidence", 1.0)))
+                        memory_avoid += abs(signal)
+                memory_bonus = 2.0 * math.tanh((memory_support - memory_avoid) / 2.0)
             induced_bonus = rule_inducer.action_score(state, action) if rule_inducer is not None else 0.0
             online_bias = 0.0 if action_bias is None else float(action_bias.get(action, 0.0))
+            prior_reliability = max(
+                0.2,
+                min(
+                    1.0,
+                    1.0
+                    - (0.7 * max(action_no_effect_rate, family_no_effect_rate))
+                    - (0.45 * cycle_penalty)
+                    - (0.25 * float(last_action == action)),
+                ),
+            )
+            effective_online_bias = online_bias * prior_reliability
+            effective_family_online_bias = family_online_bias * prior_reliability
+            effective_induced_bonus = induced_bonus * (0.25 + (0.75 * prior_reliability))
+            effective_memory_bonus = memory_bonus * (0.35 + (0.65 * prior_reliability))
+            effective_diagnostic_bonus = diagnostic_bonus * (1.0 + (0.5 * (1.0 - prior_reliability)))
             total = (
                 self.config.novelty_weight * novelty
                 + self.config.value_weight * (value + search)
                 + self.config.info_gain_weight * (entropy + disagreement)
-                + self.config.memory_weight * memory_bonus
+                + self.config.memory_weight * effective_memory_bonus
                 + 0.8 * empirical_reward
-                + 0.5 * induced_bonus
-                + online_bias
+                + 0.5 * effective_induced_bonus
+                + effective_online_bias
                 + (0.8 * global_novelty)
                 + (0.6 * family_novelty * max(0.0, 1.0 - family_no_effect_rate))
                 + (0.003 * mean_delta)
                 + (0.5 * mean_reward)
                 + parameter_bonus
-                + family_online_bias
+                + effective_family_online_bias
                 + interaction_grounding
                 + spatial_bonus
                 + context_online_bias
+                + (0.9 * effective_diagnostic_bonus)
                 + plan_alignment
                 + stuck_bonus
                 - 0.9 * cycle_penalty
@@ -495,20 +556,21 @@ class HybridPlanner:
                     "entropy": entropy,
                     "disagreement": disagreement,
                     "empirical_reward": empirical_reward,
-                    "memory": memory_bonus,
-                    "induced": induced_bonus,
+                    "memory": effective_memory_bonus,
+                    "induced": effective_induced_bonus,
                     "policy_prior": policy_prior,
                     "policy_weight": policy_weight,
-                    "online_bias": online_bias,
+                    "online_bias": effective_online_bias,
                     "global_novelty": global_novelty,
                     "family_novelty": family_novelty,
                     "mean_delta": mean_delta,
                     "mean_reward": mean_reward,
                     "parameter_bonus": parameter_bonus,
-                    "family_online_bias": family_online_bias,
+                    "family_online_bias": effective_family_online_bias,
                     "interaction_grounding": interaction_grounding,
                     "spatial_bonus": spatial_bonus,
                     "context_online_bias": context_online_bias,
+                    "diagnostic_bonus": effective_diagnostic_bonus,
                     "plan_alignment": plan_alignment,
                     "wait_penalty": wait_penalty,
                     "stuck_bonus": stuck_bonus,
@@ -516,6 +578,7 @@ class HybridPlanner:
                     "action_no_effect_rate": action_no_effect_rate,
                     "family_no_effect_rate": family_no_effect_rate,
                     "cycle_penalty": cycle_penalty,
+                    "prior_reliability": prior_reliability,
                     "search_budget_remaining": float(search_budget),
                 }
         return PlanOutput(
@@ -558,11 +621,10 @@ class HybridPlanner:
             if action_thought is None or action_thought.next_latent is None or action_thought.next_hidden is None:
                 continue
             immediate = (
-                action_thought.predicted_reward
-                + (0.5 * action_thought.usefulness)
-                + _policy_bonus(
+                _predicted_outcome_value(
                     action_thought.predicted_reward,
                     action_thought.usefulness,
+                    action_thought.predicted_return,
                     action_thought.policy,
                     action_thought.policy_weight,
                 )
@@ -593,6 +655,7 @@ class HybridPlanner:
         family_no_effect_counts: dict[str, int] | None,
         family_bias: dict[str, float] | None,
         context_bias: dict[tuple[str, ObjectSignature], float] | None,
+        diagnostic_action_scores: dict[ActionName, float] | None,
         stuck_steps: int,
         last_action: ActionName | None,
     ) -> tuple[ActionName, ...]:
@@ -615,6 +678,7 @@ class HybridPlanner:
                 + (0.0 if family_bias is None else float(family_bias.get(schema.family, 0.0)))
                 + _interaction_grounding_score(state, action)
                 + _context_bias_bonus(state, action, schema=schema, context_bias=context_bias)
+                + (0.85 * (0.0 if diagnostic_action_scores is None else float(diagnostic_action_scores.get(action, 0.0))))
                 + thought.value_for(action)
                 + (0.8 * thought.selector_followup_for(action))
                 + (0.4 * thought.uncertainty_for(action))
@@ -683,7 +747,7 @@ class HybridPlanner:
             for action in affordances
             if build_action_schema(action, context).action_type == "move"
         ]
-        predictions: dict[ActionName, tuple[object, float, float, float, float, float, float, _ImaginationStateProxy]] = {}
+        predictions: dict[ActionName, tuple[object, float, float, float, float, float, float, float, _ImaginationStateProxy]] = {}
         world_model_calls = 0
         baseline_move_value = float("-inf")
         for action in affordances:
@@ -699,11 +763,13 @@ class HybridPlanner:
             policy_weight = 0.35 / float(graph_visits + 1)
             policy_prior = float(prediction.policy.item())
             predicted_reward = float(prediction.reward.item())
+            predicted_return = float(prediction.return_value.item())
             usefulness = float(prediction.usefulness.item())
             uncertainty = float(prediction.uncertainty.item())
-            value = predicted_reward + (0.5 * usefulness) + _policy_bonus(
+            value = _predicted_outcome_value(
                 predicted_reward,
                 usefulness,
+                predicted_return,
                 policy_prior,
                 policy_weight,
             )
@@ -715,6 +781,7 @@ class HybridPlanner:
                 policy_prior,
                 policy_weight,
                 predicted_reward,
+                predicted_return,
                 usefulness,
                 next_state_proxy,
             )
@@ -731,6 +798,7 @@ class HybridPlanner:
             policy_prior,
             policy_weight,
             predicted_reward,
+            predicted_return,
             usefulness,
             next_state_proxy,
         ) in predictions.items():
@@ -753,11 +821,10 @@ class HybridPlanner:
                     followup_scores.append(
                         float(
                             (
-                                followup.reward
-                                + (0.5 * followup.usefulness)
-                                + _policy_bonus(
+                                _predicted_outcome_value(
                                     float(followup.reward.item()),
                                     float(followup.usefulness.item()),
+                                    float(followup.return_value.item()),
                                     float(followup.policy.item()),
                                     0.25,
                                 )
@@ -774,6 +841,7 @@ class HybridPlanner:
                     policy=policy_prior,
                     policy_weight=policy_weight,
                     predicted_reward=predicted_reward,
+                    predicted_return=predicted_return,
                     usefulness=usefulness,
                     selector_followup=selector_followup,
                     next_latent=prediction.next_latent_mean,

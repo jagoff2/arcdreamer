@@ -127,7 +127,8 @@ class HiddenRuleEnv(BaseEnvironment):
 
     def reset(self, seed: int | None = None) -> GridObservation:
         if seed is not None:
-            self._rng = random.Random(seed)
+            self._base_seed = int(seed)
+            self._rng = random.Random(self._base_seed)
         else:
             self._rng = random.Random(self._base_seed + self._episode_index)
         self._episode_index += 1
@@ -412,7 +413,7 @@ class HiddenRuleEnv(BaseEnvironment):
                 self._mark_goal_active()
                 return 0.2, "selector_unlock_complete"
             if self._selected_color == cell:
-                return 0.03, "local_match_no_unlock"
+                return self._local_match_no_unlock_reward()
             return -0.08, "wrong_selector_or_switch"
         if self._rule.kind == "order_collect" and cell in COLLECT_COLORS:
             collected = self._inventory.get("sequence", "")
@@ -434,8 +435,7 @@ class HiddenRuleEnv(BaseEnvironment):
             cell in self._rule.order or cell == self._rule.decoy_color
         ):
             if cell == self._rule.decoy_color:
-                self._progress_index = 0
-                return 0.08, "decoy_reward_reset"
+                return self._decoy_reset_reward()
             expected = self._rule.order[self._progress_index] if self._progress_index < len(self._rule.order) else None
             if expected is None:
                 return -0.05, "redundant_collect"
@@ -452,11 +452,9 @@ class HiddenRuleEnv(BaseEnvironment):
             cell in self._rule.order or cell == self._rule.decoy_color
         ):
             if cell == self._rule.decoy_color:
-                self._progress_index = 0
-                return 0.08, "decoy_reward_reset"
+                return self._decoy_reset_reward()
             if self._selected_color != self._rule.target_color:
-                self._progress_index = 0
-                return 0.02, "false_progress_under_wrong_selector"
+                return self._wrong_selector_progress_reward()
             expected = self._rule.order[self._progress_index] if self._progress_index < len(self._rule.order) else None
             if expected is None:
                 return -0.05, "redundant_collect"
@@ -491,6 +489,35 @@ class HiddenRuleEnv(BaseEnvironment):
 
     def _mark_goal_active(self) -> None:
         self._grid[self._target_pos] = GOAL_ACTIVE
+
+    def _decoy_reset_reward(self) -> tuple[float, str]:
+        had_progress = self._progress_index > 0
+        self._progress_index = 0
+        seen_before = self._flags.get("decoy_seen") == "1"
+        self._flags["decoy_seen"] = "1"
+        if had_progress:
+            return (-0.08 if not seen_before else -0.12), "decoy_reward_reset"
+        if not seen_before:
+            return 0.0, "decoy_reward_reset"
+        return -0.05, "decoy_reward_reset"
+
+    def _local_match_no_unlock_reward(self) -> tuple[float, str]:
+        seen_before = self._flags.get("selector_local_match_seen") == "1"
+        self._flags["selector_local_match_seen"] = "1"
+        if not seen_before:
+            return 0.0, "local_match_no_unlock"
+        return -0.03, "local_match_no_unlock"
+
+    def _wrong_selector_progress_reward(self) -> tuple[float, str]:
+        had_progress = self._progress_index > 0
+        self._progress_index = 0
+        seen_before = self._flags.get("selector_false_progress_seen") == "1"
+        self._flags["selector_false_progress_seen"] = "1"
+        if had_progress:
+            return (-0.08 if not seen_before else -0.12), "false_progress_under_wrong_selector"
+        if not seen_before:
+            return 0.0, "false_progress_under_wrong_selector"
+        return -0.04, "false_progress_under_wrong_selector"
 
     def _observation(self) -> GridObservation:
         extras = {

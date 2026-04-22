@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 
 @dataclass(frozen=True)
@@ -11,6 +12,21 @@ class PolicySupervision:
     sibling_move_weight: float = 0.0
     same_type_target: float = 0.0
     same_type_weight: float = 0.0
+
+
+@dataclass(frozen=True)
+class HindsightSupervision:
+    usefulness: float
+    policy_target: float
+    policy_weight: float
+    sibling_move_weight: float
+    same_type_weight: float
+    teacher_weight: float
+    replay_weight: float
+    discounted_return: float
+    future_progress: float
+    future_setback: float
+    outcome_signal: float
 
 
 _STRONG_POSITIVE_EVENTS: frozenset[str] = frozenset(
@@ -187,3 +203,58 @@ def transition_policy_supervision(
             sibling_move_weight=0.3 if family == "move" else 0.0,
         )
     return PolicySupervision(target=0.0, weight=1.6 if family in {"interact", "click"} else 1.1)
+
+
+def hindsight_supervision(
+    *,
+    base_usefulness: float,
+    base_policy: PolicySupervision,
+    discounted_return: float,
+    future_progress: float,
+    future_setback: float,
+    teacher_weight: float = 0.0,
+    teacher_disagrees: bool = False,
+) -> HindsightSupervision:
+    progress_mass = max(0.0, float(future_progress))
+    setback_mass = max(0.0, float(future_setback))
+    return_signal = math.tanh(float(discounted_return))
+    balance_signal = (progress_mass - (1.15 * setback_mass)) / (1.0 + progress_mass + setback_mass)
+    outcome_signal = _clamp((0.6 * return_signal) + (0.4 * balance_signal), lower=-1.0, upper=1.0)
+    positive = max(outcome_signal, 0.0)
+    negative = max(-outcome_signal, 0.0)
+
+    if float(base_usefulness) >= 0.0:
+        usefulness = float(base_usefulness) + (0.22 * positive) - (0.08 * negative)
+    else:
+        usefulness = float(base_usefulness) + (0.06 * positive) - (0.30 * negative)
+    usefulness = _clamp(usefulness, lower=-1.1, upper=1.1)
+
+    if float(base_policy.target) >= 0.5:
+        policy_target = float(base_policy.target) + (0.18 * positive) - (0.12 * negative)
+    else:
+        policy_target = float(base_policy.target) + (0.04 * positive) - (0.18 * negative)
+    policy_target = _clamp(policy_target, lower=0.0, upper=1.0)
+
+    weight_scale = 1.0 + (0.45 * abs(outcome_signal)) + (0.08 * progress_mass) + (0.16 * setback_mass)
+    weight_scale = _clamp(weight_scale, lower=1.0, upper=3.0)
+
+    teacher_scale = 1.0 + (0.75 * negative if teacher_disagrees else 0.0) - (0.2 * positive if teacher_disagrees else 0.0)
+    teacher_scale += 0.1 * setback_mass
+    teacher_scale = _clamp(teacher_scale, lower=0.4 if teacher_disagrees else 1.0, upper=3.5)
+
+    replay_weight = 1.0 + (0.25 * abs(outcome_signal)) + (0.05 * progress_mass) + (0.12 * setback_mass)
+    replay_weight = _clamp(replay_weight, lower=1.0, upper=3.0)
+
+    return HindsightSupervision(
+        usefulness=usefulness,
+        policy_target=policy_target,
+        policy_weight=float(base_policy.weight) * weight_scale,
+        sibling_move_weight=float(base_policy.sibling_move_weight) * weight_scale,
+        same_type_weight=float(base_policy.same_type_weight) * weight_scale,
+        teacher_weight=float(teacher_weight) * teacher_scale,
+        replay_weight=replay_weight,
+        discounted_return=float(discounted_return),
+        future_progress=progress_mass,
+        future_setback=setback_mass,
+        outcome_signal=outcome_signal,
+    )

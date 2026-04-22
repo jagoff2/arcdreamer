@@ -17,6 +17,7 @@ class WorldModelPrediction:
     next_latent_mean: torch.Tensor
     next_latent_std: torch.Tensor
     reward: torch.Tensor
+    return_value: torch.Tensor
     usefulness: torch.Tensor
     policy: torch.Tensor
     delta: torch.Tensor
@@ -28,6 +29,7 @@ class _EnsembleHead(nn.Module):
         super().__init__()
         self.next_latent = nn.Linear(hidden_dim, latent_dim)
         self.reward = nn.Linear(hidden_dim, 1)
+        self.return_value = nn.Linear(hidden_dim, 1)
         self.usefulness = nn.Linear(hidden_dim, 1)
         self.policy = nn.Linear(hidden_dim, 1)
         self.delta = nn.Linear(hidden_dim, summary_dim)
@@ -36,6 +38,7 @@ class _EnsembleHead(nn.Module):
         return {
             "next_latent": self.next_latent(hidden),
             "reward": self.reward(hidden).squeeze(-1),
+            "return_value": self.return_value(hidden).squeeze(-1),
             "usefulness": self.usefulness(hidden).squeeze(-1),
             "policy": self.policy(hidden).squeeze(-1),
             "delta": self.delta(hidden),
@@ -80,7 +83,7 @@ class RecurrentWorldModel(nn.Module):
         action_embeddings: torch.Tensor | None = None,
         hidden: torch.Tensor | None = None,
     ) -> WorldModelPrediction:
-        next_hidden, next_latents, rewards, usefulness, policies, deltas = self._predict_ensemble(
+        next_hidden, next_latents, rewards, return_values, usefulness, policies, deltas = self._predict_ensemble(
             latent,
             actions=actions,
             state=state,
@@ -94,6 +97,7 @@ class RecurrentWorldModel(nn.Module):
             next_latent_mean=next_latent_mean,
             next_latent_std=next_latent_std,
             reward=rewards.mean(dim=0),
+            return_value=return_values.mean(dim=0),
             usefulness=usefulness.mean(dim=0),
             policy=policies.mean(dim=0),
             delta=deltas.mean(dim=0),
@@ -107,7 +111,7 @@ class RecurrentWorldModel(nn.Module):
         state: StructuredState | None = None,
         action_embeddings: torch.Tensor | None = None,
         hidden: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         if hidden is None:
             hidden = self.initial_hidden(latent.shape[0], device=latent.device)
         if action_embeddings is None:
@@ -119,10 +123,11 @@ class RecurrentWorldModel(nn.Module):
         predictions = [head(next_hidden) for head in self.heads]
         next_latents = torch.stack([prediction["next_latent"] for prediction in predictions], dim=0)
         rewards = torch.stack([prediction["reward"] for prediction in predictions], dim=0)
+        return_values = torch.stack([prediction["return_value"] for prediction in predictions], dim=0)
         usefulness = torch.stack([prediction["usefulness"] for prediction in predictions], dim=0)
         policies = torch.stack([prediction["policy"] for prediction in predictions], dim=0)
         deltas = torch.stack([prediction["delta"] for prediction in predictions], dim=0)
-        return next_hidden, next_latents, rewards, usefulness, policies, deltas
+        return next_hidden, next_latents, rewards, return_values, usefulness, policies, deltas
 
     def loss(
         self,
@@ -132,10 +137,11 @@ class RecurrentWorldModel(nn.Module):
         hidden: torch.Tensor | None,
         next_latent_target: torch.Tensor,
         reward_target: torch.Tensor,
+        return_target: torch.Tensor,
         delta_target: torch.Tensor,
         usefulness_target: torch.Tensor,
     ) -> tuple[torch.Tensor, dict[str, float]]:
-        next_hidden, next_latents, rewards, usefulness, _policies, deltas = self._predict_ensemble(
+        next_hidden, next_latents, rewards, return_values, usefulness, _policies, deltas = self._predict_ensemble(
             latent,
             actions=actions,
             state=state,
@@ -144,18 +150,21 @@ class RecurrentWorldModel(nn.Module):
         del next_hidden
         expanded_next_latent_target = next_latent_target.unsqueeze(0).expand_as(next_latents)
         expanded_reward_target = reward_target.unsqueeze(0).expand_as(rewards)
+        expanded_return_target = return_target.unsqueeze(0).expand_as(return_values)
         expanded_delta_target = delta_target.unsqueeze(0).expand_as(deltas)
         expanded_usefulness_target = usefulness_target.unsqueeze(0).expand_as(usefulness)
         latent_loss = F.mse_loss(next_latents, expanded_next_latent_target)
         reward_loss = F.mse_loss(rewards, expanded_reward_target)
+        return_loss = F.mse_loss(return_values, expanded_return_target)
         delta_loss = F.mse_loss(deltas, expanded_delta_target)
         usefulness_loss = F.mse_loss(usefulness, expanded_usefulness_target)
         next_latent_std = next_latents.std(dim=0)
-        total = latent_loss + reward_loss + 0.5 * delta_loss + 0.5 * usefulness_loss
+        total = latent_loss + reward_loss + (0.35 * return_loss) + 0.5 * delta_loss + 0.5 * usefulness_loss
         metrics = {
             "loss_total": float(total.detach().cpu()),
             "loss_latent": float(latent_loss.detach().cpu()),
             "loss_reward": float(reward_loss.detach().cpu()),
+            "loss_return": float(return_loss.detach().cpu()),
             "loss_delta": float(delta_loss.detach().cpu()),
             "loss_usefulness": float(usefulness_loss.detach().cpu()),
             "uncertainty": float(next_latent_std.mean(dim=-1).mean().detach().cpu()),

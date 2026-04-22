@@ -16,7 +16,7 @@ class _MeanMatchingButWrongEnsembleWorldModel(RecurrentWorldModel):
         state=None,
         action_embeddings: torch.Tensor | None = None,
         hidden: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         batch_size = latent.shape[0]
         device = latent.device
         next_hidden = torch.zeros(batch_size, self.hidden_dim, device=device)
@@ -33,6 +33,15 @@ class _MeanMatchingButWrongEnsembleWorldModel(RecurrentWorldModel):
             [
                 [1.0],
                 [-1.0],
+                [0.0],
+            ],
+            dtype=torch.float32,
+            device=device,
+        )
+        return_values = torch.tensor(
+            [
+                [1.5],
+                [-1.5],
                 [0.0],
             ],
             dtype=torch.float32,
@@ -57,7 +66,7 @@ class _MeanMatchingButWrongEnsembleWorldModel(RecurrentWorldModel):
             dtype=torch.float32,
             device=device,
         )
-        return next_hidden, next_latents, rewards, usefulness, policies, deltas
+        return next_hidden, next_latents, rewards, return_values, usefulness, policies, deltas
 
 
 def test_world_model_loss_penalizes_wrong_heads_even_if_ensemble_mean_matches() -> None:
@@ -65,6 +74,7 @@ def test_world_model_loss_penalizes_wrong_heads_even_if_ensemble_mean_matches() 
     latent = torch.zeros((1, 2), dtype=torch.float32)
     next_latent_target = torch.zeros((1, 2), dtype=torch.float32)
     reward_target = torch.zeros((1,), dtype=torch.float32)
+    return_target = torch.zeros((1,), dtype=torch.float32)
     delta_target = torch.zeros((1, 3), dtype=torch.float32)
     usefulness_target = torch.zeros((1,), dtype=torch.float32)
 
@@ -75,6 +85,7 @@ def test_world_model_loss_penalizes_wrong_heads_even_if_ensemble_mean_matches() 
         hidden=None,
         next_latent_target=next_latent_target,
         reward_target=reward_target,
+        return_target=return_target,
         delta_target=delta_target,
         usefulness_target=usefulness_target,
     )
@@ -82,6 +93,7 @@ def test_world_model_loss_penalizes_wrong_heads_even_if_ensemble_mean_matches() 
     assert float(loss.item()) > 0.5
     assert metrics["loss_latent"] > 0.0
     assert metrics["loss_reward"] > 0.0
+    assert metrics["loss_return"] > 0.0
     assert metrics["loss_delta"] > 0.0
     assert metrics["loss_usefulness"] > 0.0
 
@@ -91,6 +103,7 @@ def test_world_model_reports_disagreement_without_penalizing_it_in_total_loss() 
     latent = torch.zeros((1, 2), dtype=torch.float32)
     next_latent_target = torch.zeros((1, 2), dtype=torch.float32)
     reward_target = torch.zeros((1,), dtype=torch.float32)
+    return_target = torch.zeros((1,), dtype=torch.float32)
     delta_target = torch.zeros((1, 3), dtype=torch.float32)
     usefulness_target = torch.zeros((1,), dtype=torch.float32)
 
@@ -101,6 +114,7 @@ def test_world_model_reports_disagreement_without_penalizing_it_in_total_loss() 
         hidden=None,
         next_latent_target=next_latent_target,
         reward_target=reward_target,
+        return_target=return_target,
         delta_target=delta_target,
         usefulness_target=usefulness_target,
     )
@@ -108,6 +122,7 @@ def test_world_model_reports_disagreement_without_penalizing_it_in_total_loss() 
     expected_total = (
         metrics["loss_latent"]
         + metrics["loss_reward"]
+        + (0.35 * metrics["loss_return"])
         + (0.5 * metrics["loss_delta"])
         + (0.5 * metrics["loss_usefulness"])
     )

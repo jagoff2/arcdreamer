@@ -298,6 +298,7 @@ class ActionThought:
     policy: float = 0.0
     policy_weight: float = 0.0
     predicted_reward: float = 0.0
+    predicted_return: float = 0.0
     usefulness: float = 0.0
     selector_followup: float = 0.0
     next_latent: Any | None = None

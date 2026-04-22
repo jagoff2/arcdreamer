@@ -154,6 +154,16 @@ def test_selector_unlock_requires_click_before_correct_switch() -> None:
     assert final.reward > 0.9
 
 
+def test_explicit_reset_seed_updates_episode_identity() -> None:
+    env = HiddenRuleEnv(family_mode="switch_unlock", family_variant="red", seed=13)
+
+    first = env.reset(seed=41)
+    second = env.reset(seed=42)
+
+    assert first.episode_id == "synthetic_hidden_rule/41_0"
+    assert second.episode_id == "synthetic_hidden_rule/42_1"
+
+
 def test_delayed_order_unlock_uses_delayed_completion_and_decoy_reset() -> None:
     env = HiddenRuleEnv(family_mode="delayed_order_unlock", family_variant="red_then_blue", seed=19)
     observation = env.reset(seed=19)
@@ -177,7 +187,7 @@ def test_delayed_order_unlock_uses_delayed_completion_and_decoy_reset() -> None:
     agent, interact = approach(decoy, agent)
     decoy_result = env.step(interact)
     assert decoy_result.info["event"] == "decoy_reward_reset"
-    assert decoy_result.reward > 0.0
+    assert decoy_result.reward <= 0.0
 
     agent, interact = approach(first, agent)
     env.step(interact)
@@ -185,3 +195,26 @@ def test_delayed_order_unlock_uses_delayed_completion_and_decoy_reset() -> None:
     second_result = env.step(interact)
     assert second_result.info["event"] == "delayed_sequence_complete"
     assert second_result.reward == 0.0
+
+
+def test_delayed_order_unlock_decoy_loop_is_not_reward_hackable() -> None:
+    env = HiddenRuleEnv(family_mode="delayed_order_unlock", family_variant="red_then_blue", seed=23)
+    observation = env.reset(seed=23)
+    agent = _find(observation.grid, AGENT)
+    decoy = env._collect_positions[SWITCH_YELLOW]
+
+    def approach(target: tuple[int, int], agent_pos: tuple[int, int]):
+        path, interact_action = _reachable_interaction(env._grid, agent_pos, target)
+        for move in path:
+            env.step(move)
+        return env._agent, interact_action
+
+    agent, interact = approach(decoy, agent)
+    first = env.step(interact)
+    agent, interact = approach(decoy, agent)
+    second = env.step(interact)
+
+    assert first.info["event"] == "decoy_reward_reset"
+    assert second.info["event"] == "decoy_reward_reset"
+    assert first.reward <= 0.0
+    assert second.reward < 0.0

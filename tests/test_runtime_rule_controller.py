@@ -912,3 +912,89 @@ def test_runtime_rule_controller_exploit_plan_materializes_bind_then_objective_o
 
     assert plan is not None
     assert any(option.option_type == "bind_then_objective" for option in controller.option_hypotheses.values())
+
+
+def test_runtime_rule_controller_keeps_interface_only_targets_out_of_reward_objectives_without_evidence() -> None:
+    state = extract_structured_state(
+        _observation(
+            np.array(
+                [
+                    [5, 0, 0, 0, 0],
+                    [0, 9, 0, 2, 0],
+                    [0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 0],
+                ],
+                dtype=np.int64,
+            ),
+            step_index=0,
+            actions=("right", "interact_right", "click:0:0"),
+            action_roles={"right": "move_right", "interact_right": "interact", "click:0:0": "click"},
+            cell_tags={
+                (1, 1): ("agent",),
+                (1, 3): ("target",),
+            },
+        )
+    )
+    controller = RuntimeRuleController()
+    mover_signature = _signature_for_tag(state, "agent")
+    target_signature = _signature_for_tag(state, "target")
+    interface_signature = next(
+        object_signature(obj)
+        for obj in state.objects
+        if (0, 0) in obj.cells
+    )
+    controller.control_hypotheses[(controller.current_mode_key, mover_signature)] = ControlHypothesis(
+        evidence=EvidenceCounter(support=5, contradiction=1),
+        moved_steps=3,
+        motion_sum=3.0,
+    )
+
+    candidates = controller._objective_candidates(state, {mover_signature: 1.0})
+
+    candidate_signatures = {object_signature(target_object) for _, target_object, _ in candidates}
+    assert target_signature in candidate_signatures
+    assert interface_signature not in candidate_signatures
+    assert controller._has_unresolved_interaction_targets(state, {mover_signature: 1.0}) is False
+
+
+def test_runtime_rule_controller_allows_interface_target_into_reward_objectives_after_reward_evidence() -> None:
+    state = extract_structured_state(
+        _observation(
+            np.array(
+                [
+                    [5, 0, 0],
+                    [0, 9, 0],
+                    [0, 0, 0],
+                ],
+                dtype=np.int64,
+            ),
+            step_index=0,
+            actions=("right", "interact_right", "click:0:0"),
+            action_roles={"right": "move_right", "interact_right": "interact", "click:0:0": "click"},
+            cell_tags={(1, 1): ("agent",)},
+        )
+    )
+    controller = RuntimeRuleController()
+    mover_signature = _signature_for_tag(state, "agent")
+    interface_signature = next(
+        object_signature(obj)
+        for obj in state.objects
+        if (0, 0) in obj.cells
+    )
+    controller.control_hypotheses[(controller.current_mode_key, mover_signature)] = ControlHypothesis(
+        evidence=EvidenceCounter(support=5, contradiction=1),
+        moved_steps=3,
+        motion_sum=3.0,
+    )
+    controller.objective_hypotheses[(controller.current_mode_key, mover_signature, interface_signature)] = ObjectiveHypothesis(
+        evidence=EvidenceCounter(support=3, contradiction=0),
+        successful_interactions=1,
+        reward_hits=1,
+        reward_sum=0.5,
+    )
+
+    candidates = controller._objective_candidates(state, {mover_signature: 1.0})
+
+    candidate_signatures = {object_signature(target_object) for _, target_object, _ in candidates}
+    assert interface_signature in candidate_signatures
