@@ -20,6 +20,7 @@ from arcagi.training.synthetic import (
     _dream_sequence_windows,
     _evaluate_checkpoint_holdout,
     _evaluate_holdout,
+    _flat_family_weights,
     _finalize_holdout_result,
     _holdout_passed,
     _make_sample,
@@ -30,7 +31,10 @@ from arcagi.training.synthetic import (
     _should_run_regression_holdout,
     _stage_family_weights,
     _teacher_episode_fraction,
+    _teacher_ownership_signal,
     _trainable_parameters,
+    _weighted_family_schedule,
+    build_parser,
     build_default_modules,
     collect_dataset,
     train_synthetic,
@@ -229,6 +233,55 @@ def test_collect_dataset_reports_teacher_guidance_state_from_history() -> None:
     assert metrics["teacher_relabel_fraction"] >= 0.0
 
 
+def test_teacher_ownership_signal_phases_down_guidance_when_learner_owns_and_agrees() -> None:
+    config = SyntheticTrainingConfig(
+        teacher_episode_fraction_initial=0.4,
+        teacher_episode_fraction_floor=0.05,
+        teacher_takeover_prob_initial=0.5,
+        teacher_takeover_prob_floor=0.05,
+        teacher_ownership_window=3,
+        teacher_agreement_target=0.75,
+        teacher_success_target=0.8,
+    )
+    history = [
+        {
+            "collect_success_rate": 0.92,
+            "teacher_step_fraction": 0.08,
+            "teacher_relabel_fraction": 0.12,
+            "learner_teacher_agreement": 0.89,
+        },
+        {
+            "collect_success_rate": 0.95,
+            "teacher_step_fraction": 0.05,
+            "teacher_relabel_fraction": 0.1,
+            "learner_teacher_agreement": 0.93,
+        },
+    ]
+
+    signal = _teacher_ownership_signal(config, history)
+    fraction = _teacher_episode_fraction(config, history)
+
+    assert signal > 0.5
+    assert fraction < config.teacher_episode_fraction_initial
+    assert fraction >= config.teacher_episode_fraction_floor
+
+
+def test_build_parser_inherits_teacher_and_theory_defaults_from_config() -> None:
+    defaults = SyntheticTrainingConfig()
+    parser = build_parser()
+    args = parser.parse_args([])
+
+    assert args.teacher_episode_fraction_initial == defaults.teacher_episode_fraction_initial
+    assert args.teacher_episode_fraction_floor == defaults.teacher_episode_fraction_floor
+    assert args.teacher_takeover_prob_initial == defaults.teacher_takeover_prob_initial
+    assert args.teacher_takeover_prob_floor == defaults.teacher_takeover_prob_floor
+    assert args.teacher_ownership_window == defaults.teacher_ownership_window
+    assert args.teacher_agreement_target == defaults.teacher_agreement_target
+    assert args.teacher_success_target == defaults.teacher_success_target
+    assert args.theory_loss_weight == defaults.theory_loss_weight
+    assert args.diagnostic_language_loss_weight == defaults.diagnostic_language_loss_weight
+
+
 def test_mixed_warm_start_uses_dense_supervision_without_full_teacher_ownership() -> None:
     config = SyntheticTrainingConfig(
         episodes_per_epoch=32,
@@ -253,7 +306,7 @@ def test_mixed_warm_start_uses_dense_supervision_without_full_teacher_ownership(
 
     assert metrics["dense_teacher_supervision"] is True
     assert metrics["teacher_episode_fraction"] == 0.25
-    assert metrics["teacher_episode_count"] < metrics["episodes"]
+    assert metrics["teacher_episode_count"] == 0.0
     assert metrics["teacher_step_fraction"] < 1.0
     assert metrics["teacher_relabel_fraction"] > 0.0
 
@@ -307,6 +360,38 @@ def test_make_sample_preserves_teacher_action_labels_for_learner_states() -> Non
     assert sample["teacher_action"] == "right"
     assert sample["teacher_weight"] == 0.8
     assert sample["plan_tokens"][:5] == ("plan", "action", "move", "direction", "right")
+
+
+def test_make_sample_uses_event_conditioned_supervision_targets() -> None:
+    env = HiddenRuleEnv(family_mode="selector_sequence_unlock", family_variant="red__red_then_blue", seed=31)
+    observation = env.reset(seed=31)
+    state = extract_structured_state(observation)
+
+    misleading = _make_sample(
+        state,
+        state,
+        "interact_right",
+        0.0,
+        {"event": "false_progress_under_wrong_selector"},
+    )
+    progress = _make_sample(
+        state,
+        state,
+        "interact_right",
+        0.0,
+        {"event": "selector_sequence_progress"},
+    )
+
+    assert misleading["event"] == "false_progress_under_wrong_selector"
+    assert misleading["usefulness"] < 0.0
+    assert misleading["policy_target"] == 0.0
+    assert misleading["effect_kind"] == "setback"
+    assert misleading["theory_tokens"][0] == "rule"
+    assert progress["event"] == "selector_sequence_progress"
+    assert progress["usefulness"] > 0.0
+    assert progress["policy_target"] > 0.5
+    assert progress["effect_kind"] == "reward_gain"
+    assert progress["diagnostic_target"] >= 0.0
 
 
 def test_episode_hindsight_boosts_early_credit_for_late_positive_outcome() -> None:
@@ -493,9 +578,14 @@ def test_multidevice_replay_phase_uses_secondary_episode_shard_on_cpu() -> None:
         "epoch_reward_losses": [],
         "epoch_delta_losses": [],
         "epoch_usefulness_losses": [],
+        "epoch_causal_losses": [],
+        "epoch_diagnostic_world_losses": [],
+        "epoch_effect_losses": [],
         "epoch_belief_losses": [],
         "epoch_question_losses": [],
         "epoch_plan_losses": [],
+        "epoch_theory_losses": [],
+        "epoch_diagnostic_language_losses": [],
         "epoch_policy_losses": [],
         "epoch_positive_policy_losses": [],
         "epoch_negative_policy_losses": [],
@@ -570,6 +660,62 @@ def test_stage_family_weights_replay_previous_frontier_families() -> None:
     assert weights["delayed_order_unlock"] == 4
     assert weights["switch_unlock"] == 2
     assert weights["order_collect"] == 2
+
+
+def test_flat_family_weights_focus_more_on_lagging_families_without_dropping_rehearsal_floor() -> None:
+    config = SyntheticTrainingConfig(
+        curriculum="flat",
+        family_modes=("switch_unlock", "order_collect", "selector_sequence_unlock"),
+        flat_family_weight_floor=1,
+        flat_family_weight_ceiling=4,
+        flat_family_focus_strength=3.0,
+        flat_family_history_window=1,
+    )
+    history = [
+        {
+            "family_breakdown": {
+                "switch_unlock": {
+                    "episodes": 32,
+                    "success_rate": 1.0,
+                    "avg_return": 1.0,
+                    "avg_steps": 12.0,
+                    "avg_interactions": 2.0,
+                },
+                "order_collect": {
+                    "episodes": 32,
+                    "success_rate": 0.92,
+                    "avg_return": 0.8,
+                    "avg_steps": 20.0,
+                    "avg_interactions": 4.0,
+                },
+                "selector_sequence_unlock": {
+                    "episodes": 32,
+                    "success_rate": 0.35,
+                    "avg_return": -0.4,
+                    "avg_steps": 40.0,
+                    "avg_interactions": 11.0,
+                },
+            }
+        }
+    ]
+
+    weights = _flat_family_weights(config, history)
+
+    assert weights["switch_unlock"] == 1
+    assert weights["order_collect"] >= 1
+    assert weights["selector_sequence_unlock"] > weights["order_collect"]
+    assert weights["selector_sequence_unlock"] > weights["switch_unlock"]
+
+
+def test_weighted_family_schedule_keeps_minimum_family_coverage_when_budget_allows() -> None:
+    schedule = _weighted_family_schedule(
+        {"switch_unlock": 1, "order_collect": 1, "selector_sequence_unlock": 4},
+        episode_count=12,
+        seed=17,
+    )
+
+    assert len(schedule) == 12
+    assert {"switch_unlock", "order_collect", "selector_sequence_unlock"} <= set(schedule)
 
 
 def test_holdout_pass_requires_frontier_and_regression_thresholds() -> None:

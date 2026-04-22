@@ -299,6 +299,8 @@ class ActionThought:
     policy_weight: float = 0.0
     predicted_reward: float = 0.0
     predicted_return: float = 0.0
+    causal_value: float = 0.0
+    diagnostic_value: float = 0.0
     usefulness: float = 0.0
     selector_followup: float = 0.0
     next_latent: Any | None = None
@@ -382,6 +384,10 @@ class RuntimeThought:
     def selector_followup_for(self, action: ActionName) -> float:
         thought = self.for_action(action)
         return 0.0 if thought is None else thought.selector_followup
+
+    def diagnostic_value_for(self, action: ActionName) -> float:
+        thought = self.for_action(action)
+        return 0.0 if thought is None else thought.diagnostic_value
 
     def claim_tokens(self, limit: int = 2) -> tuple[str, ...]:
         tokens: list[str] = []

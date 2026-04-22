@@ -134,6 +134,9 @@ class _FakeWorldModel:
             usefulness=torch.tensor([usefulness], dtype=torch.float32, device=latent.device),
             policy=torch.tensor([policy], dtype=torch.float32, device=latent.device),
             delta=torch.zeros((1, 25), dtype=torch.float32, device=latent.device),
+            causal_value=torch.tensor([reward + (0.5 * usefulness)], dtype=torch.float32, device=latent.device),
+            diagnostic_value=torch.tensor([0.15], dtype=torch.float32, device=latent.device),
+            effect_logits=torch.zeros((1, 5), dtype=torch.float32, device=latent.device),
             uncertainty=torch.tensor([0.05], dtype=torch.float32, device=latent.device),
         )
 
@@ -174,6 +177,9 @@ class _ProxySensitiveWorldModel:
             usefulness=torch.tensor([usefulness], dtype=torch.float32, device=latent.device),
             policy=torch.tensor([policy], dtype=torch.float32, device=latent.device),
             delta=torch.ones((1, 25), dtype=torch.float32, device=latent.device) * 0.1,
+            causal_value=torch.tensor([reward + (0.5 * usefulness)], dtype=torch.float32, device=latent.device),
+            diagnostic_value=torch.tensor([0.1], dtype=torch.float32, device=latent.device),
+            effect_logits=torch.zeros((1, 5), dtype=torch.float32, device=latent.device),
             uncertainty=torch.tensor([0.05], dtype=torch.float32, device=latent.device),
         )
 
@@ -214,6 +220,9 @@ class _UncertaintyTrapWorldModel:
             usefulness=torch.tensor([usefulness], dtype=torch.float32, device=latent.device),
             policy=torch.tensor([policy], dtype=torch.float32, device=latent.device),
             delta=torch.zeros((1, 25), dtype=torch.float32, device=latent.device),
+            causal_value=torch.tensor([reward + (0.5 * usefulness)], dtype=torch.float32, device=latent.device),
+            diagnostic_value=torch.tensor([uncertainty], dtype=torch.float32, device=latent.device),
+            effect_logits=torch.zeros((1, 5), dtype=torch.float32, device=latent.device),
             uncertainty=torch.tensor([uncertainty], dtype=torch.float32, device=latent.device),
         )
 
@@ -245,6 +254,9 @@ class _PolicyTrapWorldModel:
             usefulness=torch.tensor([usefulness], dtype=torch.float32, device=latent.device),
             policy=torch.tensor([policy], dtype=torch.float32, device=latent.device),
             delta=torch.zeros((1, 25), dtype=torch.float32, device=latent.device),
+            causal_value=torch.tensor([reward + (0.5 * usefulness)], dtype=torch.float32, device=latent.device),
+            diagnostic_value=torch.tensor([0.05], dtype=torch.float32, device=latent.device),
+            effect_logits=torch.zeros((1, 5), dtype=torch.float32, device=latent.device),
             uncertainty=torch.tensor([0.05], dtype=torch.float32, device=latent.device),
         )
 

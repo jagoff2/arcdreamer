@@ -10,6 +10,8 @@ from torch.nn import functional as F
 from arcagi.core.types import ActionName, StructuredState
 from arcagi.models.action_encoder import ActionEncoder
 
+EFFECT_KINDS: tuple[str, ...] = ("reward_gain", "setback", "state_change", "latent_shift", "no_effect")
+
 
 @dataclass(frozen=True)
 class WorldModelPrediction:
@@ -21,6 +23,9 @@ class WorldModelPrediction:
     usefulness: torch.Tensor
     policy: torch.Tensor
     delta: torch.Tensor
+    causal_value: torch.Tensor
+    diagnostic_value: torch.Tensor
+    effect_logits: torch.Tensor
     uncertainty: torch.Tensor
 
 
@@ -33,6 +38,9 @@ class _EnsembleHead(nn.Module):
         self.usefulness = nn.Linear(hidden_dim, 1)
         self.policy = nn.Linear(hidden_dim, 1)
         self.delta = nn.Linear(hidden_dim, summary_dim)
+        self.causal_value = nn.Linear(hidden_dim, 1)
+        self.diagnostic_value = nn.Linear(hidden_dim, 1)
+        self.effect_logits = nn.Linear(hidden_dim, len(EFFECT_KINDS))
 
     def forward(self, hidden: torch.Tensor) -> dict[str, torch.Tensor]:
         return {
@@ -42,6 +50,9 @@ class _EnsembleHead(nn.Module):
             "usefulness": self.usefulness(hidden).squeeze(-1),
             "policy": self.policy(hidden).squeeze(-1),
             "delta": self.delta(hidden),
+            "causal_value": self.causal_value(hidden).squeeze(-1),
+            "diagnostic_value": self.diagnostic_value(hidden).squeeze(-1),
+            "effect_logits": self.effect_logits(hidden),
         }
 
 
@@ -83,7 +94,18 @@ class RecurrentWorldModel(nn.Module):
         action_embeddings: torch.Tensor | None = None,
         hidden: torch.Tensor | None = None,
     ) -> WorldModelPrediction:
-        next_hidden, next_latents, rewards, return_values, usefulness, policies, deltas = self._predict_ensemble(
+        (
+            next_hidden,
+            next_latents,
+            rewards,
+            return_values,
+            usefulness,
+            policies,
+            deltas,
+            causal_values,
+            diagnostic_values,
+            effect_logits,
+        ) = self._predict_ensemble(
             latent,
             actions=actions,
             state=state,
@@ -101,6 +123,9 @@ class RecurrentWorldModel(nn.Module):
             usefulness=usefulness.mean(dim=0),
             policy=policies.mean(dim=0),
             delta=deltas.mean(dim=0),
+            causal_value=causal_values.mean(dim=0),
+            diagnostic_value=diagnostic_values.mean(dim=0),
+            effect_logits=effect_logits.mean(dim=0),
             uncertainty=next_latent_std.mean(dim=-1),
         )
 
@@ -111,7 +136,18 @@ class RecurrentWorldModel(nn.Module):
         state: StructuredState | None = None,
         action_embeddings: torch.Tensor | None = None,
         hidden: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
         if hidden is None:
             hidden = self.initial_hidden(latent.shape[0], device=latent.device)
         if action_embeddings is None:
@@ -127,7 +163,21 @@ class RecurrentWorldModel(nn.Module):
         usefulness = torch.stack([prediction["usefulness"] for prediction in predictions], dim=0)
         policies = torch.stack([prediction["policy"] for prediction in predictions], dim=0)
         deltas = torch.stack([prediction["delta"] for prediction in predictions], dim=0)
-        return next_hidden, next_latents, rewards, return_values, usefulness, policies, deltas
+        causal_values = torch.stack([prediction["causal_value"] for prediction in predictions], dim=0)
+        diagnostic_values = torch.stack([prediction["diagnostic_value"] for prediction in predictions], dim=0)
+        effect_logits = torch.stack([prediction["effect_logits"] for prediction in predictions], dim=0)
+        return (
+            next_hidden,
+            next_latents,
+            rewards,
+            return_values,
+            usefulness,
+            policies,
+            deltas,
+            causal_values,
+            diagnostic_values,
+            effect_logits,
+        )
 
     def loss(
         self,
@@ -140,8 +190,22 @@ class RecurrentWorldModel(nn.Module):
         return_target: torch.Tensor,
         delta_target: torch.Tensor,
         usefulness_target: torch.Tensor,
+        effect_target: torch.Tensor | None = None,
+        causal_target: torch.Tensor | None = None,
+        diagnostic_target: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, dict[str, float]]:
-        next_hidden, next_latents, rewards, return_values, usefulness, _policies, deltas = self._predict_ensemble(
+        (
+            next_hidden,
+            next_latents,
+            rewards,
+            return_values,
+            usefulness,
+            _policies,
+            deltas,
+            causal_values,
+            diagnostic_values,
+            effect_logits,
+        ) = self._predict_ensemble(
             latent,
             actions=actions,
             state=state,
@@ -158,8 +222,35 @@ class RecurrentWorldModel(nn.Module):
         return_loss = F.mse_loss(return_values, expanded_return_target)
         delta_loss = F.mse_loss(deltas, expanded_delta_target)
         usefulness_loss = F.mse_loss(usefulness, expanded_usefulness_target)
+        if causal_target is None:
+            causal_loss = torch.zeros((), dtype=latent.dtype, device=latent.device)
+        else:
+            expanded_causal_target = causal_target.unsqueeze(0).expand_as(causal_values)
+            causal_loss = F.mse_loss(causal_values, expanded_causal_target)
+        if diagnostic_target is None:
+            diagnostic_loss = torch.zeros((), dtype=latent.dtype, device=latent.device)
+        else:
+            expanded_diagnostic_target = diagnostic_target.unsqueeze(0).expand_as(diagnostic_values)
+            diagnostic_loss = F.mse_loss(diagnostic_values, expanded_diagnostic_target)
+        if effect_target is None:
+            effect_loss = torch.zeros((), dtype=latent.dtype, device=latent.device)
+        else:
+            repeated_targets = effect_target.unsqueeze(0).expand(effect_logits.shape[0], -1).reshape(-1)
+            effect_loss = F.cross_entropy(
+                effect_logits.reshape(-1, effect_logits.shape[-1]),
+                repeated_targets,
+            )
         next_latent_std = next_latents.std(dim=0)
-        total = latent_loss + reward_loss + (0.35 * return_loss) + 0.5 * delta_loss + 0.5 * usefulness_loss
+        total = (
+            latent_loss
+            + reward_loss
+            + (0.35 * return_loss)
+            + (0.5 * delta_loss)
+            + (0.5 * usefulness_loss)
+            + (0.35 * causal_loss)
+            + (0.3 * diagnostic_loss)
+            + (0.35 * effect_loss)
+        )
         metrics = {
             "loss_total": float(total.detach().cpu()),
             "loss_latent": float(latent_loss.detach().cpu()),
@@ -167,6 +258,9 @@ class RecurrentWorldModel(nn.Module):
             "loss_return": float(return_loss.detach().cpu()),
             "loss_delta": float(delta_loss.detach().cpu()),
             "loss_usefulness": float(usefulness_loss.detach().cpu()),
+            "loss_causal": float(causal_loss.detach().cpu()),
+            "loss_diagnostic": float(diagnostic_loss.detach().cpu()),
+            "loss_effect": float(effect_loss.detach().cpu()),
             "uncertainty": float(next_latent_std.mean(dim=-1).mean().detach().cpu()),
         }
         return total, metrics

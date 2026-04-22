@@ -21,6 +21,54 @@ def _agent_visible_info(info: dict[str, object]) -> dict[str, object]:
     return visible
 
 
+def _merge_visible_info_into_observation(
+    observation: GridObservation,
+    info: dict[str, object],
+) -> GridObservation:
+    visible = _agent_visible_info(info)
+    if not visible:
+        return observation
+    extras = dict(observation.extras)
+    inventory = {str(key): str(value) for key, value in extras.get("inventory", {}).items()}
+    flags = {str(key): str(value) for key, value in extras.get("flags", {}).items()}
+    cell_tags = {
+        tuple(cell): tuple(str(tag) for tag in tags)
+        for cell, tags in extras.get("cell_tags", {}).items()
+    }
+    for key, value in visible.items():
+        if key in {"public_inventory", "surface_inventory"} and isinstance(value, dict):
+            inventory.update({str(item_key): str(item_value) for item_key, item_value in value.items()})
+            continue
+        if key in {"public_flags", "surface_flags"} and isinstance(value, dict):
+            flags.update({str(item_key): str(item_value) for item_key, item_value in value.items()})
+            continue
+        if key in {"public_cell_tags", "surface_cell_tags"} and isinstance(value, dict):
+            for cell, tags_value in value.items():
+                normalized_cell = tuple(cell)
+                existing = set(cell_tags.get(normalized_cell, ()))
+                if isinstance(tags_value, (tuple, list)):
+                    existing.update(str(tag) for tag in tags_value)
+                else:
+                    existing.add(str(tags_value))
+                cell_tags[normalized_cell] = tuple(sorted(existing))
+            continue
+        extras[key] = value
+    if inventory:
+        extras["inventory"] = inventory
+    if flags:
+        extras["flags"] = flags
+    if cell_tags:
+        extras["cell_tags"] = cell_tags
+    return GridObservation(
+        task_id=observation.task_id,
+        episode_id=observation.episode_id,
+        step_index=observation.step_index,
+        grid=observation.grid,
+        available_actions=observation.available_actions,
+        extras=extras,
+    )
+
+
 class BaseAgent(ABC):
     def __init__(self, name: str) -> None:
         self.name = name
@@ -72,7 +120,8 @@ class BaseAgent(ABC):
         info: dict[str, object],
     ) -> StructuredState:
         agent_info = _agent_visible_info(info)
-        extracted_next_raw_state = extract_structured_state(next_observation)
+        merged_observation = _merge_visible_info_into_observation(next_observation, info)
+        extracted_next_raw_state = extract_structured_state(merged_observation)
         next_raw_state = self.representation_repair.augment(extracted_next_raw_state, commit=False)
         if self.last_raw_state is not None and self.last_action is not None:
             self.representation_repair.observe_transition(

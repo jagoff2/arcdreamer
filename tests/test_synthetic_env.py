@@ -218,3 +218,29 @@ def test_delayed_order_unlock_decoy_loop_is_not_reward_hackable() -> None:
     assert second.info["event"] == "decoy_reward_reset"
     assert first.reward <= 0.0
     assert second.reward < 0.0
+
+
+def test_selector_sequence_observation_surfaces_public_control_and_progress_state() -> None:
+    env = HiddenRuleEnv(family_mode="selector_sequence_unlock", family_variant="red__red_then_blue", seed=29)
+    observation = env.reset(seed=29)
+    selector_click = next(action for action, color in env._selector_actions.items() if color == SWITCH_RED)
+
+    clicked = env.step(selector_click)
+
+    assert clicked.observation.extras["inventory"]["interface_selected_color"] == "red"
+    assert clicked.observation.extras["flags"]["interface_selection_active"] == "1"
+    selector_position = env._selector_positions[SWITCH_RED]
+    assert "active" in clicked.observation.extras["cell_tags"][selector_position]
+    assert "selected" in clicked.observation.extras["cell_tags"][selector_position]
+
+    agent = env._agent
+    first_target = env._collect_positions[COLLECT_RED]
+    path, interact_action = _reachable_interaction(env._grid, agent, first_target)
+    for action in path:
+        env.step(action)
+    progressed = env.step(interact_action)
+
+    assert progressed.info["event"] == "selector_sequence_progress"
+    assert progressed.observation.extras["inventory"]["interface_sequence_progress"] == "1"
+    assert progressed.observation.extras["inventory"]["interface_sequence_total"] == "2"
+    assert progressed.observation.extras["flags"]["interface_sequence_started"] == "1"

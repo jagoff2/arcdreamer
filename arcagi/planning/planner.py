@@ -130,6 +130,7 @@ def _predicted_outcome_value(
     predicted_reward: float,
     usefulness: float,
     predicted_return: float,
+    causal_value: float,
     policy_prior: float,
     policy_weight: float,
 ) -> float:
@@ -137,6 +138,7 @@ def _predicted_outcome_value(
         predicted_reward
         + (0.5 * usefulness)
         + (0.35 * predicted_return)
+        + (0.45 * causal_value)
         + _policy_bonus(
             predicted_reward,
             usefulness,
@@ -432,27 +434,32 @@ class HybridPlanner:
             disagreement = 0.0
             policy_prior = 0.0
             policy_weight = 0.0
+            diagnostic_model_bonus = 0.0
             action_thought = thought.for_action(action)
             if action_thought is not None:
                 value = action_thought.value
                 disagreement = action_thought.uncertainty
                 policy_prior = action_thought.policy
                 policy_weight = action_thought.policy_weight
+                diagnostic_model_bonus = action_thought.diagnostic_value
             elif world_model is not None and latent is not None:
                 prediction = world_model.step(latent, actions=[action], state=state, hidden=hidden)
                 policy_prior = float(prediction.policy.item())
                 policy_weight = 0.35 / float(graph_stats.visits + 1)
                 predicted_reward = float(prediction.reward.item())
                 predicted_return = float(prediction.return_value.item())
+                causal_value = float(prediction.causal_value.item())
                 usefulness = float(prediction.usefulness.item())
                 value = _predicted_outcome_value(
                     predicted_reward,
                     usefulness,
                     predicted_return,
+                    causal_value,
                     policy_prior,
                     policy_weight,
                 )
                 disagreement = float(prediction.uncertainty.item())
+                diagnostic_model_bonus = float(prediction.diagnostic_value.item())
             if (
                 world_model is not None
                 and latent is not None
@@ -537,6 +544,7 @@ class HybridPlanner:
                 + spatial_bonus
                 + context_online_bias
                 + (0.9 * effective_diagnostic_bonus)
+                + (0.75 * diagnostic_model_bonus)
                 + plan_alignment
                 + stuck_bonus
                 - 0.9 * cycle_penalty
@@ -571,6 +579,7 @@ class HybridPlanner:
                     "spatial_bonus": spatial_bonus,
                     "context_online_bias": context_online_bias,
                     "diagnostic_bonus": effective_diagnostic_bonus,
+                    "diagnostic_model": diagnostic_model_bonus,
                     "plan_alignment": plan_alignment,
                     "wait_penalty": wait_penalty,
                     "stuck_bonus": stuck_bonus,
@@ -625,9 +634,11 @@ class HybridPlanner:
                     action_thought.predicted_reward,
                     action_thought.usefulness,
                     action_thought.predicted_return,
+                    action_thought.causal_value,
                     action_thought.policy,
                     action_thought.policy_weight,
                 )
+                + (0.25 * action_thought.diagnostic_value)
                 - (0.1 * action_thought.uncertainty)
             )
             future = self._lookahead(
@@ -680,6 +691,7 @@ class HybridPlanner:
                 + _context_bias_bonus(state, action, schema=schema, context_bias=context_bias)
                 + (0.85 * (0.0 if diagnostic_action_scores is None else float(diagnostic_action_scores.get(action, 0.0))))
                 + thought.value_for(action)
+                + (0.85 * thought.diagnostic_value_for(action))
                 + (0.8 * thought.selector_followup_for(action))
                 + (0.4 * thought.uncertainty_for(action))
                 + (0.35 * graph.action_novelty(state, action))
@@ -747,7 +759,10 @@ class HybridPlanner:
             for action in affordances
             if build_action_schema(action, context).action_type == "move"
         ]
-        predictions: dict[ActionName, tuple[object, float, float, float, float, float, float, float, _ImaginationStateProxy]] = {}
+        predictions: dict[
+            ActionName,
+            tuple[object, float, float, float, float, float, float, float, float, float, _ImaginationStateProxy],
+        ] = {}
         world_model_calls = 0
         baseline_move_value = float("-inf")
         for action in affordances:
@@ -764,12 +779,15 @@ class HybridPlanner:
             policy_prior = float(prediction.policy.item())
             predicted_reward = float(prediction.reward.item())
             predicted_return = float(prediction.return_value.item())
+            causal_value = float(prediction.causal_value.item())
+            diagnostic_value = float(prediction.diagnostic_value.item())
             usefulness = float(prediction.usefulness.item())
             uncertainty = float(prediction.uncertainty.item())
             value = _predicted_outcome_value(
                 predicted_reward,
                 usefulness,
                 predicted_return,
+                causal_value,
                 policy_prior,
                 policy_weight,
             )
@@ -782,6 +800,8 @@ class HybridPlanner:
                 policy_weight,
                 predicted_reward,
                 predicted_return,
+                causal_value,
+                diagnostic_value,
                 usefulness,
                 next_state_proxy,
             )
@@ -799,6 +819,8 @@ class HybridPlanner:
             policy_weight,
             predicted_reward,
             predicted_return,
+            causal_value,
+            diagnostic_value,
             usefulness,
             next_state_proxy,
         ) in predictions.items():
@@ -825,9 +847,11 @@ class HybridPlanner:
                                     float(followup.reward.item()),
                                     float(followup.usefulness.item()),
                                     float(followup.return_value.item()),
+                                    float(followup.causal_value.item()),
                                     float(followup.policy.item()),
                                     0.25,
                                 )
+                                + (0.25 * float(followup.diagnostic_value.item()))
                                 - (0.1 * followup.uncertainty)
                             ).item()
                         )
@@ -842,6 +866,8 @@ class HybridPlanner:
                     policy_weight=policy_weight,
                     predicted_reward=predicted_reward,
                     predicted_return=predicted_return,
+                    causal_value=causal_value,
+                    diagnostic_value=diagnostic_value,
                     usefulness=usefulness,
                     selector_followup=selector_followup,
                     next_latent=prediction.next_latent_mean,
@@ -878,6 +904,7 @@ class HybridPlanner:
             thought_by_action.keys(),
             key=lambda action: (
                 thought_by_action[action].value
+                + (0.45 * thought_by_action[action].diagnostic_value)
                 + (0.8 * thought_by_action[action].selector_followup)
                 - (0.15 * thought_by_action[action].uncertainty)
                 + (0.1 if build_action_schema(action, context).action_type in {"move", "interact"} else 0.0)

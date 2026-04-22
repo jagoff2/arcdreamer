@@ -544,6 +544,8 @@ class LearnedPlanningAgent(BaseAgent):
                     policy_weight=action_thought.policy_weight,
                     predicted_reward=action_thought.predicted_reward,
                     predicted_return=action_thought.predicted_return,
+                    causal_value=action_thought.causal_value,
+                    diagnostic_value=action_thought.diagnostic_value,
                     usefulness=action_thought.usefulness + patch.usefulness_shift,
                     selector_followup=action_thought.selector_followup,
                     next_latent=action_thought.next_latent,

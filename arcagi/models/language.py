@@ -19,6 +19,8 @@ def _default_vocab_tokens() -> tuple[str, ...]:
             "belief",
             "question",
             "plan",
+            "theory",
+            "diagnostic",
             "goal",
             "target",
             "state",
@@ -26,6 +28,8 @@ def _default_vocab_tokens() -> tuple[str, ...]:
             "progress",
             "focus",
             "contradiction",
+            "competition",
+            "support",
             "effect",
             "direction",
             "action",
@@ -64,6 +68,8 @@ def _default_vocab_tokens() -> tuple[str, ...]:
             "positive",
             "negative",
             "none",
+            "high",
+            "low",
             "near",
             "mid",
             "far",
@@ -113,7 +119,7 @@ def _default_vocab_tokens() -> tuple[str, ...]:
 
 DEFAULT_VOCAB: tuple[str, ...] = _default_vocab_tokens()
 
-MODE_TO_ID = {"belief": 0, "question": 1, "plan": 2}
+MODE_TO_ID = {"belief": 0, "question": 1, "plan": 2, "theory": 3, "diagnostic": 4}
 
 
 @dataclass(frozen=True)

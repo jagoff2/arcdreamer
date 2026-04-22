@@ -188,6 +188,8 @@ class HiddenRuleEnv(BaseEnvironment):
             "question_tokens": self._rule.question_tokens if self._rule else (),
             "inventory": dict(self._inventory),
             "flags": dict(self._flags),
+            "public_inventory": self._public_inventory(),
+            "public_flags": self._public_flags(),
             "event": event,
         }
         return StepResult(
@@ -524,6 +526,8 @@ class HiddenRuleEnv(BaseEnvironment):
             "cell_tags": self._build_cell_tags(),
             "world_type": "synthetic_hidden_rule",
             "action_roles": dict(self._action_roles),
+            "inventory": self._public_inventory(),
+            "flags": self._public_flags(),
         }
         return GridObservation(
             task_id=self.task_id,
@@ -553,7 +557,16 @@ class HiddenRuleEnv(BaseEnvironment):
                 if value == EMPTY:
                     continue
                 if (y, x) in self._cell_tag_overrides:
-                    tags[(y, x)] = self._cell_tag_overrides[(y, x)]
+                    override_tags = set(self._cell_tag_overrides[(y, x)])
+                    selected_position = (
+                        self._selector_positions.get(self._selected_color)
+                        if self._selected_color is not None
+                        else None
+                    )
+                    if selected_position == (y, x):
+                        override_tags.add("active")
+                        override_tags.add("selected")
+                    tags[(y, x)] = tuple(sorted(override_tags))
                     continue
                 if value == WALL:
                     tags[(y, x)] = ("blocking", "wall")
@@ -568,6 +581,31 @@ class HiddenRuleEnv(BaseEnvironment):
                 elif value == GOAL_ACTIVE:
                     tags[(y, x)] = ("target", "active")
         return tags
+
+    def _public_inventory(self) -> dict[str, str]:
+        inventory: dict[str, str] = {}
+        if self._selected_color is not None:
+            inventory["interface_selected_color"] = self._color_name(self._selected_color)
+        sequence_total = len(self._rule.order) if self._rule is not None else 0
+        if sequence_total > 0:
+            inventory["interface_sequence_progress"] = str(int(self._progress_index))
+            inventory["interface_sequence_total"] = str(int(sequence_total))
+            inventory["interface_sequence_remaining"] = str(max(int(sequence_total) - int(self._progress_index), 0))
+        collected = self._inventory.get("sequence", "")
+        if collected:
+            inventory["interface_collected_sequence_length"] = str(len(collected))
+        return inventory
+
+    def _public_flags(self) -> dict[str, str]:
+        sequence_total = len(self._rule.order) if self._rule is not None else 0
+        collected = self._inventory.get("sequence", "")
+        return {
+            "goal_active": self._flags.get("goal_active", "0"),
+            "interface_has_selection_state": "1" if self._selector_actions else "0",
+            "interface_selection_active": "1" if self._selected_color is not None else "0",
+            "interface_has_sequence_state": "1" if sequence_total > 0 else "0",
+            "interface_sequence_started": "1" if (self._progress_index > 0 or bool(collected)) else "0",
+        }
 
 
 def _name_to_color(name: str) -> int:

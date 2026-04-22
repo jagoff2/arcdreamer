@@ -125,7 +125,7 @@ def transition_usefulness_target(
     if event_name == "correct_collect":
         return 0.55
     if event_name in {"delayed_correct_collect", "selector_sequence_progress"}:
-        return 0.3
+        return 0.45
     if event_name == "selector_candidate":
         return 0.35
     if event_name == "selector_probe":
@@ -135,7 +135,7 @@ def transition_usefulness_target(
     if event_name == "move":
         return _clamp(0.08 + (0.14 * min(delta_norm, 1.0)), lower=0.05, upper=0.24)
     if event_name in _MISLEADING_EVENTS:
-        return -0.2
+        return -0.35 if family in {"interact", "click"} else -0.25
     if event_name in _STRUCTURAL_NEGATIVE_EVENTS:
         return -0.45
     if event_name in _NO_EFFECT_EVENTS:
@@ -169,7 +169,7 @@ def transition_policy_supervision(
     if event_name == "correct_collect":
         return PolicySupervision(target=0.9, weight=1.35)
     if event_name in {"delayed_correct_collect", "selector_sequence_progress"}:
-        return PolicySupervision(target=0.65, weight=1.1)
+        return PolicySupervision(target=0.75, weight=1.2)
     if event_name == "selector_candidate":
         return PolicySupervision(target=0.65, weight=1.1)
     if event_name == "selector_probe":
@@ -179,7 +179,7 @@ def transition_policy_supervision(
     if event_name == "move":
         return PolicySupervision(target=0.4, weight=0.75, sibling_move_target=0.2, sibling_move_weight=0.35)
     if event_name in _MISLEADING_EVENTS:
-        return PolicySupervision(target=0.0, weight=1.6 if family in {"interact", "click"} else 1.2)
+        return PolicySupervision(target=0.0, weight=2.1 if family in {"interact", "click"} else 1.5)
     if event_name in _STRUCTURAL_NEGATIVE_EVENTS:
         return PolicySupervision(target=0.0, weight=1.8 if family in {"interact", "click"} else 1.3)
     if event_name in _NO_EFFECT_EVENTS:

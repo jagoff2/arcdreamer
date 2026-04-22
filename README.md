@@ -4,11 +4,11 @@
 
 - object-centric state extraction over grid observations
 - explicit world-state graph for novelty, transitions, and search
-- compact recurrent world model with uncertainty via ensemble disagreement
+- compact recurrent world model with uncertainty via ensemble disagreement, explicit causal-effect classification, and diagnostic value heads
 - episodic memory for one-shot mechanic recall
-- grounded internal language for hypotheses, questions, and plan summaries
+- grounded internal language for hypotheses, diagnostic questions, theory summaries, and plan sketches
 
-The repository is being built from an empty workspace. The current priority is a strong runnable core with synthetic hidden-rule benchmarks, clear ablations, and an optional adapter for the official ARC toolkit.
+The repository now has a runnable core with synthetic hidden-rule benchmarks, strong baselines, and an optional adapter for the official ARC toolkit. The current priority is turning that core into a genuinely online experimental scientist instead of a narrow synthetic specialist.
 
 Runtime requirement:
 
@@ -41,24 +41,29 @@ Detailed runtime-learning design:
   - `recurrent`: `1.0` success rate on the full synthetic eval slice
   - `hybrid`: `1.0` success rate on the full synthetic eval slice
 - current runtime-learning status:
-  - the learned agent now beats the synthetic benchmark through live runtime rule learning
-  - the full hybrid agent now does construct the generic runtime hypothesis controller by default
-  - that controller now records proof and exception objects, executes online split / merge / relabel / rebind repair in the working structured state, and writes local model edits within the episode
+  - the learned agent now beats the synthetic benchmark through live runtime rule learning and explicit online hypothesis competition
+  - the full hybrid agent constructs the generic runtime hypothesis controller by default
+  - the runtime path now records proof and exception objects, executes online split / merge / relabel / rebind repair in the working structured state, and writes local model edits within the episode
   - control, objective, and selector-mode competition now use normalized posteriors over rival executable theories instead of only heuristic utility ranking
-  - temporary options are now induced online from successful control sequences such as path-to-objective chains, selector-followed-by-move behaviors, and bind-then-objective programs
-  - interface-aware first-contact probing is now explicit in the runtime controller: the agent can test selector binding and follow-up move or interact semantics from generic action-schema structure rather than ARC-shaped controller labels
-  - chosen controller-plan language now overrides stale pre-plan language carryover, so emitted traces and episodic memory reflect the plan that actually won action arbitration
-  - heuristic language/question fallbacks remain disabled
-  - the controller-heavy synthetic work remains research/bootstrap-only only when it depends on synthetic semantics; the generic runtime hypothesis controller is now part of the intended submission-relevant hybrid path
-  - a long manual Stage 1 run at `25,000` episodes per epoch now clears foundation and reaches `hidden_modes` by epoch `4`
+  - temporary options are induced online from successful control sequences such as path-to-objective chains, selector-followed-by-move behaviors, and bind-then-objective programs
+  - the Stage 1 training loop now optimizes explicit causal/theory structure directly:
+    - recurrent world model heads predict `effect_kind`, `causal_value`, and `diagnostic_value`
+    - replay and dream phases train `theory` and `diagnostic` language modes explicitly
+    - event-conditioned supervision and hindsight credit now shape usefulness/policy targets instead of dropping event semantics on the floor
+  - dense warm-start supervision is now learner-owned by default:
+    - dense supervision no longer creates full teacher-owned episodes
+    - current CLI and programmatic defaults are aligned at `teacher_episode_fraction=0.1` and `teacher_takeover_prob=0.25`
+    - a tiny end-to-end flat CLI run after the fix recorded `teacher_episode_count=0`, `teacher_step_fraction=0.0823`, and `teacher_relabel_fraction=0.6013`
+  - a long manual Stage 1 run at `25,000` episodes per epoch cleared foundation and reached `hidden_modes` by epoch `4`
   - that promoted epoch-4 snapshot is still only partial competence in `hidden_modes`: `running_success_rate = 0.45072`, `running_avg_return = -0.0482464`, `running_avg_steps = 33.6464`, `teacher_step_fraction = 0.259249`, `teacher_relabel_fraction = 0.621525`
+  - current synthetic bottleneck is held-out compositional control/sequence binding, especially `selector_sequence_unlock`; easy families hold up materially better than the sequence-binding family under flat joint training
   - the official public online 5-game slice now completes end-to-end under one shared scorecard in the harness; current result remains `0/5`, but first-contact activity is less passive:
     - `ar25`: `72` steps, `5` interaction steps
     - `bp35`: `22` steps, `0` interaction steps
     - `cd82`: `100` steps, `0` interaction steps
     - `cn04`: `75` steps, `1` interaction step, with `objective_competition` / `disambiguate_objective` in the trace
     - `dc22`: `128` steps, `16` interaction steps
-  - the next useful work is hidden-mode stabilization, lower teacher dependence, and broader transfer validation, not more shallow controller shaping
+  - the next useful work is held-out compositional generalization, lower relabel dependence, broader mechanic diversity, and broader transfer validation, not more shallow controller shaping
 
 ## Prize Eligibility Boundary
 
@@ -104,7 +109,10 @@ Current training-default corrections:
 
 - the trainer default is now `behavior_policy=mixed` in both CLI and programmatic config construction
 - `mixed` / `bootstrap` collection now use the current hybrid agent as the learner-side collector, not the graph baseline, while teacher episodes and teacher relabeling still provide scaffold data
+- replay and dream now optimize explicit causal/theory structure, not only generic next-state/value losses
+- dense warm-start supervision keeps trajectories learner-owned; teacher control defaults are now `teacher_episode_fraction=0.1` and `teacher_takeover_prob=0.25`
 - `--secondary-device` is now the preferred name for the second GPU; it mirrors replay and dream optimization each epoch, and only falls back to async holdout when it cannot be used for real training work
+- `--resume-checkpoint-path` is the correct way to continue a tracked run; `--init-checkpoint-path` is weights-only initialization unless explicitly overridden
 
 Observed long-run milestone on `2026-04-20`:
 
@@ -118,13 +126,14 @@ Observed long-run milestone on `2026-04-20`:
   - `teacher_relabel_fraction = 0.621525`
 - this means foundation is no longer the active synthetic blocker; hidden-mode stability and learner ownership are now the main Stage 1 problems
 
+Recommended staged training command:
+
 ```bash
 python -m arcagi.training.synthetic \
   --epochs 64 \
   --episodes-per-epoch 256 \
   --learning-rate 2e-4 \
   --checkpoint-path artifacts/manual_stage1.pt \
-  --init-checkpoint-path artifacts/mixed_policy_hybrid.pt \
   --behavior-policy mixed \
   --device cuda:0 \
   --secondary-device cuda:1 \
@@ -145,3 +154,25 @@ Trainer behavior:
 - also saves epoch snapshots like `artifacts/manual_stage1.epoch_0007.pt`
 - on `Ctrl-C`, saves `artifacts/manual_stage1.interrupt.pt` before exit
 - `--curriculum staged` now means gated staged progression with replay, not the old fixed epoch-thirds schedule
+
+Recommended flat joint-training command:
+
+```bash
+python -m arcagi.training.synthetic \
+  --epochs 200 \
+  --episodes-per-epoch 512 \
+  --learning-rate 2e-4 \
+  --checkpoint-path artifacts/flat_joint.pt \
+  --behavior-policy mixed \
+  --device cuda:0 \
+  --secondary-device cuda:1 \
+  --curriculum flat \
+  --log-every-episodes 32
+```
+
+Flat-mode notes:
+
+- `flat` trains across all synthetic mechanic families at once
+- `flat` does not use staged promotion/holdout gating during training
+- collection metrics in `flat` are not a held-out benchmark
+- evaluate saved checkpoints separately when comparing flat runs or checking whether hard families such as `selector_sequence_unlock` are actually improving

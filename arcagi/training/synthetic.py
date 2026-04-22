@@ -65,6 +65,10 @@ class SyntheticTrainingConfig:
     promotion_consecutive_evals: int = 2
     frontier_replay_weight: int = 3
     previous_stage_replay_weight: int = 1
+    flat_family_weight_floor: int = 1
+    flat_family_weight_ceiling: int = 4
+    flat_family_focus_strength: float = 3.0
+    flat_family_history_window: int = 3
     oracle_imitation_epochs: int = 2
     oracle_bootstrap_steps: int = 16
     oracle_bootstrap_stride: int = 1
@@ -75,11 +79,14 @@ class SyntheticTrainingConfig:
     oracle_bootstrap_decay_success_threshold: float = 0.9
     oracle_bootstrap_decay_stability_epochs: int = 2
     teacher_guidance_holdout_success_threshold: float = 0.2
-    teacher_episode_fraction_initial: float = 0.2
-    teacher_episode_fraction_floor: float = 0.2
-    teacher_takeover_prob_initial: float = 0.5
-    teacher_takeover_prob_floor: float = 0.2
+    teacher_episode_fraction_initial: float = 0.1
+    teacher_episode_fraction_floor: float = 0.05
+    teacher_takeover_prob_initial: float = 0.25
+    teacher_takeover_prob_floor: float = 0.05
     teacher_relabel_weight: float = 0.8
+    teacher_ownership_window: int = 4
+    teacher_agreement_target: float = 0.78
+    teacher_success_target: float = 0.8
     trajectory_credit_discount: float = 0.94
     dream_batches_per_epoch: int = 8
     dream_batch_size: int = 8
@@ -88,6 +95,8 @@ class SyntheticTrainingConfig:
     dream_belief_weight: float = 0.2
     dream_question_weight: float = 0.2
     dream_plan_weight: float = 0.2
+    theory_loss_weight: float = 0.45
+    diagnostic_language_loss_weight: float = 0.35
     holdout_failure_examples: int = 5
     holdout_trace_steps: int = 48
     holdout_trace_top_actions: int = 3
@@ -248,8 +257,18 @@ def _validate_synthetic_training_config(config: SyntheticTrainingConfig) -> None
         raise ValueError("teacher_takeover_prob_initial must be within [0, 1]")
     if float(config.teacher_takeover_prob_floor) < 0.0 or float(config.teacher_takeover_prob_floor) > 1.0:
         raise ValueError("teacher_takeover_prob_floor must be within [0, 1]")
+    if float(config.teacher_agreement_target) < 0.0 or float(config.teacher_agreement_target) > 1.0:
+        raise ValueError("teacher_agreement_target must be within [0, 1]")
+    if float(config.teacher_success_target) < 0.0 or float(config.teacher_success_target) > 1.0:
+        raise ValueError("teacher_success_target must be within [0, 1]")
+    if int(config.teacher_ownership_window) <= 0:
+        raise ValueError("teacher_ownership_window must be positive")
     if float(config.trajectory_credit_discount) < 0.0 or float(config.trajectory_credit_discount) > 1.0:
         raise ValueError("trajectory_credit_discount must be within [0, 1]")
+    if float(config.theory_loss_weight) < 0.0:
+        raise ValueError("theory_loss_weight must be non-negative")
+    if float(config.diagnostic_language_loss_weight) < 0.0:
+        raise ValueError("diagnostic_language_loss_weight must be non-negative")
     if config.init_checkpoint_path and config.resume_checkpoint_path:
         raise ValueError("init_checkpoint_path and resume_checkpoint_path are mutually exclusive")
 
@@ -392,6 +411,174 @@ def _load_compatible_state_dict(
         )
 
 
+_EFFECT_KIND_TO_ID: dict[str, int] = {
+    "reward_gain": 0,
+    "setback": 1,
+    "state_change": 2,
+    "latent_shift": 3,
+    "no_effect": 4,
+}
+_SAMPLE_STRONG_POSITIVE_EVENTS: frozenset[str] = frozenset(
+    {
+        "goal_reached",
+        "correct_switch",
+        "selector_unlock_complete",
+        "correct_order_complete",
+        "delayed_sequence_complete",
+        "selector_sequence_complete",
+        "correct_collect",
+        "delayed_correct_collect",
+        "selector_sequence_progress",
+        "selector_candidate",
+    }
+)
+_SAMPLE_DIAGNOSTIC_EVENTS: frozenset[str] = frozenset({"selector_probe", "local_match_no_unlock"})
+_SAMPLE_NEGATIVE_EVENTS: frozenset[str] = frozenset(
+    {
+        "decoy_reward_reset",
+        "false_progress_under_wrong_selector",
+        "wrong_switch",
+        "wrong_selector_or_switch",
+        "wrong_order",
+        "wrong_order_reset",
+    }
+)
+_SAMPLE_NO_EFFECT_EVENTS: frozenset[str] = frozenset(
+    {
+        "empty_interaction",
+        "noop",
+        "wall",
+        "blocked_by_object",
+        "invalid_click",
+        "unused_click",
+        "missing_rule",
+        "inactive_goal_blocked",
+        "redundant_collect",
+        "redundant_post_goal_interaction",
+    }
+)
+_FAMILY_KEYWORD_TOKENS: tuple[str, ...] = ("collect", "unlock", "selector", "switch", "order", "delayed", "sequence")
+
+
+def _effect_token(effect_kind: str) -> str:
+    return {
+        "reward_gain": "positive",
+        "setback": "negative",
+        "state_change": "visible",
+        "latent_shift": "hidden",
+        "no_effect": "none",
+    }.get(effect_kind, "unknown")
+
+
+def _sample_effect_kind(
+    *,
+    action: str,
+    reward: float,
+    event: str,
+    delta_norm: float,
+) -> str:
+    family = _shared_action_family(action)
+    event_name = str(event or "")
+    if event_name in _SAMPLE_STRONG_POSITIVE_EVENTS or float(reward) > 0.05:
+        return "reward_gain"
+    if event_name in _SAMPLE_NEGATIVE_EVENTS or float(reward) < -0.04:
+        return "setback"
+    if event_name in _SAMPLE_DIAGNOSTIC_EVENTS:
+        return "latent_shift"
+    if event_name in _SAMPLE_NO_EFFECT_EVENTS:
+        return "no_effect"
+    if family in {"click", "interact", "select"} and float(delta_norm) >= 0.2:
+        return "latent_shift"
+    if float(delta_norm) >= 0.12:
+        return "state_change"
+    return "no_effect"
+
+
+def _family_tokens_for_sample(action: str, event: str) -> tuple[str, ...]:
+    context = build_action_schema_context((action,), {action: ""})
+    schema = build_action_schema(action, context)
+    joined = f"{schema.family} {event}".lower()
+    tokens = [token for token in _FAMILY_KEYWORD_TOKENS if token in joined]
+    return tuple(tokens[:2])
+
+
+def _theory_tokens_for_sample(
+    sample: dict[str, object],
+) -> tuple[str, ...]:
+    action = str(sample["action"])
+    effect_kind = str(sample.get("effect_kind", "no_effect"))
+    state = sample.get("state")
+    action_roles = () if state is None else getattr(state, "action_roles", ())
+    context = build_action_schema_context(tuple(sample.get("available_actions", (action,))), dict(action_roles))
+    schema = build_action_schema(action, context)
+    return (
+        "rule",
+        schema.action_type,
+        _effect_token(effect_kind),
+        *_family_tokens_for_sample(action, str(sample.get("event", ""))),
+    )[:6]
+
+
+def _causal_value_target_for_sample(sample: dict[str, object]) -> float:
+    discounted_return = float(sample.get("discounted_return", sample.get("reward", 0.0)))
+    future_progress = float(sample.get("future_progress", 0.0))
+    future_setback = float(sample.get("future_setback", 0.0))
+    usefulness = float(sample.get("usefulness", 0.0))
+    outcome_signal = float(sample.get("outcome_signal", 0.0))
+    return float(
+        max(
+            min(
+                (0.45 * discounted_return)
+                + (0.35 * future_progress)
+                - (0.4 * future_setback)
+                + (0.3 * usefulness)
+                + (0.45 * outcome_signal),
+                1.5,
+            ),
+            -1.5,
+        )
+    )
+
+
+def _diagnostic_target_for_sample(sample: dict[str, object]) -> float:
+    action = str(sample["action"])
+    effect_kind = str(sample.get("effect_kind", "no_effect"))
+    event_name = str(sample.get("event", ""))
+    future_progress = max(float(sample.get("future_progress", 0.0)), 0.0)
+    future_setback = max(float(sample.get("future_setback", 0.0)), 0.0)
+    delta_norm = float(sample.get("delta_norm", 0.0))
+    usefulness = abs(float(sample.get("usefulness", 0.0)))
+    interactive_bonus = 0.18 if _shared_action_family(action) in {"click", "interact", "select"} else 0.0
+    hidden_bonus = 0.22 if effect_kind == "latent_shift" else 0.0
+    diagnostic_bonus = 0.2 if event_name in _SAMPLE_DIAGNOSTIC_EVENTS else 0.0
+    outcome_bonus = 0.18 * abs(float(sample.get("outcome_signal", 0.0)))
+    target = (
+        diagnostic_bonus
+        + interactive_bonus
+        + hidden_bonus
+        + (0.14 * min(delta_norm, 1.0))
+        + (0.18 * usefulness)
+        + (0.22 * future_progress)
+        + (0.28 * future_setback)
+    )
+    return float(max(0.0, min(target + outcome_bonus, 1.25)))
+
+
+def _diagnostic_tokens_for_sample(sample: dict[str, object]) -> tuple[str, ...]:
+    action = str(sample["action"])
+    state = sample.get("state")
+    action_roles = () if state is None else getattr(state, "action_roles", ())
+    context = build_action_schema_context(tuple(sample.get("available_actions", (action,))), dict(action_roles))
+    schema = build_action_schema(action, context)
+    diagnostic_target = float(sample.get("diagnostic_target", 0.0))
+    effect_kind = str(sample.get("effect_kind", "no_effect"))
+    if diagnostic_target >= 0.65:
+        return ("question", "need", "test", "rule", schema.action_type, _effect_token(effect_kind))
+    if diagnostic_target >= 0.3:
+        return ("question", "confirm", "rule", schema.action_type, _effect_token(effect_kind))
+    return ("plan", "commit", schema.action_type, "because", _effect_token(effect_kind))
+
+
 def _make_sample(
     state: StructuredState,
     next_state: StructuredState,
@@ -404,20 +591,21 @@ def _make_sample(
 ) -> dict[str, object]:
     delta = next_state.transition_vector() - state.transition_vector()
     delta_norm = float(np.linalg.norm(delta))
+    event_name = str(info.get("event", ""))
     usefulness = transition_usefulness_target(
         action,
         reward,
-        None,
+        event_name,
         delta_norm,
     )
     policy_supervision = transition_policy_supervision(
         action,
         reward,
-        None,
+        event_name,
         delta_norm,
     )
     plan_action = teacher_action or action
-    return {
+    sample = {
         "state": state,
         "next_state": next_state,
         "action": action,
@@ -425,7 +613,7 @@ def _make_sample(
         "teacher_weight": float(teacher_weight),
         "available_actions": state.affordances,
         "reward": reward,
-        "event": str(info.get("event", "")),
+        "event": event_name,
         "delta": delta.astype(np.float32),
         "delta_norm": delta_norm,
         "usefulness": usefulness,
@@ -444,6 +632,18 @@ def _make_sample(
         "question_tokens": _grounded_question_tokens(state),
         "plan_tokens": _grounded_plan_tokens(state, plan_action),
     }
+    sample["effect_kind"] = _sample_effect_kind(
+        action=action,
+        reward=reward,
+        event=event_name,
+        delta_norm=delta_norm,
+    )
+    sample["effect_target"] = _EFFECT_KIND_TO_ID[str(sample["effect_kind"])]
+    sample["theory_tokens"] = _theory_tokens_for_sample(sample)
+    sample["causal_value_target"] = _causal_value_target_for_sample(sample)
+    sample["diagnostic_target"] = _diagnostic_target_for_sample(sample)
+    sample["diagnostic_tokens"] = _diagnostic_tokens_for_sample(sample)
+    return sample
 
 
 def _apply_episode_hindsight(
@@ -488,6 +688,10 @@ def _apply_episode_hindsight(
         sample["future_progress"] = hindsight.future_progress
         sample["future_setback"] = hindsight.future_setback
         sample["outcome_signal"] = hindsight.outcome_signal
+        sample["causal_value_target"] = _causal_value_target_for_sample(sample)
+        sample["diagnostic_target"] = _diagnostic_target_for_sample(sample)
+        sample["theory_tokens"] = _theory_tokens_for_sample(sample)
+        sample["diagnostic_tokens"] = _diagnostic_tokens_for_sample(sample)
         trailing_return = discounted_return
         trailing_progress = max(0.0, base_usefulness) + (discount * trailing_progress)
         trailing_setback = max(0.0, -base_usefulness) + (discount * trailing_setback)
@@ -640,6 +844,65 @@ def _bootstrap_schedule(
     return max(0, bootstrap_steps), max(1, bootstrap_stride)
 
 
+def _teacher_ownership_signal(
+    config: SyntheticTrainingConfig,
+    history: list[dict[str, object]] | None = None,
+) -> float:
+    if not history:
+        return 0.0
+    window = max(1, int(config.teacher_ownership_window))
+    recent = history[-window:]
+
+    def _metric(name: str) -> list[float]:
+        values: list[float] = []
+        for item in recent:
+            if name not in item:
+                continue
+            values.append(float(item[name]))
+        return values
+
+    collect_success_values = _metric("collect_success_rate")
+    holdout_success_values = [
+        float(item.get("holdout_frontier_success", 0.0))
+        for item in recent
+        if bool(item.get("holdout_evaluated", False))
+    ]
+    agreement_values = _metric("learner_teacher_agreement")
+    teacher_step_values = _metric("teacher_step_fraction")
+    teacher_relabel_values = _metric("teacher_relabel_fraction")
+    if not agreement_values and not teacher_step_values and not teacher_relabel_values:
+        return 0.0
+    success = mean(holdout_success_values) if holdout_success_values else (mean(collect_success_values) if collect_success_values else 0.0)
+    agreement = mean(agreement_values) if agreement_values else 0.0
+    teacher_step_fraction = mean(teacher_step_values) if teacher_step_values else 1.0
+    teacher_relabel_fraction = mean(teacher_relabel_values) if teacher_relabel_values else 1.0
+    ownership = max(
+        0.0,
+        1.0 - max(teacher_step_fraction, 0.6 * teacher_relabel_fraction),
+    )
+    agreement_signal = max(
+        0.0,
+        min(1.0, (agreement - 0.5 * float(config.teacher_agreement_target)) / max(0.5 * float(config.teacher_agreement_target), 1e-6)),
+    )
+    success_signal = max(
+        0.0,
+        min(1.0, (success - 0.55 * float(config.teacher_success_target)) / max(0.45 * float(config.teacher_success_target), 1e-6)),
+    )
+    ownership_signal = max(
+        0.0,
+        min(1.0, (ownership - 0.45) / 0.4),
+    )
+    return float(
+        max(
+            0.0,
+            min(
+                1.0,
+                (0.4 * success_signal) + (0.35 * ownership_signal) + (0.25 * agreement_signal),
+            ),
+        )
+    )
+
+
 def _teacher_episode_fraction(
     config: SyntheticTrainingConfig,
     history: list[dict[str, object]] | None = None,
@@ -649,8 +912,8 @@ def _teacher_episode_fraction(
     high = max(initial, floor)
     low = min(initial, floor)
     guidance_state = _teacher_guidance_state(config, history)
-    alpha = float(guidance_state["alpha"])
-    return high + ((low - high) * alpha)
+    alpha = max(float(guidance_state["alpha"]), _teacher_ownership_signal(config, history))
+    return max(low, high + ((low - high) * alpha))
 
 
 def _teacher_takeover_probability(
@@ -662,8 +925,8 @@ def _teacher_takeover_probability(
     high = max(initial, floor)
     low = min(initial, floor)
     guidance_state = _teacher_guidance_state(config, history)
-    alpha = float(guidance_state["alpha"])
-    return high + ((low - high) * alpha)
+    alpha = max(float(guidance_state["alpha"]), _teacher_ownership_signal(config, history))
+    return max(low, high + ((low - high) * alpha))
 
 
 def _dense_teacher_supervision_active(config: SyntheticTrainingConfig, epoch_index: int) -> bool:
@@ -769,11 +1032,20 @@ def _weighted_family_schedule(
     families = tuple(family_weights.keys())
     if not families:
         return []
+    if episode_count <= len(families):
+        rng = np.random.default_rng(seed)
+        sampled = list(families[:episode_count])
+        rng.shuffle(sampled)
+        return sampled
     weights = np.asarray([max(1, family_weights[family]) for family in families], dtype=np.float64)
     probabilities = weights / weights.sum()
     rng = np.random.default_rng(seed)
-    sampled_indices = rng.choice(len(families), size=episode_count, replace=True, p=probabilities)
-    return [families[int(index)] for index in sampled_indices]
+    base_schedule = list(families)
+    remaining = episode_count - len(base_schedule)
+    sampled_indices = rng.choice(len(families), size=remaining, replace=True, p=probabilities)
+    schedule = base_schedule + [families[int(index)] for index in sampled_indices]
+    rng.shuffle(schedule)
+    return schedule
 
 
 def _stable_token_signature(token: str) -> int:
@@ -799,6 +1071,77 @@ def _stage_family_weights(
             weights[family_mode] = max(weights.get(family_mode, 0), config.previous_stage_replay_weight)
     for family_mode in stages[stage_index].frontier_families:
         weights[family_mode] = max(weights.get(family_mode, 0), config.frontier_replay_weight)
+    return weights
+
+
+def _flat_family_weights(
+    config: SyntheticTrainingConfig,
+    history: list[dict[str, object]] | None = None,
+) -> dict[str, int]:
+    families = tuple(dict.fromkeys(str(family) for family in config.family_modes))
+    floor = max(1, int(config.flat_family_weight_floor))
+    ceiling = max(floor, int(config.flat_family_weight_ceiling))
+    weights = {family: floor for family in families}
+    if not history:
+        return weights
+    window = max(1, int(config.flat_family_history_window))
+    recent_entries = [entry for entry in history[-window:] if isinstance(entry.get("family_breakdown"), dict)]
+    if not recent_entries:
+        return weights
+
+    aggregate: dict[str, dict[str, float]] = {}
+    for entry in recent_entries:
+        family_breakdown = dict(entry.get("family_breakdown", {}))
+        for family in families:
+            metrics = family_breakdown.get(family)
+            if not isinstance(metrics, dict):
+                continue
+            episodes = float(metrics.get("episodes", 0.0))
+            if episodes <= 0.0:
+                continue
+            bucket = aggregate.setdefault(
+                family,
+                {
+                    "episodes": 0.0,
+                    "success_sum": 0.0,
+                    "return_sum": 0.0,
+                    "steps_sum": 0.0,
+                    "interaction_sum": 0.0,
+                },
+            )
+            bucket["episodes"] += episodes
+            bucket["success_sum"] += episodes * float(metrics.get("success_rate", 0.0))
+            bucket["return_sum"] += episodes * float(metrics.get("avg_return", 0.0))
+            bucket["steps_sum"] += episodes * float(metrics.get("avg_steps", 0.0))
+            bucket["interaction_sum"] += episodes * float(metrics.get("avg_interactions", 0.0))
+    if not aggregate:
+        return weights
+
+    normalized: dict[str, dict[str, float]] = {}
+    for family, bucket in aggregate.items():
+        episodes = max(bucket["episodes"], 1.0)
+        normalized[family] = {
+            "success_rate": bucket["success_sum"] / episodes,
+            "avg_return": bucket["return_sum"] / episodes,
+            "avg_steps": bucket["steps_sum"] / episodes,
+            "avg_interactions": bucket["interaction_sum"] / episodes,
+        }
+
+    best_success = max(metrics["success_rate"] for metrics in normalized.values())
+    best_return = max(metrics["avg_return"] for metrics in normalized.values())
+    min_steps = min(metrics["avg_steps"] for metrics in normalized.values())
+    min_interactions = min(metrics["avg_interactions"] for metrics in normalized.values())
+    focus_strength = max(0.0, float(config.flat_family_focus_strength))
+    max_steps = max(float(config.max_steps), 1.0)
+
+    for family, metrics in normalized.items():
+        success_gap = max(0.0, best_success - metrics["success_rate"])
+        return_gap = max(0.0, best_return - metrics["avg_return"])
+        step_gap = max(0.0, metrics["avg_steps"] - min_steps) / max_steps
+        interaction_gap = max(0.0, metrics["avg_interactions"] - min_interactions) / max_steps
+        difficulty = success_gap + (0.35 * return_gap) + (0.2 * step_gap) + (0.15 * interaction_gap)
+        dynamic_bonus = int(round(focus_strength * difficulty))
+        weights[family] = max(floor, min(ceiling, floor + dynamic_bonus))
     return weights
 
 
@@ -1382,10 +1725,22 @@ def collect_dataset(
         frontier_families = resolved_stage.frontier_families
     else:
         family_modes = _family_modes_for_epoch(config, epoch_index)
-        family_mode_schedule = [family_modes[episode_index % len(family_modes)] for episode_index in range(config.episodes_per_epoch)]
+        if config.curriculum == "flat":
+            family_weights = _flat_family_weights(config, history)
+            family_mode_schedule = _weighted_family_schedule(
+                family_weights,
+                config.episodes_per_epoch,
+                seed=epoch_seed_base,
+            )
+        else:
+            family_weights = {family: 1 for family in family_modes}
+            family_mode_schedule = [
+                family_modes[episode_index % len(family_modes)]
+                for episode_index in range(config.episodes_per_epoch)
+            ]
         size_options = _size_options_for_epoch(config, epoch_index)
         stage_name = "fixed_staged" if config.curriculum == "fixed_staged" else "flat"
-        frontier_families = tuple(dict.fromkeys(family_mode_schedule))
+        frontier_families = tuple(dict.fromkeys(family_modes))
     episode_returns: list[float] = []
     episode_steps: list[float] = []
     episode_successes: list[float] = []
@@ -1409,6 +1764,8 @@ def collect_dataset(
     teacher_episode_count = 0
     teacher_controlled_steps = 0
     teacher_labeled_steps = 0
+    teacher_agreement_steps = 0
+    teacher_opportunity_steps = 0
     total_steps = 0
     collect_started = perf_counter()
     for epoch_episode in range(config.episodes_per_epoch):
@@ -1440,6 +1797,7 @@ def collect_dataset(
         episode_samples: list[dict[str, object]] = []
         sampled_teacher_episode = (
             config.behavior_policy in {"mixed", "bootstrap"}
+            and not dense_teacher_supervision
             and bool(guidance_rng.random() < teacher_episode_fraction)
         )
         teacher_episode = sampled_teacher_episode or config.behavior_policy == "oracle"
@@ -1470,6 +1828,10 @@ def collect_dataset(
                 learner_action = collector.act(observation)
                 state = collector.last_state
                 assert state is not None
+                if teacher_action:
+                    teacher_opportunity_steps += 1
+                    if learner_action == teacher_action:
+                        teacher_agreement_steps += 1
                 use_bootstrap_oracle = (
                     bootstrap_takeover_candidate
                     and teacher_action
@@ -1571,6 +1933,7 @@ def collect_dataset(
                         "stage_name": stage_name,
                         "frontier_families": frontier_families,
                         "running_family_counts": _count_by_value(episode_family_modes),
+                        "family_sampling_weights": family_weights,
                         "interval_avg_return": mean(interval_returns),
                         "interval_avg_steps": mean(interval_steps),
                         "interval_success_rate": mean(interval_successes),
@@ -1587,6 +1950,9 @@ def collect_dataset(
                         "teacher_episode_count": teacher_episode_count,
                         "teacher_step_fraction": (float(teacher_controlled_steps) / float(max(total_steps, 1))),
                         "teacher_relabel_fraction": (float(teacher_labeled_steps) / float(max(total_steps, 1))),
+                        "learner_teacher_agreement": (
+                            float(teacher_agreement_steps) / float(max(teacher_opportunity_steps, 1))
+                        ),
                         "collector_agent": collector_agent_name,
                     }
                 ),
@@ -1600,6 +1966,7 @@ def collect_dataset(
         "success_rate": mean(episode_successes) if episode_successes else 0.0,
         "stage_name": stage_name,
         "frontier_families": frontier_families,
+        "family_sampling_weights": dict(family_weights),
         "family_counts": _count_by_value(episode_family_modes),
         "family_breakdown": _sorted_metric_breakdown(records_by_family),
         "variant_breakdown": _sorted_metric_breakdown(records_by_variant),
@@ -1618,6 +1985,7 @@ def collect_dataset(
         "teacher_episode_count": float(teacher_episode_count),
         "teacher_step_fraction": float(teacher_controlled_steps) / float(max(total_steps, 1)),
         "teacher_relabel_fraction": float(teacher_labeled_steps) / float(max(total_steps, 1)),
+        "learner_teacher_agreement": float(teacher_agreement_steps) / float(max(teacher_opportunity_steps, 1)),
         "collector_agent": collector_agent_name,
     }
 
@@ -1651,6 +2019,11 @@ def _prepare_replay_training_step(
     belief_tokens = sample["belief_tokens"]
     question_tokens = sample["question_tokens"]
     plan_tokens = sample["plan_tokens"]
+    theory_tokens = sample.get("theory_tokens", ())
+    diagnostic_tokens = sample.get("diagnostic_tokens", ())
+    effect_target_id = int(sample.get("effect_target", _EFFECT_KIND_TO_ID["no_effect"]))
+    causal_value_target_scalar = float(sample.get("causal_value_target", sample.get("outcome_signal", 0.0)))
+    diagnostic_target_scalar = float(sample.get("diagnostic_target", 0.0))
 
     encoded = encoder.encode_state(state, device=device)
     with torch.no_grad():
@@ -1659,6 +2032,9 @@ def _prepare_replay_training_step(
     return_target = torch.tensor([float(sample.get("discounted_return", reward))], dtype=torch.float32, device=device)
     delta_target = torch.tensor(delta, dtype=torch.float32, device=device).unsqueeze(0)
     usefulness_target = torch.tensor([usefulness], dtype=torch.float32, device=device)
+    effect_target = torch.tensor([effect_target_id], dtype=torch.long, device=device)
+    causal_value_target = torch.tensor([causal_value_target_scalar], dtype=torch.float32, device=device)
+    diagnostic_target = torch.tensor([diagnostic_target_scalar], dtype=torch.float32, device=device)
     world_loss, world_metrics = world_model.loss(
         latent=encoded.latent,
         actions=[action],
@@ -1669,6 +2045,9 @@ def _prepare_replay_training_step(
         return_target=return_target,
         delta_target=delta_target,
         usefulness_target=usefulness_target,
+        effect_target=effect_target,
+        causal_target=causal_value_target,
+        diagnostic_target=diagnostic_target,
     )
     belief_loss = language_model.teacher_forcing_loss(
         encoded.latent,
@@ -1684,6 +2063,16 @@ def _prepare_replay_training_step(
         encoded.latent,
         [plan_tokens or ("plan", "action", "unknown")],
         mode="plan",
+    )
+    theory_loss = language_model.teacher_forcing_loss(
+        encoded.latent,
+        [theory_tokens or ("rule", "unknown")],
+        mode="theory",
+    )
+    diagnostic_language_loss = language_model.teacher_forcing_loss(
+        encoded.latent,
+        [diagnostic_tokens or ("question", "need", "test", "rule")],
+        mode="diagnostic",
     )
     repeated_latent = encoded.latent.repeat(len(available_actions), 1)
     repeated_hidden = None
@@ -1782,6 +2171,8 @@ def _prepare_replay_training_step(
         + 0.25 * belief_loss
         + 0.25 * question_loss
         + 0.25 * plan_loss
+        + (float(config.theory_loss_weight) * theory_loss)
+        + (float(config.diagnostic_language_loss_weight) * diagnostic_language_loss)
         + 0.5 * policy_loss
     )
     loss = weighted_core_loss + gate_loss
@@ -1793,9 +2184,14 @@ def _prepare_replay_training_step(
         "epoch_reward_losses": float(world_metrics["loss_reward"]),
         "epoch_delta_losses": float(world_metrics["loss_delta"]),
         "epoch_usefulness_losses": float(world_metrics["loss_usefulness"]),
+        "epoch_causal_losses": float(world_metrics["loss_causal"]),
+        "epoch_diagnostic_world_losses": float(world_metrics["loss_diagnostic"]),
+        "epoch_effect_losses": float(world_metrics["loss_effect"]),
         "epoch_belief_losses": float(belief_loss.detach().cpu()),
         "epoch_question_losses": float(question_loss.detach().cpu()),
         "epoch_plan_losses": float(plan_loss.detach().cpu()),
+        "epoch_theory_losses": float(theory_loss.detach().cpu()),
+        "epoch_diagnostic_language_losses": float(diagnostic_language_loss.detach().cpu()),
         "epoch_policy_losses": float(policy_loss.detach().cpu()),
         "epoch_positive_policy_losses": float(positive_policy_loss.detach().cpu()),
         "epoch_negative_policy_losses": float(negative_policy_loss.detach().cpu()),
@@ -1933,6 +2329,8 @@ def _prepare_dream_window(
     sequence_belief_terms: list[torch.Tensor] = []
     sequence_question_terms: list[torch.Tensor] = []
     sequence_plan_terms: list[torch.Tensor] = []
+    sequence_theory_terms: list[torch.Tensor] = []
+    sequence_diagnostic_language_terms: list[torch.Tensor] = []
     total_steps = 0
     for position, index in enumerate(window):
         sample = dataset[index]
@@ -1945,6 +2343,9 @@ def _prepare_dream_window(
         return_target = torch.tensor([float(sample.get("discounted_return", sample["reward"]))], dtype=torch.float32, device=device)
         delta_target = torch.tensor(sample["delta"], dtype=torch.float32, device=device).unsqueeze(0)
         usefulness_target = torch.tensor([float(sample["usefulness"])], dtype=torch.float32, device=device)
+        effect_target = torch.tensor([int(sample.get("effect_target", _EFFECT_KIND_TO_ID["no_effect"]))], dtype=torch.long, device=device)
+        causal_target = torch.tensor([float(sample.get("causal_value_target", sample.get("outcome_signal", 0.0)))], dtype=torch.float32, device=device)
+        diagnostic_target = torch.tensor([float(sample.get("diagnostic_target", 0.0))], dtype=torch.float32, device=device)
         world_loss, _metrics = world_model.loss(
             latent=latent,
             actions=[action],
@@ -1955,6 +2356,9 @@ def _prepare_dream_window(
             return_target=return_target,
             delta_target=delta_target,
             usefulness_target=usefulness_target,
+            effect_target=effect_target,
+            causal_target=causal_target,
+            diagnostic_target=diagnostic_target,
         )
         prediction = world_model.step(
             latent,
@@ -1984,15 +2388,29 @@ def _prepare_dream_window(
             [next_plan_tokens or ("plan", "action", "unknown")],
             mode="plan",
         )
+        theory_loss = language_model.teacher_forcing_loss(
+            prediction.next_latent_mean,
+            [tuple(sample.get("theory_tokens", ())) or ("rule", "unknown")],
+            mode="theory",
+        )
+        diagnostic_language_loss = language_model.teacher_forcing_loss(
+            prediction.next_latent_mean,
+            [tuple(sample.get("diagnostic_tokens", ())) or ("question", "need", "test", "rule")],
+            mode="diagnostic",
+        )
         sequence_world_terms.append(world_loss)
         sequence_belief_terms.append(belief_loss)
         sequence_question_terms.append(question_loss)
         sequence_plan_terms.append(plan_loss)
+        sequence_theory_terms.append(theory_loss)
+        sequence_diagnostic_language_terms.append(diagnostic_language_loss)
         sequence_terms.append(
             world_loss
             + (float(config.dream_belief_weight) * belief_loss)
             + (float(config.dream_question_weight) * question_loss)
             + (float(config.dream_plan_weight) * plan_loss)
+            + (float(config.theory_loss_weight) * theory_loss)
+            + (float(config.diagnostic_language_loss_weight) * diagnostic_language_loss)
         )
         hidden = prediction.hidden
         latent = prediction.next_latent_mean
@@ -2006,6 +2424,8 @@ def _prepare_dream_window(
             "dream_belief_loss": 0.0,
             "dream_question_loss": 0.0,
             "dream_plan_loss": 0.0,
+            "dream_theory_loss": 0.0,
+            "dream_diagnostic_language_loss": 0.0,
         }
     dream_loss = float(config.dream_loss_weight) * torch.stack(sequence_terms).mean()
     return dream_loss, {
@@ -2016,6 +2436,8 @@ def _prepare_dream_window(
         "dream_belief_loss": float(torch.stack(sequence_belief_terms).mean().detach().cpu()),
         "dream_question_loss": float(torch.stack(sequence_question_terms).mean().detach().cpu()),
         "dream_plan_loss": float(torch.stack(sequence_plan_terms).mean().detach().cpu()),
+        "dream_theory_loss": float(torch.stack(sequence_theory_terms).mean().detach().cpu()),
+        "dream_diagnostic_language_loss": float(torch.stack(sequence_diagnostic_language_terms).mean().detach().cpu()),
     }
 
 
@@ -2040,6 +2462,8 @@ def _run_multidevice_dream_phase(
             "dream_belief_loss": 0.0,
             "dream_question_loss": 0.0,
             "dream_plan_loss": 0.0,
+            "dream_theory_loss": 0.0,
+            "dream_diagnostic_language_loss": 0.0,
             "dream_seconds": 0.0,
             "secondary_dream_sequences": 0.0,
             "secondary_device": str(secondary_runtime.device),
@@ -2060,6 +2484,8 @@ def _run_multidevice_dream_phase(
             "dream_belief_loss": 0.0,
             "dream_question_loss": 0.0,
             "dream_plan_loss": 0.0,
+            "dream_theory_loss": 0.0,
+            "dream_diagnostic_language_loss": 0.0,
             "dream_seconds": 0.0,
             "secondary_dream_sequences": 0.0,
             "secondary_device": str(secondary_runtime.device),
@@ -2078,6 +2504,8 @@ def _run_multidevice_dream_phase(
     belief_losses: list[float] = []
     question_losses: list[float] = []
     plan_losses: list[float] = []
+    theory_losses: list[float] = []
+    diagnostic_language_losses: list[float] = []
     total_steps = 0
     secondary_dream_sequences = 0
     for window_index in range(0, len(windows), 2):
@@ -2107,6 +2535,8 @@ def _run_multidevice_dream_phase(
             belief_losses.append(float(primary_prepared[1]["dream_belief_loss"]))
             question_losses.append(float(primary_prepared[1]["dream_question_loss"]))
             plan_losses.append(float(primary_prepared[1]["dream_plan_loss"]))
+            theory_losses.append(float(primary_prepared[1]["dream_theory_loss"]))
+            diagnostic_language_losses.append(float(primary_prepared[1]["dream_diagnostic_language_loss"]))
             total_steps += int(primary_prepared[1]["dream_steps"])
         secondary_prepared: tuple[torch.Tensor | None, dict[str, float]] | None = None
         if secondary_window is not None:
@@ -2128,6 +2558,8 @@ def _run_multidevice_dream_phase(
                 belief_losses.append(float(secondary_prepared[1]["dream_belief_loss"]))
                 question_losses.append(float(secondary_prepared[1]["dream_question_loss"]))
                 plan_losses.append(float(secondary_prepared[1]["dream_plan_loss"]))
+                theory_losses.append(float(secondary_prepared[1]["dream_theory_loss"]))
+                diagnostic_language_losses.append(float(secondary_prepared[1]["dream_diagnostic_language_loss"]))
                 total_steps += int(secondary_prepared[1]["dream_steps"])
         _merge_secondary_gradients(
             encoder,
@@ -2147,6 +2579,8 @@ def _run_multidevice_dream_phase(
         "dream_belief_loss": mean(belief_losses) if belief_losses else 0.0,
         "dream_question_loss": mean(question_losses) if question_losses else 0.0,
         "dream_plan_loss": mean(plan_losses) if plan_losses else 0.0,
+        "dream_theory_loss": mean(theory_losses) if theory_losses else 0.0,
+        "dream_diagnostic_language_loss": mean(diagnostic_language_losses) if diagnostic_language_losses else 0.0,
         "dream_seconds": perf_counter() - dream_started,
         "secondary_dream_sequences": float(secondary_dream_sequences),
         "secondary_device": str(secondary_runtime.device),
@@ -2173,6 +2607,8 @@ def _run_dream_phase(
             "dream_belief_loss": 0.0,
             "dream_question_loss": 0.0,
             "dream_plan_loss": 0.0,
+            "dream_theory_loss": 0.0,
+            "dream_diagnostic_language_loss": 0.0,
             "dream_seconds": 0.0,
             "secondary_dream_sequences": 0.0,
             "secondary_device": "",
@@ -2193,6 +2629,8 @@ def _run_dream_phase(
             "dream_belief_loss": 0.0,
             "dream_question_loss": 0.0,
             "dream_plan_loss": 0.0,
+            "dream_theory_loss": 0.0,
+            "dream_diagnostic_language_loss": 0.0,
             "dream_seconds": 0.0,
             "secondary_dream_sequences": 0.0,
             "secondary_device": "",
@@ -2203,6 +2641,8 @@ def _run_dream_phase(
     belief_losses: list[float] = []
     question_losses: list[float] = []
     plan_losses: list[float] = []
+    theory_losses: list[float] = []
+    diagnostic_language_losses: list[float] = []
     total_steps = 0
     encoder.train()
     world_model.train()
@@ -2217,6 +2657,8 @@ def _run_dream_phase(
         sequence_belief_terms: list[torch.Tensor] = []
         sequence_question_terms: list[torch.Tensor] = []
         sequence_plan_terms: list[torch.Tensor] = []
+        sequence_theory_terms: list[torch.Tensor] = []
+        sequence_diagnostic_language_terms: list[torch.Tensor] = []
         for position, index in enumerate(window):
             sample = dataset[index]
             state = sample["state"]
@@ -2228,6 +2670,9 @@ def _run_dream_phase(
             return_target = torch.tensor([float(sample.get("discounted_return", sample["reward"]))], dtype=torch.float32, device=device)
             delta_target = torch.tensor(sample["delta"], dtype=torch.float32, device=device).unsqueeze(0)
             usefulness_target = torch.tensor([float(sample["usefulness"])], dtype=torch.float32, device=device)
+            effect_target = torch.tensor([int(sample.get("effect_target", _EFFECT_KIND_TO_ID["no_effect"]))], dtype=torch.long, device=device)
+            causal_target = torch.tensor([float(sample.get("causal_value_target", sample.get("outcome_signal", 0.0)))], dtype=torch.float32, device=device)
+            diagnostic_target = torch.tensor([float(sample.get("diagnostic_target", 0.0))], dtype=torch.float32, device=device)
             world_loss, _metrics = world_model.loss(
                 latent=latent,
                 actions=[action],
@@ -2238,6 +2683,9 @@ def _run_dream_phase(
                 return_target=return_target,
                 delta_target=delta_target,
                 usefulness_target=usefulness_target,
+                effect_target=effect_target,
+                causal_target=causal_target,
+                diagnostic_target=diagnostic_target,
             )
             prediction = world_model.step(
                 latent,
@@ -2268,15 +2716,29 @@ def _run_dream_phase(
                 [next_plan_tokens or ("plan", "action", "unknown")],
                 mode="plan",
             )
+            theory_loss = language_model.teacher_forcing_loss(
+                prediction.next_latent_mean,
+                [tuple(sample.get("theory_tokens", ())) or ("rule", "unknown")],
+                mode="theory",
+            )
+            diagnostic_language_loss = language_model.teacher_forcing_loss(
+                prediction.next_latent_mean,
+                [tuple(sample.get("diagnostic_tokens", ())) or ("question", "need", "test", "rule")],
+                mode="diagnostic",
+            )
             sequence_world_terms.append(world_loss)
             sequence_belief_terms.append(belief_loss)
             sequence_question_terms.append(question_loss)
             sequence_plan_terms.append(plan_loss)
+            sequence_theory_terms.append(theory_loss)
+            sequence_diagnostic_language_terms.append(diagnostic_language_loss)
             sequence_terms.append(
                 world_loss
                 + (float(config.dream_belief_weight) * belief_loss)
                 + (float(config.dream_question_weight) * question_loss)
                 + (float(config.dream_plan_weight) * plan_loss)
+                + (float(config.theory_loss_weight) * theory_loss)
+                + (float(config.diagnostic_language_loss_weight) * diagnostic_language_loss)
             )
             hidden = prediction.hidden
             latent = prediction.next_latent_mean
@@ -2296,6 +2758,8 @@ def _run_dream_phase(
         belief_losses.append(float(torch.stack(sequence_belief_terms).mean().detach().cpu()))
         question_losses.append(float(torch.stack(sequence_question_terms).mean().detach().cpu()))
         plan_losses.append(float(torch.stack(sequence_plan_terms).mean().detach().cpu()))
+        theory_losses.append(float(torch.stack(sequence_theory_terms).mean().detach().cpu()))
+        diagnostic_language_losses.append(float(torch.stack(sequence_diagnostic_language_terms).mean().detach().cpu()))
     return {
         "dream_sequences": float(len(losses)),
         "dream_steps": float(total_steps),
@@ -2304,6 +2768,8 @@ def _run_dream_phase(
         "dream_belief_loss": mean(belief_losses) if belief_losses else 0.0,
         "dream_question_loss": mean(question_losses) if question_losses else 0.0,
         "dream_plan_loss": mean(plan_losses) if plan_losses else 0.0,
+        "dream_theory_loss": mean(theory_losses) if theory_losses else 0.0,
+        "dream_diagnostic_language_loss": mean(diagnostic_language_losses) if diagnostic_language_losses else 0.0,
         "dream_seconds": perf_counter() - dream_started,
         "secondary_dream_sequences": 0.0,
         "secondary_device": "",
@@ -2912,9 +3378,14 @@ def train_synthetic(
     epoch_reward_losses: list[float] = []
     epoch_delta_losses: list[float] = []
     epoch_usefulness_losses: list[float] = []
+    epoch_causal_losses: list[float] = []
+    epoch_diagnostic_world_losses: list[float] = []
+    epoch_effect_losses: list[float] = []
     epoch_belief_losses: list[float] = []
     epoch_question_losses: list[float] = []
     epoch_plan_losses: list[float] = []
+    epoch_theory_losses: list[float] = []
+    epoch_diagnostic_language_losses: list[float] = []
     epoch_policy_losses: list[float] = []
     epoch_positive_policy_losses: list[float] = []
     epoch_negative_policy_losses: list[float] = []
@@ -2969,6 +3440,36 @@ def train_synthetic(
             async_holdout_runtime = _start_async_holdout_runtime(config)
 
     current_stage = stages[min(max(current_stage_index, 0), len(stages) - 1)] if stages else None
+    startup_stage_name = (
+        "flat"
+        if config.curriculum == "flat"
+        else "fixed_staged"
+        if config.curriculum == "fixed_staged"
+        else current_stage.name
+        if current_stage is not None
+        else ""
+    )
+    startup_frontier_families = (
+        tuple(dict.fromkeys(config.family_modes))
+        if config.curriculum == "flat"
+        else current_stage.frontier_families
+        if current_stage is not None
+        else ()
+    )
+    startup_train_sizes = (
+        config.size_options
+        if config.curriculum == "flat"
+        else current_stage.train_size_options
+        if current_stage is not None
+        else config.size_options
+    )
+    startup_holdout_sizes = (
+        config.size_options
+        if config.curriculum == "flat"
+        else current_stage.holdout_size_options
+        if current_stage is not None
+        else config.size_options
+    )
     print(
         json.dumps(
             {
@@ -2977,11 +3478,11 @@ def train_synthetic(
                 "checkpoint_path": startup_checkpoint_path,
                 "start_epoch": start_epoch,
                 "stage_index": current_stage_index,
-                "stage_name": current_stage.name if current_stage is not None else "",
+                "stage_name": startup_stage_name,
                 "stage_epoch_count": stage_epoch_count,
-                "frontier_families": current_stage.frontier_families if current_stage is not None else (),
-                "train_size_options": current_stage.train_size_options if current_stage is not None else config.size_options,
-                "holdout_size_options": current_stage.holdout_size_options if current_stage is not None else config.size_options,
+                "frontier_families": startup_frontier_families,
+                "train_size_options": startup_train_sizes,
+                "holdout_size_options": startup_holdout_sizes,
                 "device": str(device),
                 "secondary_device": secondary_train_device or str(config.async_eval_device or ""),
             }
@@ -3097,9 +3598,14 @@ def train_synthetic(
                 "epoch_reward_losses": [],
                 "epoch_delta_losses": [],
                 "epoch_usefulness_losses": [],
+                "epoch_causal_losses": [],
+                "epoch_diagnostic_world_losses": [],
+                "epoch_effect_losses": [],
                 "epoch_belief_losses": [],
                 "epoch_question_losses": [],
                 "epoch_plan_losses": [],
+                "epoch_theory_losses": [],
+                "epoch_diagnostic_language_losses": [],
                 "epoch_policy_losses": [],
                 "epoch_positive_policy_losses": [],
                 "epoch_negative_policy_losses": [],
@@ -3112,9 +3618,14 @@ def train_synthetic(
             epoch_reward_losses = metric_lists["epoch_reward_losses"]
             epoch_delta_losses = metric_lists["epoch_delta_losses"]
             epoch_usefulness_losses = metric_lists["epoch_usefulness_losses"]
+            epoch_causal_losses = metric_lists["epoch_causal_losses"]
+            epoch_diagnostic_world_losses = metric_lists["epoch_diagnostic_world_losses"]
+            epoch_effect_losses = metric_lists["epoch_effect_losses"]
             epoch_belief_losses = metric_lists["epoch_belief_losses"]
             epoch_question_losses = metric_lists["epoch_question_losses"]
             epoch_plan_losses = metric_lists["epoch_plan_losses"]
+            epoch_theory_losses = metric_lists["epoch_theory_losses"]
+            epoch_diagnostic_language_losses = metric_lists["epoch_diagnostic_language_losses"]
             epoch_policy_losses = metric_lists["epoch_policy_losses"]
             epoch_positive_policy_losses = metric_lists["epoch_positive_policy_losses"]
             epoch_negative_policy_losses = metric_lists["epoch_negative_policy_losses"]
@@ -3306,6 +3817,7 @@ def train_synthetic(
                     "stage_epoch_count": float(epoch_stage_epoch_count),
                     "frontier_families": tuple(current_collection_metrics.get("frontier_families", ())),
                     "collector_agent": str(current_collection_metrics.get("collector_agent", "graph")),
+                    "family_sampling_weights": current_collection_metrics.get("family_sampling_weights", {}),
                     "family_counts": current_collection_metrics.get("family_counts", {}),
                     "family_breakdown": current_collection_metrics.get("family_breakdown", {}),
                     "variant_breakdown": current_collection_metrics.get("variant_breakdown", {}),
@@ -3321,9 +3833,14 @@ def train_synthetic(
                     "reward_loss": mean(epoch_reward_losses) if epoch_reward_losses else 0.0,
                     "delta_loss": mean(epoch_delta_losses) if epoch_delta_losses else 0.0,
                     "usefulness_loss": mean(epoch_usefulness_losses) if epoch_usefulness_losses else 0.0,
+                    "causal_loss": mean(epoch_causal_losses) if epoch_causal_losses else 0.0,
+                    "diagnostic_world_loss": mean(epoch_diagnostic_world_losses) if epoch_diagnostic_world_losses else 0.0,
+                    "effect_loss": mean(epoch_effect_losses) if epoch_effect_losses else 0.0,
                     "belief_loss": mean(epoch_belief_losses) if epoch_belief_losses else 0.0,
                     "question_loss": mean(epoch_question_losses) if epoch_question_losses else 0.0,
                     "plan_loss": mean(epoch_plan_losses) if epoch_plan_losses else 0.0,
+                    "theory_loss": mean(epoch_theory_losses) if epoch_theory_losses else 0.0,
+                    "diagnostic_language_loss": mean(epoch_diagnostic_language_losses) if epoch_diagnostic_language_losses else 0.0,
                     "policy_loss": mean(epoch_policy_losses) if epoch_policy_losses else 0.0,
                     "positive_policy_loss": mean(epoch_positive_policy_losses) if epoch_positive_policy_losses else 0.0,
                     "negative_policy_loss": mean(epoch_negative_policy_losses) if epoch_negative_policy_losses else 0.0,
@@ -3362,6 +3879,7 @@ def train_synthetic(
                     "teacher_episode_count": current_collection_metrics.get("teacher_episode_count", 0.0),
                     "teacher_step_fraction": current_collection_metrics.get("teacher_step_fraction", 0.0),
                     "teacher_relabel_fraction": current_collection_metrics.get("teacher_relabel_fraction", 0.0),
+                    "learner_teacher_agreement": current_collection_metrics.get("learner_teacher_agreement", 0.0),
                     "dream_sequences": dream_metrics.get("dream_sequences", 0.0),
                     "dream_steps": dream_metrics.get("dream_steps", 0.0),
                     "dream_loss": dream_metrics.get("dream_loss", 0.0),
@@ -3369,6 +3887,8 @@ def train_synthetic(
                     "dream_belief_loss": dream_metrics.get("dream_belief_loss", 0.0),
                     "dream_question_loss": dream_metrics.get("dream_question_loss", 0.0),
                     "dream_plan_loss": dream_metrics.get("dream_plan_loss", 0.0),
+                    "dream_theory_loss": dream_metrics.get("dream_theory_loss", 0.0),
+                    "dream_diagnostic_language_loss": dream_metrics.get("dream_diagnostic_language_loss", 0.0),
                     "dream_seconds": dream_metrics.get("dream_seconds", 0.0),
                     "secondary_dream_sequences": dream_metrics.get("secondary_dream_sequences", 0.0),
                 }
@@ -3379,7 +3899,7 @@ def train_synthetic(
                 "interrupted": False,
                 "last_epoch_samples": history[-1]["samples"],
                 "stage_index": current_stage_index,
-                "stage_name": stages[current_stage_index].name if stages else "",
+                "stage_name": str(current_collection_metrics.get("stage_name", epoch_stage_name)),
                 "stage_epoch_count": stage_epoch_count,
                 "consecutive_holdout_passes": consecutive_holdout_passes,
                 "holdout_seconds": history[-1]["holdout_seconds"],
@@ -3399,6 +3919,7 @@ def train_synthetic(
                 "teacher_step_fraction": current_collection_metrics.get("teacher_step_fraction", 0.0),
                 "teacher_relabel_fraction": current_collection_metrics.get("teacher_relabel_fraction", 0.0),
                 "collector_agent": current_collection_metrics.get("collector_agent", "graph"),
+                "family_sampling_weights": current_collection_metrics.get("family_sampling_weights", {}),
                 "dream_sequences": dream_metrics.get("dream_sequences", 0.0),
                 "dream_steps": dream_metrics.get("dream_steps", 0.0),
                 "dream_loss": dream_metrics.get("dream_loss", 0.0),
@@ -3463,6 +3984,7 @@ def train_synthetic(
                         "stage_epoch_count": epoch_stage_epoch_count,
                         "frontier_families": current_collection_metrics.get("frontier_families", ()),
                         "collector_agent": history[-1]["collector_agent"],
+                        "family_sampling_weights": history[-1]["family_sampling_weights"],
                         "collect_avg_return": history[-1]["collect_avg_return"],
                         "collect_avg_steps": history[-1]["collect_avg_steps"],
                         "collect_success_rate": history[-1]["collect_success_rate"],
@@ -3485,9 +4007,14 @@ def train_synthetic(
                         "reward_loss": history[-1]["reward_loss"],
                         "delta_loss": history[-1]["delta_loss"],
                         "usefulness_loss": history[-1]["usefulness_loss"],
+                        "causal_loss": history[-1]["causal_loss"],
+                        "diagnostic_world_loss": history[-1]["diagnostic_world_loss"],
+                        "effect_loss": history[-1]["effect_loss"],
                         "belief_loss": history[-1]["belief_loss"],
                         "question_loss": history[-1]["question_loss"],
                         "plan_loss": history[-1]["plan_loss"],
+                        "theory_loss": history[-1]["theory_loss"],
+                        "diagnostic_language_loss": history[-1]["diagnostic_language_loss"],
                         "policy_loss": history[-1]["policy_loss"],
                         "positive_policy_loss": history[-1]["positive_policy_loss"],
                         "negative_policy_loss": history[-1]["negative_policy_loss"],
@@ -3508,6 +4035,8 @@ def train_synthetic(
                         "dream_belief_loss": history[-1]["dream_belief_loss"],
                         "dream_question_loss": history[-1]["dream_question_loss"],
                         "dream_plan_loss": history[-1]["dream_plan_loss"],
+                        "dream_theory_loss": history[-1]["dream_theory_loss"],
+                        "dream_diagnostic_language_loss": history[-1]["dream_diagnostic_language_loss"],
                         "dream_seconds": history[-1]["dream_seconds"],
                         "secondary_dream_sequences": history[-1]["secondary_dream_sequences"],
                         **saved_paths,
@@ -3526,9 +4055,11 @@ def train_synthetic(
             "partial_epoch_uncertainty": mean(epoch_uncertainty) if epoch_uncertainty else 0.0,
             "partial_epoch_samples": float(current_collection_metrics.get("samples", 0.0)),
             "partial_world_loss": mean(epoch_world_total_losses) if epoch_world_total_losses else 0.0,
+            "partial_causal_loss": mean(epoch_causal_losses) if epoch_causal_losses else 0.0,
+            "partial_effect_loss": mean(epoch_effect_losses) if epoch_effect_losses else 0.0,
             "partial_policy_loss": mean(epoch_policy_losses) if epoch_policy_losses else 0.0,
             "stage_index": current_stage_index,
-            "stage_name": stages[current_stage_index].name if stages else "",
+            "stage_name": str(current_collection_metrics.get("stage_name", "flat" if config.curriculum == "flat" else stages[current_stage_index].name if stages else "")),
             "stage_epoch_count": stage_epoch_count,
             "consecutive_holdout_passes": consecutive_holdout_passes,
             "bootstrap_steps": float(current_collection_metrics.get("bootstrap_steps", 0.0)),
@@ -3542,6 +4073,8 @@ def train_synthetic(
             "dream_belief_loss": float(dream_metrics.get("dream_belief_loss", 0.0)),
             "dream_question_loss": float(dream_metrics.get("dream_question_loss", 0.0)),
             "dream_plan_loss": float(dream_metrics.get("dream_plan_loss", 0.0)),
+            "dream_theory_loss": float(dream_metrics.get("dream_theory_loss", 0.0)),
+            "dream_diagnostic_language_loss": float(dream_metrics.get("dream_diagnostic_language_loss", 0.0)),
             "dream_seconds": float(dream_metrics.get("dream_seconds", 0.0)),
             "secondary_train_device": secondary_train_device,
             "secondary_replay_samples": float(secondary_replay_samples),
@@ -3579,7 +4112,7 @@ def train_synthetic(
             "epochs_completed": len(history),
             "active_epoch": current_epoch,
             "stage_index": current_stage_index,
-            "stage_name": stages[current_stage_index].name if stages else "",
+            "stage_name": str(current_collection_metrics.get("stage_name", "flat" if config.curriculum == "flat" else stages[current_stage_index].name if stages else "")),
             "samples_last_epoch": history[-1]["samples"] if history else 0.0,
             "loss_last_epoch": history[-1]["loss"] if history else 0.0,
             "uncertainty_last_epoch": history[-1]["uncertainty"] if history else 0.0,
@@ -3597,7 +4130,7 @@ def train_synthetic(
             "interrupted": False,
             "last_epoch_samples": history[-1]["samples"] if history else 0.0,
             "stage_index": current_stage_index,
-            "stage_name": stages[current_stage_index].name if stages else "",
+            "stage_name": str(current_collection_metrics.get("stage_name", "flat" if config.curriculum == "flat" else stages[current_stage_index].name if stages else "")),
             "stage_epoch_count": stage_epoch_count,
             "consecutive_holdout_passes": consecutive_holdout_passes,
             "holdout_seconds": history[-1]["holdout_seconds"] if history else 0.0,
@@ -3648,7 +4181,7 @@ def train_synthetic(
         "epochs": float(config.epochs),
         "epochs_completed": len(history),
         "stage_index": current_stage_index,
-        "stage_name": stages[current_stage_index].name if stages else "",
+        "stage_name": str(current_collection_metrics.get("stage_name", "flat" if config.curriculum == "flat" else stages[current_stage_index].name if stages else "")),
         "samples_last_epoch": history[-1]["samples"] if history else 0.0,
         "loss_last_epoch": history[-1]["loss"] if history else 0.0,
         "uncertainty_last_epoch": history[-1]["uncertainty"] if history else 0.0,
@@ -3681,11 +4214,12 @@ def load_checkpoint(
 
 
 def build_parser() -> argparse.ArgumentParser:
+    defaults = SyntheticTrainingConfig()
     parser = argparse.ArgumentParser(prog="python -m arcagi.training.synthetic")
-    parser.add_argument("--epochs", type=int, default=8)
-    parser.add_argument("--episodes-per-epoch", type=int, default=96)
-    parser.add_argument("--learning-rate", type=float, default=3e-4)
-    parser.add_argument("--checkpoint-path", type=str, default="artifacts/synthetic_hybrid.pt")
+    parser.add_argument("--epochs", type=int, default=defaults.epochs)
+    parser.add_argument("--episodes-per-epoch", type=int, default=defaults.episodes_per_epoch)
+    parser.add_argument("--learning-rate", type=float, default=defaults.learning_rate)
+    parser.add_argument("--checkpoint-path", type=str, default=defaults.checkpoint_path)
     parser.add_argument("--init-checkpoint-path", type=str, default="")
     parser.add_argument("--resume-checkpoint-path", type=str, default="")
     parser.add_argument(
@@ -3693,62 +4227,115 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="allow init-checkpoint-path to load weights from a checkpoint that also contains saved training state",
     )
-    parser.add_argument("--device", type=str, default="")
+    parser.add_argument("--device", type=str, default=defaults.train_device)
     parser.add_argument(
         "--async-eval-device",
         type=str,
-        default="",
+        default=defaults.async_eval_device,
         help="secondary device for mirrored replay/dream training when CUDA is available; otherwise async holdout fallback",
     )
     parser.add_argument(
         "--secondary-device",
         type=str,
-        default="",
+        default=defaults.async_eval_device,
         help="alias for --async-eval-device",
     )
-    parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--seed", type=int, default=defaults.seed)
     parser.add_argument(
         "--behavior-policy",
         type=str,
-        default="mixed",
+        default=defaults.behavior_policy,
         choices=sorted(_ALLOWED_SYNTHETIC_BEHAVIOR_POLICIES),
     )
-    parser.add_argument("--curriculum", type=str, default="staged", choices=sorted(_ALLOWED_CURRICULA))
-    parser.add_argument("--oracle-imitation-epochs", type=int, default=2)
-    parser.add_argument("--oracle-bootstrap-steps", type=int, default=16)
-    parser.add_argument("--oracle-bootstrap-stride", type=int, default=1)
-    parser.add_argument("--oracle-bootstrap-min-steps", type=int, default=8)
-    parser.add_argument("--oracle-bootstrap-min-stride", type=int, default=2)
-    parser.add_argument("--oracle-bootstrap-full-epochs", type=int, default=4)
-    parser.add_argument("--oracle-bootstrap-decay-epochs", type=int, default=8)
-    parser.add_argument("--oracle-bootstrap-decay-success-threshold", type=float, default=0.9)
-    parser.add_argument("--oracle-bootstrap-decay-stability-epochs", type=int, default=2)
-    parser.add_argument("--teacher-guidance-holdout-success-threshold", type=float, default=0.2)
-    parser.add_argument("--teacher-episode-fraction-initial", type=float, default=0.2)
-    parser.add_argument("--teacher-episode-fraction-floor", type=float, default=0.2)
-    parser.add_argument("--teacher-takeover-prob-initial", type=float, default=0.5)
-    parser.add_argument("--teacher-takeover-prob-floor", type=float, default=0.2)
-    parser.add_argument("--teacher-relabel-weight", type=float, default=0.8)
-    parser.add_argument("--trajectory-credit-discount", type=float, default=0.94)
-    parser.add_argument("--dream-batches-per-epoch", type=int, default=8)
-    parser.add_argument("--dream-batch-size", type=int, default=8)
-    parser.add_argument("--dream-horizon", type=int, default=3)
-    parser.add_argument("--dream-loss-weight", type=float, default=0.35)
-    parser.add_argument("--dream-belief-weight", type=float, default=0.2)
-    parser.add_argument("--dream-question-weight", type=float, default=0.2)
-    parser.add_argument("--dream-plan-weight", type=float, default=0.2)
-    parser.add_argument("--log-every-episodes", type=int, default=16)
-    parser.add_argument("--holdout-eval-every-epochs", type=int, default=4)
-    parser.add_argument("--holdout-episodes-per-variant", type=int, default=2)
-    parser.add_argument("--regression-holdout-every-evals", type=int, default=1)
-    parser.add_argument("--promotion-consecutive-evals", type=int, default=2)
-    parser.add_argument("--frontier-replay-weight", type=int, default=3)
-    parser.add_argument("--previous-stage-replay-weight", type=int, default=1)
-    parser.add_argument("--holdout-failure-examples", type=int, default=5)
-    parser.add_argument("--holdout-trace-steps", type=int, default=48)
-    parser.add_argument("--holdout-trace-top-actions", type=int, default=3)
-    parser.add_argument("--enhancement-gate-target", type=float, default=0.3)
-    parser.add_argument("--enhancement-gate-weight", type=float, default=0.05)
+    parser.add_argument("--curriculum", type=str, default=defaults.curriculum, choices=sorted(_ALLOWED_CURRICULA))
+    parser.add_argument("--oracle-imitation-epochs", type=int, default=defaults.oracle_imitation_epochs)
+    parser.add_argument("--oracle-bootstrap-steps", type=int, default=defaults.oracle_bootstrap_steps)
+    parser.add_argument("--oracle-bootstrap-stride", type=int, default=defaults.oracle_bootstrap_stride)
+    parser.add_argument("--oracle-bootstrap-min-steps", type=int, default=defaults.oracle_bootstrap_min_steps)
+    parser.add_argument("--oracle-bootstrap-min-stride", type=int, default=defaults.oracle_bootstrap_min_stride)
+    parser.add_argument("--oracle-bootstrap-full-epochs", type=int, default=defaults.oracle_bootstrap_full_epochs)
+    parser.add_argument("--oracle-bootstrap-decay-epochs", type=int, default=defaults.oracle_bootstrap_decay_epochs)
+    parser.add_argument(
+        "--oracle-bootstrap-decay-success-threshold",
+        type=float,
+        default=defaults.oracle_bootstrap_decay_success_threshold,
+    )
+    parser.add_argument(
+        "--oracle-bootstrap-decay-stability-epochs",
+        type=int,
+        default=defaults.oracle_bootstrap_decay_stability_epochs,
+    )
+    parser.add_argument(
+        "--teacher-guidance-holdout-success-threshold",
+        type=float,
+        default=defaults.teacher_guidance_holdout_success_threshold,
+    )
+    parser.add_argument(
+        "--teacher-episode-fraction-initial",
+        type=float,
+        default=defaults.teacher_episode_fraction_initial,
+    )
+    parser.add_argument(
+        "--teacher-episode-fraction-floor",
+        type=float,
+        default=defaults.teacher_episode_fraction_floor,
+    )
+    parser.add_argument(
+        "--teacher-takeover-prob-initial",
+        type=float,
+        default=defaults.teacher_takeover_prob_initial,
+    )
+    parser.add_argument(
+        "--teacher-takeover-prob-floor",
+        type=float,
+        default=defaults.teacher_takeover_prob_floor,
+    )
+    parser.add_argument("--teacher-relabel-weight", type=float, default=defaults.teacher_relabel_weight)
+    parser.add_argument("--teacher-ownership-window", type=int, default=defaults.teacher_ownership_window)
+    parser.add_argument("--teacher-agreement-target", type=float, default=defaults.teacher_agreement_target)
+    parser.add_argument("--teacher-success-target", type=float, default=defaults.teacher_success_target)
+    parser.add_argument("--trajectory-credit-discount", type=float, default=defaults.trajectory_credit_discount)
+    parser.add_argument("--dream-batches-per-epoch", type=int, default=defaults.dream_batches_per_epoch)
+    parser.add_argument("--dream-batch-size", type=int, default=defaults.dream_batch_size)
+    parser.add_argument("--dream-horizon", type=int, default=defaults.dream_horizon)
+    parser.add_argument("--dream-loss-weight", type=float, default=defaults.dream_loss_weight)
+    parser.add_argument("--dream-belief-weight", type=float, default=defaults.dream_belief_weight)
+    parser.add_argument("--dream-question-weight", type=float, default=defaults.dream_question_weight)
+    parser.add_argument("--dream-plan-weight", type=float, default=defaults.dream_plan_weight)
+    parser.add_argument("--theory-loss-weight", type=float, default=defaults.theory_loss_weight)
+    parser.add_argument(
+        "--diagnostic-language-loss-weight",
+        type=float,
+        default=defaults.diagnostic_language_loss_weight,
+    )
+    parser.add_argument("--log-every-episodes", type=int, default=defaults.log_every_episodes)
+    parser.add_argument("--holdout-eval-every-epochs", type=int, default=defaults.holdout_eval_every_epochs)
+    parser.add_argument(
+        "--holdout-episodes-per-variant",
+        type=int,
+        default=defaults.holdout_episodes_per_variant,
+    )
+    parser.add_argument(
+        "--regression-holdout-every-evals",
+        type=int,
+        default=defaults.regression_holdout_every_evals,
+    )
+    parser.add_argument(
+        "--promotion-consecutive-evals",
+        type=int,
+        default=defaults.promotion_consecutive_evals,
+    )
+    parser.add_argument("--frontier-replay-weight", type=int, default=defaults.frontier_replay_weight)
+    parser.add_argument(
+        "--previous-stage-replay-weight",
+        type=int,
+        default=defaults.previous_stage_replay_weight,
+    )
+    parser.add_argument("--holdout-failure-examples", type=int, default=defaults.holdout_failure_examples)
+    parser.add_argument("--holdout-trace-steps", type=int, default=defaults.holdout_trace_steps)
+    parser.add_argument("--holdout-trace-top-actions", type=int, default=defaults.holdout_trace_top_actions)
+    parser.add_argument("--enhancement-gate-target", type=float, default=defaults.enhancement_gate_target)
+    parser.add_argument("--enhancement-gate-weight", type=float, default=defaults.enhancement_gate_weight)
     return parser
 
 
@@ -3785,6 +4372,9 @@ def main() -> int:
         teacher_takeover_prob_initial=args.teacher_takeover_prob_initial,
         teacher_takeover_prob_floor=args.teacher_takeover_prob_floor,
         teacher_relabel_weight=args.teacher_relabel_weight,
+        teacher_ownership_window=args.teacher_ownership_window,
+        teacher_agreement_target=args.teacher_agreement_target,
+        teacher_success_target=args.teacher_success_target,
         trajectory_credit_discount=args.trajectory_credit_discount,
         dream_batches_per_epoch=args.dream_batches_per_epoch,
         dream_batch_size=args.dream_batch_size,
@@ -3793,6 +4383,8 @@ def main() -> int:
         dream_belief_weight=args.dream_belief_weight,
         dream_question_weight=args.dream_question_weight,
         dream_plan_weight=args.dream_plan_weight,
+        theory_loss_weight=args.theory_loss_weight,
+        diagnostic_language_loss_weight=args.diagnostic_language_loss_weight,
         log_every_episodes=args.log_every_episodes,
         holdout_eval_every_epochs=args.holdout_eval_every_epochs,
         holdout_episodes_per_variant=args.holdout_episodes_per_variant,
