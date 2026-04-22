@@ -40,6 +40,10 @@ Detailed runtime-learning design:
 - current learned synthetic result after the runtime object-hypothesis controller landed:
   - `recurrent`: `1.0` success rate on the full synthetic eval slice
   - `hybrid`: `1.0` success rate on the full synthetic eval slice
+- scientist-agent patch status:
+  - the hypothesis-driven `arcagi.scientist` stack is now integrated, checkpointable, and runnable through the shared evaluation harness
+  - the current scientist curriculum trainer persists the online world-model weights across episodes, but it does not yet train a separate persistent policy or hypothesis library
+  - bounded scientist pretraining currently solves its own tiny hidden-rule holdout (`simple_success_rate = 1.0`) but still fails the richer repo synthetic families (`rich_success_rate = 0.0`) and does not yet improve local ARC `AR25`
 - current runtime-learning status:
   - the learned agent now beats the synthetic benchmark through live runtime rule learning and explicit online hypothesis competition
   - the full hybrid agent constructs the generic runtime hypothesis controller by default
@@ -100,6 +104,65 @@ Notes:
 - Current official `arc-agi` releases require Python `3.12+`.
 - `arc-agi` brings in `arcengine`; it does not need to be listed separately here.
 - The ARC adapter is kept optional so local research and testing do not hard-fail when the toolkit is absent.
+
+## Scientist Agent
+
+The repo now includes a separate hypothesis-driven `scientist` agent under `arcagi.scientist`.
+This path is intentionally small and explicit:
+
+- object-centric perception
+- falsifiable online hypotheses
+- surprise-weighted episodic memory
+- a tiny bootstrap world model
+- grounded internal language
+- an information-gain planner
+
+Current boundary:
+
+- the scientist path now supports checkpoint save/load and a reproducible curriculum runner
+- its persistent learned state is currently only the online world model
+- it is therefore useful for rapid attack-loop experiments, but it is not yet a full replacement for the main Stage 1 / Stage 2 training stack
+
+Run the scientist smoke environment:
+
+```bash
+python -m arcagi.scientist.cli --seed 3 --max-steps 80
+```
+
+Run bounded scientist curriculum training:
+
+```bash
+python -m arcagi.scientist.train \
+  --stage1-episodes 32 \
+  --stage2-episodes 96 \
+  --eval-every 32 \
+  --holdout-simple-episodes 6 \
+  --checkpoint-path artifacts/scientist_curriculum_run1_best.pkl \
+  --latest-checkpoint-path artifacts/scientist_curriculum_run1_latest.pkl
+```
+
+Evaluate the trained scientist checkpoint on local ARC:
+
+```bash
+python -m arcagi.evaluation.harness arc \
+  --agent scientist \
+  --checkpoint-path artifacts/scientist_curriculum_run1_best.pkl \
+  --game-limit 1 \
+  --mode offline
+```
+
+Current measured scientist result on this tree:
+
+- bounded curriculum pretraining reached:
+  - `simple_success_rate = 1.0`
+  - `rich_success_rate = 0.0`
+- local offline ARC `ar25-0c556536` still failed after pretraining:
+  - `success = false`
+  - `return = 0.0`
+  - `steps = 256`
+  - `interaction_steps = 20`
+
+So the scientist edits improved the experimentation substrate, but they did not close the real ARC semantic-transfer gap yet.
 
 ## Manual Stage 1 Training
 

@@ -119,7 +119,6 @@ class BaseAgent(ABC):
         terminated: bool,
         info: dict[str, object],
     ) -> StructuredState:
-        agent_info = _agent_visible_info(info)
         merged_observation = _merge_visible_info_into_observation(next_observation, info)
         extracted_next_raw_state = extract_structured_state(merged_observation)
         next_raw_state = self.representation_repair.augment(extracted_next_raw_state, commit=False)
@@ -158,12 +157,12 @@ class BaseAgent(ABC):
                 reward=reward,
                 next_state=next_state,
                 terminated=terminated,
-                info=agent_info,
+                info={},
             )
             self.graph.update(transition)
             self.on_transition(transition)
         self.total_reward += reward
-        self.last_info = agent_info
+        self.last_info = {}
         self.last_reward = reward
         self.last_raw_state = next_raw_state
         return next_state

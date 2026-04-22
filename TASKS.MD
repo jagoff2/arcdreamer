@@ -2,6 +2,8 @@
 
 ## Active
 
+- [x] Add a reproducible scientist-agent curriculum training path with checkpoint save/load, run a bounded pretrain, and re-evaluate local ARC `AR25`.
+- [x] Integrate the GPT-5.4-pro scientist patch set from `GPT-PRO-PATCH-SET` into the live repo and validate the touched package, harness, and tests.
 - [x] Move the generic runtime hypothesis controller into the full hybrid eval path instead of leaving it as sidecar research code.
 - [x] Add explicit proof and exception objects to the runtime hypothesis loop and write them into episodic memory.
 - [x] Add a first online representation-repair substrate: split/merge/rebind repair hypotheses now accumulate within the episode and suppress premature exploitation when the current object view looks wrong.

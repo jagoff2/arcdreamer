@@ -163,7 +163,7 @@ class HiddenRuleEnv(BaseEnvironment):
             raise ValueError(f"unknown family_mode: {self.family_mode}")
         self._agent = _random_empty_cell(self._grid, self._rng)
         self._grid[self._agent] = AGENT
-        return self._observation()
+        return self._observation(include_interface_state=False)
 
     def step(self, action: ActionName) -> StepResult:
         if self._terminated:
@@ -521,14 +521,15 @@ class HiddenRuleEnv(BaseEnvironment):
             return 0.0, "false_progress_under_wrong_selector"
         return -0.04, "false_progress_under_wrong_selector"
 
-    def _observation(self) -> GridObservation:
+    def _observation(self, *, include_interface_state: bool = True) -> GridObservation:
         extras = {
             "cell_tags": self._build_cell_tags(),
             "world_type": "synthetic_hidden_rule",
             "action_roles": dict(self._action_roles),
-            "inventory": self._public_inventory(),
-            "flags": self._public_flags(),
         }
+        if include_interface_state:
+            extras["inventory"] = self._public_inventory()
+            extras["flags"] = self._public_flags()
         return GridObservation(
             task_id=self.task_id,
             episode_id=f"synthetic_hidden_rule/{self._base_seed}_{self._episode_index - 1}",

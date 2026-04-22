@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "arcagi"
 version = "0.1.0"
-description = "Local ARC-AGI-3 hybrid agent research stack with explicit exploration, world modeling, memory, and grounded language."
+description = "Local ARC-AGI-3 hybrid agent research stack with explicit exploration, world modeling, memory, grounded language, and hypothesis-driven online learning."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -25,6 +25,8 @@ dev = [
 
 [project.scripts]
 arcagi = "arcagi.cli:main"
+arcagi-scientist-synthetic = "arcagi.scientist.cli:main"
+arcagi-scientist-train = "arcagi.scientist.train:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["arcagi"]
