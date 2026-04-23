@@ -25,6 +25,7 @@ from .types import (
     grid_cell_to_action_coordinates,
     is_interact_action,
     is_move_action,
+    is_reset_action,
     is_selector_action,
     make_targeted_action,
     parse_action_target,
@@ -33,6 +34,20 @@ from .types import (
 
 def _clip(value: float, lo: float, hi: float) -> float:
     return float(max(lo, min(hi, value)))
+
+
+def _bounded_accumulate(current: float, contribution: float, *, cap: float) -> float:
+    if contribution <= 1e-12:
+        return float(current)
+    if cap <= 1e-12:
+        return 0.0
+    base = _clip(current / cap, 0.0, 0.999)
+    update = _clip(contribution / cap, 0.0, 0.95)
+    return float(cap * (1.0 - (1.0 - base) * (1.0 - update)))
+
+
+def _belief_weight(hyp: "Hypothesis") -> float:
+    return float(hyp.posterior * (0.25 + 0.75 * hyp.evidence.confidence))
 
 
 @dataclass
@@ -138,6 +153,9 @@ class HypothesisEngine:
         self.positive_examples = 0
         self.recent_actions.clear()
 
+    def reset_level(self) -> None:
+        self.recent_actions.clear()
+
     def _id(self, kind: str, action_fam: str, params: Mapping[str, Any]) -> str:
         payload = ";".join(f"{k}={params[k]}" for k in sorted(params))
         return f"{kind}|{action_fam}|{payload}"
@@ -191,6 +209,8 @@ class HypothesisEngine:
         self.recent_actions.append(record.action)
         if len(self.recent_actions) > 16:
             self.recent_actions.pop(0)
+        if is_reset_action(record.action):
+            return
 
         # First update existing hypotheses against the new observation.
         for hyp in list(self.hypotheses.values()):
@@ -209,6 +229,7 @@ class HypothesisEngine:
                 return
             target_sig = str(hyp.params.get("object_signature"))
             expected_delta = tuple(hyp.params.get("delta", (0, 0)))
+            target_present = self._state_contains_signature(record.before, target_sig)
             supported = any(
                 motion.before_signature == target_sig and tuple(motion.delta) == expected_delta
                 for motion in record.delta.moved_objects
@@ -216,8 +237,9 @@ class HypothesisEngine:
             visible_relevant = any(motion.before_signature == target_sig for motion in record.delta.moved_objects)
             if supported:
                 hyp.observe(supported=True, strength=1.0 + 0.25 * record.delta.changed_fraction, step=step)
-            elif visible_relevant or record.delta.has_visible_effect:
-                hyp.observe(supported=False, strength=0.35, step=step)
+            elif target_present:
+                strength = 0.35 if (visible_relevant or record.delta.has_visible_effect) else 0.18
+                hyp.observe(supported=False, strength=strength, step=step)
 
         elif hyp.kind == "targeted_action_changes_object":
             if fam != hyp.action_family:
@@ -356,6 +378,9 @@ class HypothesisEngine:
     def _state_contains_color(self, state: StructuredState, color: int) -> bool:
         return any(obj.color == color for obj in state.objects)
 
+    def _state_contains_signature(self, state: StructuredState, signature: str) -> bool:
+        return any(obj.signature == signature for obj in state.objects)
+
     def _action_touches_color(self, record: TransitionRecord, color: int) -> bool:
         for oid in record.delta.touched_objects:
             before = record.before.object_by_id(oid)
@@ -364,7 +389,23 @@ class HypothesisEngine:
                 return True
         return False
 
-    def score_action(self, state: StructuredState, action: ActionName) -> HypothesisActionScore:
+    def score_action(
+        self,
+        state: StructuredState,
+        action: ActionName,
+        *,
+        contextual: bool = False,
+        bounded: bool = False,
+    ) -> HypothesisActionScore:
+        if is_reset_action(action):
+            return HypothesisActionScore(
+                expected_reward=0.0,
+                expected_change=0.0,
+                information_gain=0.0,
+                risk=0.0,
+                posterior_mass=0.0,
+                rationale=("retry", "reset"),
+            )
         fam = action_family(action)
         expected_reward = 0.0
         expected_change = 0.0
@@ -375,13 +416,23 @@ class HypothesisEngine:
         target = action_target_to_grid_cell(action, state.frame.extras)
 
         for hyp in self.hypotheses.values():
-            p = hyp.posterior
+            belief = _belief_weight(hyp) if (contextual or bounded) else hyp.posterior
             relevant = fam == hyp.action_family
             if hyp.kind == "action_moves_object" and relevant:
-                expected_change += p * 0.45
-                posterior_mass += p
+                target_sig = str(hyp.params.get("object_signature", ""))
+                if contextual and not self._state_contains_signature(state, target_sig):
+                    continue
+                if bounded:
+                    expected_change = _bounded_accumulate(expected_change, 0.50 * belief, cap=1.0)
+                    posterior_mass = _bounded_accumulate(posterior_mass, 0.75 * belief, cap=2.0)
+                else:
+                    expected_change += belief * 0.45
+                    posterior_mass += belief
                 if hyp.uncertainty > 0.05:
-                    info_gain += hyp.uncertainty * 0.60
+                    if bounded:
+                        info_gain = _bounded_accumulate(info_gain, hyp.uncertainty * 0.45, cap=1.5)
+                    else:
+                        info_gain += hyp.uncertainty * 0.60
                     rationale.extend(("test", "movement", fam))
 
             elif hyp.kind == "targeted_action_changes_object" and relevant:
@@ -389,12 +440,20 @@ class HypothesisEngine:
                 if target is not None:
                     near_color = any(_obj_near_target(obj, target, radius=1) and obj.color == color for obj in state.objects)
                     if near_color:
-                        expected_change += p * 0.55
-                        info_gain += hyp.uncertainty * 0.75
-                        posterior_mass += p
+                        if bounded:
+                            expected_change = _bounded_accumulate(expected_change, 0.55 * belief, cap=1.0)
+                            info_gain = _bounded_accumulate(info_gain, hyp.uncertainty * 0.60, cap=1.5)
+                            posterior_mass = _bounded_accumulate(posterior_mass, 0.75 * belief, cap=2.0)
+                        else:
+                            expected_change += belief * 0.55
+                            info_gain += hyp.uncertainty * 0.75
+                            posterior_mass += belief
                         rationale.extend(("test", "targeted_change", f"c{color}"))
                 else:
-                    info_gain += hyp.uncertainty * 0.30
+                    if bounded:
+                        info_gain = _bounded_accumulate(info_gain, hyp.uncertainty * 0.25, cap=1.5)
+                    else:
+                        info_gain += hyp.uncertainty * 0.30
 
             elif hyp.kind == "reward_when_touch_color":
                 color = int(hyp.params.get("color", -999))
@@ -402,22 +461,38 @@ class HypothesisEngine:
                 if not color_present:
                     continue
                 if is_move_action(action) or is_interact_action(action) or fam == hyp.action_family:
-                    expected_reward += p * hyp.utility_prior * 0.35
-                    posterior_mass += p
+                    if bounded:
+                        expected_reward = _bounded_accumulate(expected_reward, belief * hyp.utility_prior * 0.28, cap=1.25)
+                        posterior_mass = _bounded_accumulate(posterior_mass, 0.65 * belief, cap=2.0)
+                    else:
+                        expected_reward += belief * hyp.utility_prior * 0.35
+                        posterior_mass += belief
                     if hyp.uncertainty > 0.04:
-                        info_gain += hyp.uncertainty * 0.45
+                        if bounded:
+                            info_gain = _bounded_accumulate(info_gain, hyp.uncertainty * 0.35, cap=1.5)
+                        else:
+                            info_gain += hyp.uncertainty * 0.45
                     rationale.extend(("pursue", f"c{color}"))
 
             elif hyp.kind == "reward_when_state_has_color":
                 color = int(hyp.params.get("color", -999))
                 if any(obj.color == color for obj in state.objects):
-                    expected_reward += p * 0.12
-                    posterior_mass += p * 0.25
+                    if bounded:
+                        expected_reward = _bounded_accumulate(expected_reward, 0.12 * belief, cap=1.25)
+                        posterior_mass = _bounded_accumulate(posterior_mass, 0.20 * belief, cap=2.0)
+                    else:
+                        expected_reward += belief * 0.12
+                        posterior_mass += belief * 0.25
 
             elif hyp.kind == "mode_action_changes_dynamics" and relevant:
-                expected_change += p * 0.20
-                info_gain += hyp.uncertainty * 0.65
-                posterior_mass += p
+                if bounded:
+                    expected_change = _bounded_accumulate(expected_change, 0.20 * belief, cap=1.0)
+                    info_gain = _bounded_accumulate(info_gain, hyp.uncertainty * 0.50, cap=1.5)
+                    posterior_mass = _bounded_accumulate(posterior_mass, 0.50 * belief, cap=2.0)
+                else:
+                    expected_change += belief * 0.20
+                    info_gain += hyp.uncertainty * 0.65
+                    posterior_mass += belief
                 rationale.extend(("test", "mode"))
 
             if relevant and hyp.posterior < 0.20 and hyp.evidence.contradiction > hyp.evidence.support + 1:

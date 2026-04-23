@@ -85,6 +85,11 @@ class RepresentationRepairWorkspace:
         self.last_state = None
         self.next_track_index = 0
 
+    def reset_level(self) -> None:
+        self.track_roles.clear()
+        self.last_state = None
+        self.next_track_index = 0
+
     def augment(self, state: StructuredState, *, commit: bool = True) -> StructuredState:
         objects = list(state.objects)
         objects = self._apply_merge_repairs(objects)

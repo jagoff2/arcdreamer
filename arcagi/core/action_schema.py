@@ -87,6 +87,8 @@ def direction_vector(direction: str | None) -> tuple[float, float]:
 
 
 def infer_action_type(action: ActionName, parts: tuple[str, ...], role: str) -> str:
+    if action == "0" or role in {"reset", "reset_level"} or "reset" in parts:
+        return "reset"
     if action in _DIRECTION_TO_VECTOR:
         return "move"
     if action.startswith("interact_"):

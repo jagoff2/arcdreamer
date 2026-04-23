@@ -41,6 +41,15 @@ class GraphExplorerAgent(BaseAgent):
         self.rule_inducer.clear()
         self.stuck_steps = 0
 
+    def reset_level(self) -> None:
+        super().reset_level()
+        self.global_action_counts.clear()
+        self.global_action_delta_sum.clear()
+        self.global_action_reward_sum.clear()
+        self.family_counts.clear()
+        self.family_bins.clear()
+        self.stuck_steps = 0
+
     def on_transition(self, transition: Transition) -> None:
         action = transition.action
         delta_pixels = self._grid_delta_pixels(transition)

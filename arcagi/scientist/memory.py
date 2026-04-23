@@ -51,6 +51,9 @@ class EpisodicMemory:
         self.options.clear()
         self.recent_actions.clear()
 
+    def reset_level(self) -> None:
+        self.recent_actions.clear()
+
     def write_transition(self, record: TransitionRecord, *, surprise: float, language_tokens: Iterable[str]) -> None:
         self.recent_actions.append(record.action)
         if len(self.recent_actions) > 12:

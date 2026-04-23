@@ -21,6 +21,7 @@ from arcagi.models.world_model import RecurrentWorldModel
 from arcagi.memory.episodic import EpisodicMemory
 from arcagi.perception.object_encoder import extract_structured_state
 from arcagi.planning.planner import HybridPlanner, PlannerConfig
+from arcagi.training.arc_session import annotate_session_returns, collect_arc_session
 from arcagi.training.synthetic import build_default_modules, load_checkpoint
 
 
@@ -28,7 +29,7 @@ from arcagi.training.synthetic import build_default_modules, load_checkpoint
 class ArcPublicTrainingConfig:
     mode: str = "online"
     game_limit: int = 25
-    episodes_per_game: int = 2
+    sessions_per_game: int = 2
     max_steps: int = 96
     epochs: int = 2
     learning_rate: float = 1e-4
@@ -48,8 +49,8 @@ _ALLOWED_ARC_PUBLIC_BEHAVIOR_POLICIES: frozenset[str] = frozenset({"graph", "ran
 def _validate_arc_public_training_config(config: ArcPublicTrainingConfig) -> None:
     if int(config.game_limit) <= 0:
         raise ValueError("game_limit must be positive")
-    if int(config.episodes_per_game) <= 0:
-        raise ValueError("episodes_per_game must be positive")
+    if int(config.sessions_per_game) <= 0:
+        raise ValueError("sessions_per_game must be positive")
     if int(config.max_steps) <= 0:
         raise ValueError("max_steps must be positive")
     if int(config.epochs) <= 0:
@@ -92,11 +93,11 @@ def _behavior_agent(
     device: torch.device | None = None,
 ):
     if name == "graph":
-        return GraphExplorerAgent(), False
+        return GraphExplorerAgent(), True
     if name == "random":
-        return RandomHeuristicAgent(), False
+        return RandomHeuristicAgent(), True
     if name in {"learned", "hybrid"}:
-        from arcagi.agents.learned_agent import HybridAgent
+        from arcagi.agents.learned_agent import HybridAgent, LanguageNoMemoryAgent
 
         collector_device = device or torch.device("cpu")
         if encoder is None or world_model is None or language_model is None:
@@ -113,6 +114,17 @@ def _behavior_agent(
             if collector_device.type == "cpu"
             else PlannerConfig(search_depth=2, search_root_width=2, search_branch_width=1, max_world_model_calls=32)
         )
+        if name == "learned":
+            return (
+                LanguageNoMemoryAgent(
+                    encoder=collection_encoder,
+                    world_model=collection_world_model,
+                    planner=planner,
+                    language_model=collection_language_model,
+                    device=collector_device,
+                ),
+                True,
+            )
         return (
             HybridAgent(
                 encoder=collection_encoder,
@@ -227,6 +239,63 @@ def _plan_tokens(
     return ("plan", "action", action_token, "direction", direction, "focus", focus, "state", status)
 
 
+def collect_arc_public_sessions(
+    config: ArcPublicTrainingConfig,
+    *,
+    encoder: StructuredStateEncoder | None = None,
+    world_model: RecurrentWorldModel | None = None,
+    language_model: GroundedLanguageModel | None = None,
+    device: torch.device | None = None,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    _validate_arc_public_training_config(config)
+    if not arc_toolkit_available():
+        raise RuntimeError("ARC toolkit is not installed in this environment.")
+    operation_mode = arc_operation_mode(config.mode)
+    games = list_arc_games(operation_mode=operation_mode)[: config.game_limit]
+    dataset: list[dict[str, object]] = []
+    session_summaries: list[dict[str, object]] = []
+    seed_cursor = config.seed
+    agents: dict[str, object] = {}
+    reset_all_flags: dict[str, bool] = {}
+    for game_index, game_id in enumerate(games):
+        env = ArcToolkitEnv(game_id, operation_mode=operation_mode)
+        try:
+            for session_index in range(config.sessions_per_game):
+                policy_name = config.behavior_policies[(game_index + session_index) % len(config.behavior_policies)]
+                if policy_name not in agents:
+                    agent, reset_all = _behavior_agent(
+                        policy_name,
+                        encoder=encoder,
+                        world_model=world_model,
+                        language_model=language_model,
+                        device=device,
+                    )
+                    agents[policy_name] = agent
+                    reset_all_flags[policy_name] = reset_all
+                agent = agents[policy_name]
+                if reset_all_flags[policy_name]:
+                    agent.reset_all()
+                else:
+                    agent.reset_episode()
+                session_samples, session_summary = collect_arc_session(
+                    env,
+                    agent=agent,
+                    game_id=str(game_id),
+                    session_index=session_index,
+                    seed=seed_cursor,
+                    max_steps=config.max_steps,
+                    policy_name=policy_name,
+                    sample_builder=_make_sample,
+                )
+                seed_cursor += 1
+                annotate_session_returns(session_samples)
+                dataset.extend(session_samples)
+                session_summaries.append(asdict(session_summary))
+        finally:
+            env.close()
+    return dataset, session_summaries
+
+
 def collect_arc_public_dataset(
     config: ArcPublicTrainingConfig,
     *,
@@ -235,56 +304,13 @@ def collect_arc_public_dataset(
     language_model: GroundedLanguageModel | None = None,
     device: torch.device | None = None,
 ) -> list[dict[str, object]]:
-    _validate_arc_public_training_config(config)
-    if not arc_toolkit_available():
-        raise RuntimeError("ARC toolkit is not installed in this environment.")
-    operation_mode = arc_operation_mode(config.mode)
-    games = list_arc_games(operation_mode=operation_mode)[: config.game_limit]
-    dataset: list[dict[str, object]] = []
-    seed_cursor = config.seed
-    agents: dict[str, object] = {}
-    reset_all_flags: dict[str, bool] = {}
-    for game_index, game_id in enumerate(games):
-        for episode_index in range(config.episodes_per_game):
-            policy_name = config.behavior_policies[(game_index + episode_index) % len(config.behavior_policies)]
-            if policy_name not in agents:
-                agent, reset_all = _behavior_agent(
-                    policy_name,
-                    encoder=encoder,
-                    world_model=world_model,
-                    language_model=language_model,
-                    device=device,
-                )
-                agents[policy_name] = agent
-                reset_all_flags[policy_name] = reset_all
-            agent = agents[policy_name]
-            if reset_all_flags[policy_name]:
-                agent.reset_all()
-            else:
-                agent.reset_episode()
-            env = ArcToolkitEnv(game_id, operation_mode=operation_mode)
-            try:
-                observation = env.reset(seed=seed_cursor)
-                seed_cursor += 1
-                steps = 0
-                done = False
-                while not done and steps < config.max_steps:
-                    state = extract_structured_state(observation)
-                    action = agent.act(observation)
-                    result = env.step(action)
-                    next_state = extract_structured_state(result.observation)
-                    dataset.append(_make_sample(state, next_state, action, result.reward))
-                    agent.update_after_step(
-                        next_observation=result.observation,
-                        reward=result.reward,
-                        terminated=result.terminated or result.truncated,
-                        info=result.info,
-                    )
-                    observation = result.observation
-                    done = result.terminated or result.truncated
-                    steps += 1
-            finally:
-                env.close()
+    dataset, _session_summaries = collect_arc_public_sessions(
+        config,
+        encoder=encoder,
+        world_model=world_model,
+        language_model=language_model,
+        device=device,
+    )
     return dataset
 
 
@@ -318,7 +344,7 @@ def train_arc_public(
     )
     history: list[dict[str, float]] = []
     for epoch in range(config.epochs):
-        dataset = collect_arc_public_dataset(
+        dataset, session_summaries = collect_arc_public_sessions(
             config,
             encoder=encoder,
             world_model=world_model,
@@ -332,7 +358,7 @@ def train_arc_public(
         epoch_policy_losses: list[float] = []
         epoch_plan_losses: list[float] = []
         epoch_uncertainty: list[float] = []
-        sequence_episode_id: str | None = None
+        sequence_id_cursor: str | None = None
         sequence_hidden: torch.Tensor | None = None
         for sample in dataset:
             state = sample["state"]
@@ -344,8 +370,9 @@ def train_arc_public(
             belief_tokens = sample["belief_tokens"]
             question_tokens = sample["question_tokens"]
             plan_tokens = sample["plan_tokens"]
-            if sequence_episode_id != state.episode_id or state.step_index == 0:
-                sequence_episode_id = state.episode_id
+            sample_sequence_id = str(sample.get("sequence_id", state.episode_id))
+            if sequence_id_cursor != sample_sequence_id:
+                sequence_id_cursor = sample_sequence_id
                 sequence_hidden = None
             if config.freeze_encoder:
                 with torch.no_grad():
@@ -430,6 +457,13 @@ def train_arc_public(
                 "plan_loss": mean(epoch_plan_losses) if epoch_plan_losses else 0.0,
                 "uncertainty": mean(epoch_uncertainty) if epoch_uncertainty else 0.0,
                 "samples": float(len(dataset)),
+                "sessions": float(len(session_summaries)),
+                "session_win_rate": mean(float(item["won"]) for item in session_summaries) if session_summaries else 0.0,
+                "avg_levels_completed": mean(float(item["levels_completed"]) for item in session_summaries)
+                if session_summaries
+                else 0.0,
+                "avg_session_steps": mean(float(item["steps"]) for item in session_summaries) if session_summaries else 0.0,
+                "avg_reset_steps": mean(float(item["reset_steps"]) for item in session_summaries) if session_summaries else 0.0,
             }
         )
     checkpoint_path = Path(config.checkpoint_path)
@@ -451,14 +485,16 @@ def train_arc_public(
         "policy_loss_last_epoch": history[-1]["policy_loss"] if history else 0.0,
         "plan_loss_last_epoch": history[-1]["plan_loss"] if history else 0.0,
         "uncertainty_last_epoch": history[-1]["uncertainty"] if history else 0.0,
-    }
+        "session_win_rate_last_epoch": history[-1]["session_win_rate"] if history else 0.0,
+        "avg_levels_completed_last_epoch": history[-1]["avg_levels_completed"] if history else 0.0,
+        }
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m arcagi.training.arc_public")
     parser.add_argument("--mode", type=str, default="online")
     parser.add_argument("--game-limit", type=int, default=25)
-    parser.add_argument("--episodes-per-game", type=int, default=2)
+    parser.add_argument("--sessions-per-game", "--episodes-per-game", dest="sessions_per_game", type=int, default=2)
     parser.add_argument("--max-steps", type=int, default=96)
     parser.add_argument("--epochs", type=int, default=2)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
@@ -482,7 +518,7 @@ def main() -> int:
     config = ArcPublicTrainingConfig(
         mode=args.mode,
         game_limit=args.game_limit,
-        episodes_per_game=args.episodes_per_game,
+        sessions_per_game=args.sessions_per_game,
         max_steps=args.max_steps,
         epochs=args.epochs,
         learning_rate=args.learning_rate,

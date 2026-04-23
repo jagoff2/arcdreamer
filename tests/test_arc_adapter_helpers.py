@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from arcagi.envs.arc_adapter import _click_actions_for_grid, _downsample_display_grid
+from arcagi.envs.arc_adapter import _click_actions_for_grid, _downsample_display_grid, _expand_actions
 
 
 def test_downsample_display_grid_recovers_camera_grid() -> None:
@@ -76,3 +76,18 @@ def test_click_actions_for_grid_keeps_large_salient_components_under_cap() -> No
     actions = _click_actions_for_grid(camera_grid, camera_meta, max_candidates=4)
 
     assert any(action in actions for action in ("click:3:3", "click:5:3", "click:3:5", "click:5:5"))
+
+
+def test_expand_actions_injects_reset_affordance_when_supported(monkeypatch) -> None:
+    class _GameAction:
+        RESET = object()
+
+    monkeypatch.setattr("arcagi.envs.arc_adapter.GameAction", _GameAction)
+
+    actions = _expand_actions(
+        ("1", "2", "6"),
+        np.zeros((2, 2), dtype=np.int64),
+        None,
+    )
+
+    assert actions[0] == "0"

@@ -2,6 +2,15 @@
 
 ## Active
 
+- [x] Rewrite Stage 2 ARC training around persistent prize-shaped sessions: replace reset-separated episode collection in `arc_public.py`, `goal_scientist_public.py`, and `scientist/train_arc.py` with session-based collectors, soft level-boundary resets, level-completion/session-win targets, and checkpoint selection by session outcomes instead of first positive reward or per-episode return.
+- [x] Align the ARC runtime path with prize-session semantics: expose explicit `RESET`, keep the environment alive across `GAME_OVER`, preserve learned semantics across in-session level retries and completed-level boundaries, and stop treating first positive reward as terminal success.
+- [x] Fix post-binder probe downstream valuation so stale movement hypotheses are state-conditioned, contradicted by no-effect repeats, and spotlight consumes hypothesis risk during scoring.
+- [x] Integrate the action-level spotlight scientist into the live public scientist path, including delayed binder-probe credit, spotlight aliases, and checkpoint compatibility.
+- [x] Tighten goal-scientist Stage 2 target quality so movement-only deltas stop reading as progress, zero-reward terminal endings become explicit setbacks, and Stage 2 trains on signed outcome targets instead of optimistic all-failure pseudo-progress.
+- [x] Fix the goal-scientist public trainer so `learned` and `hybrid` are distinct collectors again, updates happen during the episode stream instead of only after full-epoch collection, and epoch seeds do not silently repeat unless explicitly requested.
+- [x] Make the goal-scientist public ARC trainer observable and less wasteful under long offline runs by reusing a shared arcade and emitting per-episode collection progress.
+- [x] Integrate the `arcdreamer_goal_scientist_update` patch set and validate the new goal-scientist Stage 2 training path.
+- [x] Add a scientist offline-ARC repeated-episode trainer, run it on local `AR25`, and measure whether same-game world-model carryover helps.
 - [x] Add a reproducible scientist-agent curriculum training path with checkpoint save/load, run a bounded pretrain, and re-evaluate local ARC `AR25`.
 - [x] Integrate the GPT-5.4-pro scientist patch set from `GPT-PRO-PATCH-SET` into the live repo and validate the touched package, harness, and tests.
 - [x] Move the generic runtime hypothesis controller into the full hybrid eval path instead of leaving it as sidecar research code.
@@ -152,6 +161,26 @@
 - [ ] Measure whether bounded deeper search improves `AR25` and the online 5-game slice without regressing runtime or steps.
 - [ ] Improve the clean learned eval path on real ARC without reintroducing controller interception:
   current blockers are weak objective discovery / completion on `AR25`, `BP35`, `CD82`, `CN04`, and `DC22` even after the audit fixes removed most of the previous interaction churn.
+- [ ] Fix post-level transfer and objective reacquisition on real `AR25`. The newer `artifacts/spotlight_exec_curriculum_best.pkl` checkpoint can now complete level 1 under an uncapped offline harness run by about step `300`, but it then stalls with repeated resets and no further reward through at least step `750`.
+- [ ] Add an uncapped real-ARC eval metric alongside the capped holdout path. Current capped evals can miss genuine first-level capability, as shown by `AR25` reaching `levels_completed = 1` only after the old `256`-step budget.
+- [x] Replace hand-tuned spotlight action scoring with a learned executive scorer over explicit workspace state while keeping the minimal generic spotlight protocol.
+- [x] Add synthetic scientist-session training that explicitly exercises hidden binding, fail/reset/retry loops, and cross-level carryover in one persistent session.
+- [ ] Verify that the learned executive scorer improves synthetic binder-to-probe-to-goal behavior without adding ARC-shaped controller hacks.
+- [x] Add an explicit learned habit policy for synthetic scientist training, trained from a synthetic oracle/teacher rather than self-bootstrap.
+- [x] Convert spotlight arbitration into an explicit habit-versus-executive split where habit is the default and executive predicts override advantage.
+- [x] Log and validate move-37-style low-prior overrides: chosen action low-rank under habit, high-rank under executive, later supported by progress or disambiguation.
+- [ ] Measure whether the synthetic teacher-trained habit prior actually restores nontrivial stage-1 success and meaningful stage-2 carryover in real curriculum runs, not just unit-test behavior.
+- [ ] Stabilize teacher-free stage-1 transfer under the new habit prior. The first long curriculum run reached a transient `simple_success_rate=0.25` at session 24, then regressed to `0.0` by session 32 while rich holdout remained dead.
+- [ ] Make the executive produce real validated override events. In the first long teacher-habit run, both `best` and `latest` checkpoints still had `move37_candidates=0` and `move37_validated=0`.
+- [ ] Change the training objective from immediate action quality to attempt-to-attempt improvement quality: actions and updates should get credit when the next retry is better than the previous one.
+- [ ] Add explicit adaptation metrics to the scientist trainer and spotlight diagnostics so we can measure whether the agent is learning how to learn within a session, not just whether it gets reward.
+- [x] Change the training objective from immediate action quality to attempt-to-attempt improvement quality: actions and updates should get credit when the next retry is better than the previous one.
+- [x] Add explicit adaptation metrics to the scientist trainer and spotlight diagnostics so we can measure whether the agent is learning how to learn within a session, not just whether it gets reward.
+- [ ] Convert the new adaptation signal into stable teacher-free holdout gains. The first medium run produced nonzero `simple_avg_attempt_improvement`, `rich_avg_attempt_improvement`, and even a few `move37` events, but holdout success and levels completed remained zero.
+- [ ] Fix the scientist checkpoint ranking so attempt-improvement cannot dominate when solve metrics are still zero. The long `spotlight_exec_curriculum` run selected a `best` checkpoint on higher `rich_avg_attempt_improvement` despite `rich_session_win_rate=0.0`, `rich_avg_levels_completed=0.0`, and a much worse `rich_avg_return`.
+- [ ] Separate teacher-shaped training metrics from autonomous competence in scientist-train reporting and model selection. Current `recent_*` metrics come from `_run_teacher_session(...)`, so nonzero training wins do not mean the teacher-free policy is actually competent.
+- [ ] Tie adaptation credit to solve-boundary progress instead of generic better-failure deltas. The long curriculum run now produces heavy `habit` / `executive` / `adaptation` updates and nonzero `move37` events, but holdout `simple_success_rate` and `rich_avg_levels_completed` stay at `0.0`.
+- [ ] Fix reset-policy collapse in synthetic rich-session holdout. The long curriculum run reported `rich_avg_reset_steps = 4.0` at every observed holdout snapshot, which suggests the retry policy has converged to a fixed cadence instead of a learned state-dependent recovery decision.
 - [x] Add prize-eligible real-ARC action semantics to the adapter, including effective-grid extraction and parameterized interaction affordances.
 - [x] Replace blind real-ARC graph exploration with observation-grounded motion/target planning that still falls back to generic graph novelty.
 - [x] Write the technical report with measured results.

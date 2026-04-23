@@ -98,6 +98,22 @@ class BaseAgent(ABC):
         self.latest_language = ()
         self.latest_claims = ()
 
+    def reset_level(self) -> None:
+        self.inferred_state.reset()
+        reset_level = getattr(self.representation_repair, "reset_level", None)
+        if callable(reset_level):
+            reset_level()
+        else:
+            self.representation_repair.reset()
+        self.spatial_workspace.reset()
+        self.last_state = None
+        self.last_raw_state = None
+        self.last_action = None
+        self.last_reward = 0.0
+        self.last_info = {}
+        self.latest_language = ()
+        self.latest_claims = ()
+
     def reset_all(self) -> None:
         self.reset_episode()
         self.graph.clear()

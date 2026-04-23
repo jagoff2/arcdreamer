@@ -191,6 +191,140 @@ Concise rationale:
 4. Tighten the ARC adapter after verifying the locally installed SDK interface.
 5. Expand the synthetic curriculum and improve adaptation metrics once the current stack is stable.
 
+#### Entry 003: 2026-04-22 / ARC Prize Session Semantics Correction
+
+Iteration objective:
+
+- verify the official prize/runtime contract for ARC local evaluation and align the public runtime path with it
+
+Verified facts:
+
+- competition mode uses one environment session with multiple levels inside that session
+- reset/retry is an in-session action, not a fresh environment make
+- after `GAME_OVER`, issuing `RESET` continues the same environment session
+- local toolkit probing on `ar25-0c556536` confirmed that action `"0"` maps to `RESET` and reopens the level even though the adapter was not exposing `"0"` in `available_actions`
+
+Files changed:
+
+- `docs/ARC_COMPETITION_RUNTIME.md`
+- `arcagi/envs/arc_adapter.py`
+- `arcagi/evaluation/harness.py`
+- `arcagi/scientist/runtime.py`
+- `arcagi/scientist/agent.py`
+- `arcagi/agents/spotlight_scientist_agent.py`
+- `arcagi/scientist/spotlight.py`
+- `arcagi/scientist/planner.py`
+- `arcagi/scientist/types.py`
+- supporting tests
+
+Observed failure mode before the fix:
+
+- ARC evaluation was still modeled as a single-level episode
+- the harness stopped on first positive reward
+- `GAME_OVER` ended the run instead of allowing in-session retry
+- the adapter knew how to send `RESET` but did not expose it as a legal affordance, so the policy could not choose it
+
+Decision rationale:
+
+- ARC-facing control must preserve learned semantics across level retries and completed-level transitions inside the same environment
+- only volatile local workspace should reset at level boundaries
+- learned world/hypothesis/memory state must persist inside the session
+
+Next execution slice:
+
+1. Validate the patched ARC runtime on real offline games and inspect reset behavior in traces.
+2. Teach the runtime to choose reset proactively under prolonged zero-progress stalls, not only after explicit terminal failure.
+3. Re-run offline ARC training/eval under the corrected multi-level session semantics instead of the old single-level loop.
+
+#### Entry 004: 2026-04-22 / ARC Stage 2 Training Must Be Session-Based
+
+Iteration objective:
+
+- translate the corrected prize-session runtime semantics into the correct Stage 2 training contract
+
+Files changed:
+
+- `docs/ARC_COMPETITION_RUNTIME.md`
+- `TASKS.MD`
+
+Observed mismatch in current code:
+
+- `arcagi/training/arc_public.py` still treats `env.reset(...)` as the training unit and ends collection on `terminated or truncated`
+- `arcagi/training/goal_scientist_public.py` still collects reset-separated short episodes and still reports positive-reward / reward-threshold episode metrics
+- `arcagi/scientist/train_arc.py` still keys success on per-run total reward rather than session win / levels completed
+
+Decision rationale:
+
+- the benchmark does not evaluate "can the checkpoint get reward on a fresh short episode"
+- it evaluates whether the live agent can keep learning inside one environment session, retry failed levels with `RESET`, and carry that learning forward into later levels
+- therefore Stage 2 training must optimize session-shaped behavior, not episode-shaped behavior
+
+Hard training consequences:
+
+1. replace `episodes_per_game` with persistent `sessions_per_game`
+2. keep one live agent instance through fail -> reset -> retry loops inside a session
+3. call `reset_level()` at retry / completed-level boundaries instead of `reset_episode()`
+4. relabel training samples with `level_delta`, `level_boundary`, `reset_action`, `won_session`, and related session fields
+5. choose checkpoints by session win rate and levels completed, not by first positive reward or single-episode return
+
+Next execution slice:
+
+1. rewrite the Stage 2 ARC public collectors around persistent sessions
+2. change ARC trainer metrics and best-checkpoint selection to session outcomes
+3. rerun offline ARC training only after that rewrite lands
+
+#### Entry 005: 2026-04-22 / Stage 2 ARC Trainers Rewritten To Persistent Sessions
+
+Iteration objective:
+
+- replace the remaining reset-separated Stage 2 training loops with prize-shaped persistent session collectors
+
+Files changed:
+
+- `arcagi/training/arc_session.py`
+- `arcagi/training/arc_public.py`
+- `arcagi/training/goal_scientist_public.py`
+- `arcagi/scientist/train_arc.py`
+- `arcagi/agents/base.py`
+- `arcagi/agents/graph_agent.py`
+- `arcagi/agents/learned_agent.py`
+- `arcagi/planning/runtime_rule_controller.py`
+- `arcagi/reasoning/causal_theory.py`
+- `arcagi/core/representation_repair.py`
+- `tests/test_arc_public_training.py`
+
+Actions completed:
+
+- added shared ARC session helpers that:
+  - keep stepping through fail -> `RESET` -> retry loops
+  - annotate transitions with `level_delta`, `reset_action`, `level_boundary`, `session_terminal`, and `won_session`
+  - break world-model training sequences at level boundaries instead of only at full env resets
+- rewired `arc_public.py` collection from `episodes_per_game` into persistent `sessions_per_game`
+- rewired `goal_scientist_public.py` collection/update loops to use persistent sessions and session-shaped metrics
+- rewired `scientist/train_arc.py` so checkpoint ranking now prefers:
+  - session win rate
+  - average levels completed
+  - then return / steps
+- added soft `reset_level()` paths so in-session level boundaries clear local workspace without discarding durable session learning
+
+Validation:
+
+- `python -m py_compile arcagi/training/arc_session.py arcagi/training/arc_public.py arcagi/training/goal_scientist_public.py arcagi/scientist/train_arc.py arcagi/agents/base.py arcagi/agents/graph_agent.py arcagi/agents/learned_agent.py arcagi/planning/runtime_rule_controller.py arcagi/reasoning/causal_theory.py arcagi/core/representation_repair.py tests/test_arc_public_training.py tests/test_scientist_agent.py`
+- `python -m pytest tests/test_arc_public_training.py tests/test_scientist_agent.py tests/test_action_encoder.py tests/test_arc_adapter_helpers.py -q`
+- result: all targeted tests passed
+
+Decision rationale:
+
+- the runtime was already corrected to persistent prize sessions
+- leaving the trainers episode-shaped would keep teaching the wrong temporal abstraction even if evaluation was fixed
+- the new shared collector makes the ARC public and scientist Stage 2 paths use one consistent session contract
+
+Next execution slice:
+
+1. run Stage 2 offline ARC training again under the session-shaped collectors
+2. inspect whether the agent now converts retry/reset loops into more completed levels per session
+3. tighten remaining reset-policy and cross-level carryover behavior only if the new traces still show structural mismatch
+
 #### Entry 002: 2026-04-14 / Test And Smoke Validation
 
 State before this slice:
@@ -3749,3 +3883,509 @@ Smoke:
   - avg return `1.29125`
   - avg steps `7.625`
 - epoch metrics now expose `plan_loss` and `dream_plan_loss`
+
+## Entry 057: 2026-04-22 / Long Offline ARC Session Training Still Fails On Objective Valuation, Not Session Semantics
+
+Run:
+
+- command:
+  `.venv313\Scripts\python.exe -m arcagi.scientist.train_arc --game-id ar25-0c556536 --mode offline --sessions 96 --eval-every 12 --eval-sessions 4 --max-steps 512 --init-checkpoint-path artifacts/spotlight_scientist_arc_offline_latest.pkl --checkpoint-path artifacts/spotlight_scientist_arc_offline_session_best.pkl --latest-checkpoint-path artifacts/spotlight_scientist_arc_offline_session_latest.pkl`
+
+Verified result:
+
+- trainer completed cleanly through the new session-shaped retry/carryover loop
+- final summary:
+  - `train_session_win_rate = 0.0`
+  - `train_avg_levels_completed = 0.03125`
+  - `train_avg_return = 0.03125`
+  - `final_holdout.session_win_rate = 0.0`
+  - `final_holdout.avg_levels_completed = 0.0`
+  - `final_holdout.avg_return = 0.0`
+  - `final_holdout.avg_steps = 512`
+- `best` checkpoint never improved after the first eval
+- `latest` continued to update across eval boundaries but did not beat holdout
+
+Harness verification after training:
+
+- `artifacts/spotlight_scientist_arc_offline_session_best.pkl`
+  - `success = false`
+  - `return = 0.0`
+  - `steps = 256`
+  - `interaction_steps = 20`
+  - `reset_steps = 4`
+  - `levels_completed = 0`
+- `artifacts/spotlight_scientist_arc_offline_session_latest.pkl`
+  - `success = false`
+  - `return = 0.0`
+  - `steps = 256`
+  - `interaction_steps = 75`
+  - `reset_steps = 4`
+  - `levels_completed = 0`
+
+Interpretation:
+
+- the session semantics fix is real and working
+- the agent now learns across retries and levels mechanically, but that alone does not unlock `AR25`
+- the dominant failure is still downstream objective valuation
+- training keeps accumulating strong selector/click binder priors and generic move-effect hypotheses, but those priors do not convert into objective-bearing hypotheses or level completion
+- the final holdout trace still prefers `bind_or_test_hidden_control` and `probe_after_latent_binding` actions at the horizon instead of committing to a reward-bearing plan
+
+Current blocker, stated narrowly:
+
+- do not spend more time on episode/session plumbing
+- the next fix must make post-binder consequences compete on objective progress, not only on controllability or visible movement change
+- the agent needs a stronger path from observed controllable-state effects to explicit reward/goal hypotheses and planner value
+
+## Entry 058: 2026-04-22 / Pivot To Learned Executive Scoring Over Explicit Workspace State
+
+Updated implementation goal:
+
+- keep a minimal generic executive substrate
+- stop hand-tuning spotlight action scores
+- learn the scorer over explicit workspace state instead
+- train that scorer on synthetic tasks that require hidden binding, retries, and carryover
+- reject anything that only works because of ARC-shaped hacks
+
+Interpretation:
+
+- protocol remains explicit and generic:
+  - one active intention
+  - one falsifier
+  - pending binder probe tracking
+  - retry/reset semantics
+  - cross-level/session carryover
+- content should move into a learned scorer:
+  - which action family matters now
+  - which binder is promising
+  - which downstream probe is worth trying
+  - which visible consequence predicts real progress
+
+Concrete repo direction:
+
+- replace the current hand-weighted spotlight candidate combiner with a learned executive scorer that consumes explicit workspace features
+- keep the spotlight workspace itself as the generic control protocol
+- add synthetic session training that forces:
+  - latent binder discovery
+  - fail -> reset -> retry loops
+  - carryover of learned control semantics across levels in one session
+- treat synthetic tasks as capability training only, not as a source of ARC-shaped policy logic
+
+## Entry 059: 2026-04-22 / Learned Spotlight Scorer And Synthetic Session Training Implemented
+
+Implemented:
+
+- added `arcagi/scientist/executive.py`
+  - small learned executive scorer over explicit spotlight workspace features
+  - ensemble linear scorer with online TD-style updates
+- removed hand-weighted spotlight candidate arbitration as the primary chooser
+  - spotlight now still computes explicit candidate/workspace features
+  - final candidate ranking now comes from the learned executive scorer
+  - the explicit spotlight protocol remains:
+    - active intention
+    - pending binder probe
+    - commitment gating
+    - reset/retry semantics
+- added `arcagi/envs/session.py`
+  - generic retryable multi-level session wrapper
+  - always exposes reset action `0`
+  - advances levels on success
+  - preserves one session across fail -> reset -> retry loops
+- rewired `arcagi/scientist/train.py`
+  - trains the spotlight scientist, not the old plain scientist
+  - rich synthetic stage now uses retryable multi-level sessions
+  - holdout now ranks by rich session win rate and levels completed instead of plain episode return
+
+Verified:
+
+- `python -m pytest tests/test_action_spotlight.py tests/test_scientist_training.py -q`
+  - `10 passed`
+- `python -m pytest tests/test_scientist_agent.py tests/test_synthetic_env.py -q`
+  - `18 passed`
+
+Current status:
+
+- the architecture pivot is now real in code, not just a stated goal
+- the scorer is learned over explicit workspace state
+- the synthetic scientist trainer now applies pressure on hidden binding, retries, and carryover
+- this is still only a structural implementation and smoke-level validation
+- no new long synthetic training run or real ARC evaluation has been used yet to claim performance improvement
+
+## Entry 060: 2026-04-22 / Teacher-Trained Habit Prior Needed For Move-37 Overrides
+
+Observed failure after the first real long curriculum run:
+
+- the learned executive scorer by itself is not learning even the simple stage
+- the system has an explicit workspace, but no competent default habit policy to override
+- rich holdout behavior collapses toward reset-heavy garbage rather than productive low-prior interventions
+
+Updated implementation target:
+
+- add a separate learned habit policy for synthetic scientist training
+- train that habit from a synthetic oracle/teacher, not from more self-bootstrap
+- make the executive predict advantage over the habit, not act as the only chooser from scratch
+- make spotlight arbitration explicitly default to habit and only override when executive margin is strong enough
+- log real move-37-style events:
+  - chosen action low-rank under habit
+  - chosen action high-rank under executive/combined override
+  - later validated by progress, level advance, or hypothesis disambiguation
+
+Constraint:
+
+- oracle supervision is synthetic-training-only instrumentation
+- no synthetic teacher semantics may leak into the ARC-facing runtime path
+
+## Entry 061: 2026-04-22 / Teacher Habit Plus Move-37 Override Wiring Implemented
+
+Implemented:
+
+- added `arcagi/scientist/habit.py`
+  - separate learned habit policy over spotlight workspace features
+  - trained by synthetic teacher labels, not by the ARC-facing runtime path
+- changed `arcagi/scientist/spotlight.py`
+  - spotlight now has both `habit` and `executive`
+  - default action choice comes from the learned habit prior
+  - executive now acts as an override/advantage model on top of habit
+  - executive TD target is now relative to the current state's habit baseline
+  - move-37-style overrides are logged when:
+    - chosen action is not the habit-best action
+    - chosen action ranks first under executive override value
+    - later transition evidence supports the override
+- added synthetic-teacher integration
+  - `arcagi/training/synthetic_oracle.py` now exposes a generic `teacher_action(...)`
+  - covers:
+    - `HiddenRuleEnv`
+    - `HiddenRuleGridEnv`
+    - `PersistentLevelSessionEnv` with reset-on-`GAME_OVER`
+- changed `arcagi/scientist/train.py`
+  - training sessions now use a teacher-aware rollout loop
+  - the agent still acts with its own policy
+  - the teacher only provides synthetic label updates to the habit policy
+
+Verified:
+
+- `python -m pytest tests/test_action_spotlight.py tests/test_scientist_training.py tests/test_synthetic_oracle.py tests/test_scientist_agent.py -q`
+  - `28 passed`
+- targeted regressions now cover:
+  - teacher solving the simple hidden-rule grid
+  - teacher handling retryable session reset semantics
+  - habit policy flipping choice after teacher supervision
+  - move-37-style override logging and validation
+  - checkpointed habit updates from the synthetic trainer
+
+Current open question:
+
+- this is now structurally the right habit-versus-executive architecture
+- the next empirical question is whether a real curriculum run now exits the previous stage-1 flatline and produces useful carryover, not just cleaner control semantics
+
+## Entry 062: 2026-04-23 / First Long Teacher-Habit Curriculum Run Diagnosed Live
+
+Run:
+
+- command:
+  - `python -m arcagi.scientist.train --seed 8462852 --stage1-sessions 128 --stage2-sessions 512 --eval-every 8 --simple-max-steps 80 --rich-level-max-steps 40 --rich-session-max-steps 192 --rich-levels-per-session 2 --holdout-simple-sessions 4 --holdout-rich-sessions 6 --checkpoint-path artifacts\\teacher_habit_curriculum_best.pkl --latest-checkpoint-path artifacts\\teacher_habit_curriculum_latest.pkl`
+- run was stopped after session 32 because the diagnosis was already clear and further waiting did not look like a good use of iteration time
+
+Live eval checkpoints:
+
+- session 8 / stage `simple`
+  - `recent_avg_return = 1.075`
+  - `holdout.simple_success_rate = 0.0`
+  - `holdout.simple_avg_return = 0.0`
+  - `holdout.rich_session_win_rate = 0.0`
+  - `holdout.rich_avg_levels_completed = 0.0`
+  - `holdout.rich_avg_return = -2.9833`
+- session 16 / stage `simple`
+  - `holdout.simple_success_rate = 0.0`
+  - `holdout.simple_avg_return = 0.075`
+  - `holdout.rich_avg_return = -4.495`
+- session 24 / stage `simple`
+  - transient improvement:
+    - `holdout.simple_success_rate = 0.25`
+    - `holdout.simple_avg_return = 0.325`
+  - but still:
+    - `holdout.rich_session_win_rate = 0.0`
+    - `holdout.rich_avg_levels_completed = 0.0`
+- session 32 / stage `simple`
+  - regressed again:
+    - `holdout.simple_success_rate = 0.0`
+    - `holdout.simple_avg_return = 0.1`
+    - `holdout.rich_session_win_rate = 0.0`
+    - `holdout.rich_avg_levels_completed = 0.0`
+    - `holdout.rich_avg_return = -4.69`
+
+Checkpoint diagnostics after session 32:
+
+- `best` checkpoint:
+  - `habit_updates = 2086`
+  - `executive_updates = 968`
+  - `move37_candidates = 0`
+  - `move37_validated = 0`
+- `latest` checkpoint:
+  - `habit_updates = 2663`
+  - `executive_updates = 1238`
+  - `move37_candidates = 0`
+  - `move37_validated = 0`
+- direct teacher-free simple-environment eval of both `best` and `latest`:
+  - `return = 0.1`
+  - `won = false`
+  - `steps = 80`
+
+Diagnosis:
+
+- the synthetic teacher is clearly updating the habit prior
+- the current policy can sometimes transfer a partial simple-world reflex under teacher-free eval
+  - likely something like acquiring the key or another local subgoal
+- but that transfer is unstable
+  - it briefly appears at session 24
+  - then disappears again by session 32
+- rich-session competence is still entirely absent
+- the executive override path is effectively dormant so far
+  - no move-37-style override candidates
+  - no validated overrides
+
+Interpretation:
+
+- current training is producing partial local habit learning but not stable full-policy composition
+- the habit is not yet a robust reusable default policy
+- the executive is not yet learning useful residual interventions on top of that habit
+- continuing to burn time on this exact configuration before changing the learning signal did not look justified
+
+## Entry 063: 2026-04-23 / Pivot From Action Learning To Attempt-Improvement Learning
+
+Updated objective:
+
+- stop rewarding only immediate action quality
+- start rewarding changes that make the next retry or next attempt better
+- train the inner update loop:
+  - which contradictions matter
+  - which probe families reduce uncertainty usefully
+  - which reset timing helps
+  - which memory/hypothesis traces should change behavior on the next attempt
+
+Concrete implementation direction:
+
+- add an explicit adaptation scorer over spotlight workspace features
+- train it on attempt-to-attempt improvement deltas inside retryable synthetic sessions
+- make stage-1 synthetic training use retryable single-level sessions as well, not only one-shot hidden-rule episodes
+- surface adaptation metrics in:
+  - spotlight diagnostics
+  - training rows
+  - holdout summaries
+  - checkpoint ranking
+
+Why:
+
+- the first long teacher-habit run showed that the current system can learn a partial local habit
+- but it does not yet learn a stable update process
+- to get real within-session improvement, the target has to be:
+  - “did this make the next attempt better?”
+  not just:
+  - “did this action look good right now?”
+
+## Entry 064: 2026-04-23 / Attempt-Improvement Objective Implemented And Smoke-Tested
+
+Implemented:
+
+- added `arcagi/scientist/adaptation.py`
+  - online scorer trained on attempt-to-attempt improvement deltas
+- changed `arcagi/scientist/spotlight.py`
+  - spotlight now tracks attempt histories per level key
+  - `finalize_attempt(...)` computes improvement relative to the previous attempt on the same level
+  - adaptation weights are updated from those deltas
+  - candidate scoring now includes `adaptation_value`
+  - diagnostics now expose:
+    - `adaptation_updates`
+    - `adaptation_last_loss`
+    - `last_attempt_improvement`
+    - `avg_attempt_improvement`
+- changed `arcagi/agents/spotlight_scientist_agent.py`
+  - attempt boundaries now finalize on:
+    - failure terminal
+    - reset
+    - level advance
+- changed `arcagi/scientist/train.py`
+  - stage 1 now uses retryable single-level sessions instead of one-shot simple episodes
+  - live eval and final summaries now report:
+    - `simple_avg_attempt_improvement`
+    - `rich_avg_attempt_improvement`
+    - `train_avg_attempt_improvement`
+
+Verification:
+
+- `python -m pytest tests/test_action_spotlight.py tests/test_scientist_training.py tests/test_synthetic_oracle.py tests/test_scientist_agent.py -q`
+  - `29 passed`
+
+Medium run:
+
+- command:
+  - `python -m arcagi.scientist.train --seed 77 --stage1-sessions 16 --stage2-sessions 16 --eval-every 8 --simple-max-steps 24 --rich-level-max-steps 16 --rich-session-max-steps 48 --rich-levels-per-session 2 --holdout-simple-sessions 4 --holdout-rich-sessions 4 --checkpoint-path artifacts\\meta_adapt_medium_best.pkl --latest-checkpoint-path artifacts\\meta_adapt_medium_latest.pkl`
+- final holdout:
+  - `simple_success_rate = 0.0`
+  - `simple_avg_attempt_improvement = 0.24`
+  - `rich_session_win_rate = 0.0`
+  - `rich_avg_levels_completed = 0.0`
+  - `rich_avg_attempt_improvement = 0.19625`
+- training summary:
+  - `train_session_win_rate = 0.15625`
+  - `train_avg_levels_completed = 0.15625`
+  - `train_avg_attempt_improvement = 0.13225`
+- latest checkpoint spotlight diagnostics:
+  - `adaptation_updates = 475`
+  - `habit_updates = 3573`
+  - `executive_updates = 1413`
+  - `move37_candidates = 3`
+  - `move37_validated = 1`
+
+Interpretation:
+
+- the new objective is now live
+- the system is finally learning a measurable within-session improvement signal
+- the override path is no longer completely dead
+- but teacher-free holdout behavior is still not solving the tasks
+- the next bottleneck is turning the adaptation signal into stable reusable update policies rather than merely producing positive attempt-improvement statistics
+
+## Entry 065: 2026-04-23 / Long Curriculum Run Still Learns Better Failure, Not Solves
+
+Observed run:
+
+- command:
+  - `python -m arcagi.scientist.train --seed 8462852 --stage1-sessions 12 --stage2-sessions 512 --eval-every 32 --simple-max-steps 80 --rich-level-max-steps 40 --rich-session-max-steps 192 --rich-levels-per-session 2 --holdout-simple-sessions 8 --holdout-rich-sessions 12 --checkpoint-path artifacts\\spotlight_exec_curriculum_best.pkl --latest-checkpoint-path artifacts\\spotlight_exec_curriculum_latest.pkl`
+- eval snapshots at sessions `32, 64, 96, 128, 160, 192, 224`
+- recurring holdout pattern:
+  - `rich_session_win_rate = 0.0`
+  - `rich_avg_levels_completed = 0.0`
+  - `simple_success_rate = 0.0`
+  - but:
+    - `rich_avg_attempt_improvement` stayed positive
+    - `simple_avg_attempt_improvement` stayed positive
+- training-side recent rich-session metrics were materially nonzero:
+  - `recent_session_win_rate` peaked at `0.375`
+  - `recent_avg_levels_completed` peaked at `0.59375`
+
+Training/eval interpretation caveat:
+
+- the `recent_*` metrics in `scientist.train` come from `_run_teacher_session(...)`
+- those rollouts still call `synthetic_teacher_action(...)` and update the habit policy online during the training session
+- so positive `recent_session_win_rate` or `recent_avg_levels_completed` means:
+  - teacher-shaped training behavior improved
+  - not necessarily that the autonomous teacher-free policy has become competent
+- the real autonomous signal is the holdout block, and that remained at:
+  - `simple_success_rate = 0.0`
+  - `rich_session_win_rate = 0.0`
+  - `rich_avg_levels_completed = 0.0`
+
+Checkpoint inspection:
+
+- `artifacts\\spotlight_exec_curriculum_best.pkl`
+  - `habit_updates = 42428`
+  - `executive_updates = 16558`
+  - `adaptation_updates = 10131`
+  - `move37_candidates = 433`
+  - `move37_validated = 11`
+- `artifacts\\spotlight_exec_curriculum_latest.pkl`
+  - `habit_updates = 106489`
+  - `executive_updates = 40971`
+  - `adaptation_updates = 25279`
+  - `move37_candidates = 983`
+  - `move37_validated = 25`
+
+Metric caveat:
+
+- direct checkpoint diagnostics show `avg_attempt_improvement = 0.0`
+- that does not contradict the live training logs
+- the rolling attempt-improvement window is runtime-only and is not serialized in the checkpoint state, so nonzero attempt-improvement must be read from eval logs or fresh evaluation, not from the restored idle checkpoint object
+
+Interpretation:
+
+- this is no longer the old dead regime where nothing updates
+- habit, executive, and adaptation learning are all very active
+- real move-37-style override events now occur and sometimes validate
+- but validation rate is still low, and none of that translates into holdout solves
+- the current objective is therefore learning better local retry behavior and better exploratory failure modes, not robust task completion
+
+Important trainer issue:
+
+- `_result_key(...)` currently ranks checkpoints by:
+  - `rich_session_win_rate`
+  - `rich_avg_levels_completed`
+  - `rich_avg_attempt_improvement`
+  - `simple_success_rate`
+  - `simple_avg_attempt_improvement`
+  - `rich_avg_return`
+  - `simple_avg_return`
+- because the first, second, and fourth terms stayed `0.0` across the observed holdout snapshots, checkpoint selection was effectively driven by attempt-improvement terms
+- that is why session `96` could become `best` with:
+  - higher `rich_avg_attempt_improvement = 0.2544`
+  - but much worse `rich_avg_return = -7.0767`
+- so the current best-checkpoint logic is still selecting the most adaptation-looking failure, not the most competent agent
+
+Secondary signal:
+
+- `rich_avg_reset_steps` stayed exactly `4.0` across the observed holdout snapshots
+- that strongly suggests reset timing has collapsed toward a fixed retry cadence rather than becoming an actually state-dependent learned recovery policy
+
+Immediate conclusion:
+
+- the repo is now genuinely learning online-update structure
+- but the adaptation objective and checkpoint ranking are still too weakly tied to actual solve boundaries
+- the next fix should make post-reset improvement matter only insofar as it increases:
+  - actual level completion
+  - solve probability
+  - or sharply reduced steps-to-solve
+
+## Entry 066: 2026-04-23 / Uncapped Offline ARC Run Proves AR25 Level-1 Competence
+
+Observed harness command:
+
+- `.venv313\\Scripts\\python.exe -m arcagi.evaluation.harness arc --agent scientist --checkpoint-path artifacts\\spotlight_exec_curriculum_best.pkl --game-limit 25 --mode offline --max-steps 0 --progress-every 50`
+
+Observed `AR25` progress:
+
+- step `250`:
+  - `levels_completed = 0`
+  - `return = 0.0`
+  - `reset_steps = 3`
+- step `300`:
+  - `levels_completed = 1`
+  - `return = 1.0`
+  - `reset_steps = 4`
+  - `last_action = click:8:17`
+- step `750`:
+  - still `levels_completed = 1`
+  - still `return = 1.0`
+  - `reset_steps = 11`
+
+What this proves:
+
+- the current `spotlight_exec_curriculum_best.pkl` checkpoint can beat `AR25` level 1 under the real offline ARC harness
+- the earlier capped `256`-step evals understated capability
+- this is no longer just synthetic adaptation or better-failure behavior
+- there is now real task completion on at least the first level of a real ARC offline game
+
+Important harness semantics:
+
+- `levels_completed` is the max completed-level count reported by the environment extras
+- `return` is cumulative reward
+- `reset_steps` counts action `"0"`
+- `interaction_steps` counts only `click:` / `interact*` actions, not movement
+
+Interpretation:
+
+- solving the first level by about step `300` means the current online learner is capable of eventually discovering a reward-bearing control strategy on `AR25`
+- but the same trace also shows the next bottleneck clearly:
+  - after first completion, the agent does not yet convert carried-over learning into rapid completion of the next level
+  - instead it keeps resetting and continues exploring without additional reward through at least step `750`
+- so the failure has moved from:
+  - `cannot solve anything real`
+  to:
+  - `can solve level 1 eventually, but cannot yet stabilize cross-level transfer / next-level objective acquisition`
+
+Implication for training/eval:
+
+- capped holdout runs remain useful for throughput, but they are now known to miss at least one real positive capability signal
+- `AR25` should now be tracked with both:
+  - capped time-to-first-level-completion
+  - uncapped whether-first-level-is-ever-completed
+- the next training target should emphasize:
+  - shorter time to first completion
+  - and faster second-level completion after first-level success

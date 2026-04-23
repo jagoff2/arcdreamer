@@ -23,7 +23,18 @@ from .language import GroundedLanguage
 from .memory import EpisodicMemory
 from .perception import compare_states, extract_state
 from .planner import PlannerConfig, ScientistPlanner
-from .types import ActionDecision, ActionName, GridFrame, StructuredState, coerce_grid_frame, combined_progress_signal
+from .types import (
+    ActionDecision,
+    ActionName,
+    GridFrame,
+    StructuredState,
+    coerce_grid_frame,
+    combined_progress_signal,
+    is_failure_terminal_game_state,
+    is_reset_action,
+    observation_game_state,
+    observation_levels_completed,
+)
 from .world_model import OnlineWorldModel
 
 
@@ -66,12 +77,53 @@ class ScientistAgent:
         self.total_reward = 0.0
         self.trace.clear()
 
+    def reset_level(self) -> None:
+        reset_level = getattr(self.engine, "reset_level", None)
+        if callable(reset_level):
+            reset_level()
+        reset_level = getattr(self.memory, "reset_level", None)
+        if callable(reset_level):
+            reset_level()
+        reset_level = getattr(self.planner, "reset_level", None)
+        if callable(reset_level):
+            reset_level()
+        self.current_state = None
+        self.last_decision = None
+        self.latest_language = ()
+        self._last_raw_observation = None
+
     def perceive(self, observation: Any) -> StructuredState:
         return extract_state(coerce_grid_frame(observation))
 
     def act(self, observation: Any) -> ActionName:
         state = self.perceive(observation)
         self.current_state = state
+        game_state = observation_game_state(state)
+        if is_failure_terminal_game_state(game_state):
+            for action in state.available_actions:
+                if is_reset_action(action):
+                    decision = ActionDecision(
+                        action=action,
+                        score=10.0,
+                        components={"reset_retry_bonus": 1.0},
+                        language=(f"plan: do reset; because terminal state {game_state} requires retry",),
+                        candidate_count=len(state.available_actions),
+                        chosen_reason=f"terminal state {game_state} requires reset",
+                    )
+                    self.last_decision = decision
+                    self.latest_language = tuple(decision.language)
+                    self._last_raw_observation = observation
+                    self.trace.append(
+                        {
+                            "step": state.step_index,
+                            "action": decision.action,
+                            "score": decision.score,
+                            "components": dict(decision.components),
+                            "language": list(decision.language),
+                            "candidate_count": decision.candidate_count,
+                        }
+                    )
+                    return action
         decision = self.planner.choose_action(
             state,
             engine=self.engine,
@@ -128,6 +180,9 @@ class ScientistAgent:
             record=record,
             engine=self.engine,
         )
+        level_boundary = is_reset_action(action) or observation_levels_completed(after) > observation_levels_completed(before)
+        if level_boundary:
+            self.reset_level()
         self.current_state = after
         self.transitions_observed += 1
         self.total_reward += float(progress)

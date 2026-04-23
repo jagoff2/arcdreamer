@@ -453,6 +453,16 @@ class EpisodeTheoryManager:
         self._last_action_theories = {}
         self._recent_events.clear()
 
+    def reset_level(self) -> None:
+        self.action_bias = {}
+        self.context_bias = {}
+        self.diagnostic_action_scores = {}
+        self.rule_candidates = ()
+        self.competitions = ()
+        self.rule_candidates_by_key = {}
+        self._last_action_theories = {}
+        self._recent_events.clear()
+
     def consume_recent_events(self) -> tuple[TheoryEvent, ...]:
         events = tuple(self._recent_events)
         self._recent_events.clear()

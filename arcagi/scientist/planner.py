@@ -21,9 +21,13 @@ from .types import (
     action_family,
     combined_progress_signal,
     grid_cell_to_action_coordinates,
+    is_failure_terminal_game_state,
     is_interact_action,
     is_move_action,
+    is_reset_action,
+    is_win_game_state,
     make_targeted_action,
+    observation_game_state,
     parse_action_target,
 )
 from .world_model import OnlineWorldModel
@@ -73,6 +77,17 @@ class ScientistPlanner:
         self.productive_colors.clear()
         self.pending_interactions = 0
 
+    def reset_level(self) -> None:
+        self.state_action_visits.clear()
+        self.action_visits.clear()
+        self.last_action = None
+        self.last_state_fp = None
+        self.stall_count = 0
+        self.ineffective_actions.clear()
+        self.blocked_cells.clear()
+        self.visited_actor_positions.clear()
+        self.pending_interactions = 0
+
     def notify_transition(
         self,
         *,
@@ -119,6 +134,32 @@ class ScientistPlanner:
         candidates = self.candidate_actions(state, engine=engine)
         if not candidates:
             raise RuntimeError("No legal actions are available for ScientistPlanner")
+
+        game_state = observation_game_state(state)
+        if is_failure_terminal_game_state(game_state):
+            for action in candidates:
+                if is_reset_action(action):
+                    return ActionDecision(
+                        action=action,
+                        score=10.0,
+                        components={
+                            "expected_reward": 0.0,
+                            "information_gain": 0.0,
+                            "novelty": 0.0,
+                            "expected_change": 0.0,
+                            "world_uncertainty": 0.0,
+                            "memory_bonus": 0.0,
+                            "spatial_goal": 0.0,
+                            "navigation_goal": 0.0,
+                            "risk": 0.0,
+                            "repeat_penalty": 0.0,
+                            "posterior_mass": 0.0,
+                            "reset_retry_bonus": 1.0,
+                        },
+                        language=(f"plan: do reset; because terminal state {game_state} requires retry",),
+                        candidate_count=len(candidates),
+                        chosen_reason=f"terminal state {game_state} requires reset to continue the environment",
+                    )
 
         lang_tokens = language.memory_tokens(state, engine)
         navigation_action = self._navigation_next_action(state, engine, candidates)

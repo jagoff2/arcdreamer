@@ -27,6 +27,7 @@ dev = [
 arcagi = "arcagi.cli:main"
 arcagi-scientist-synthetic = "arcagi.scientist.cli:main"
 arcagi-scientist-train = "arcagi.scientist.train:main"
+arcagi-scientist-train-arc = "arcagi.scientist.train_arc:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["arcagi"]

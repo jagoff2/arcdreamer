@@ -42,8 +42,9 @@ Detailed runtime-learning design:
   - `hybrid`: `1.0` success rate on the full synthetic eval slice
 - scientist-agent patch status:
   - the hypothesis-driven `arcagi.scientist` stack is now integrated, checkpointable, and runnable through the shared evaluation harness
-  - the current scientist curriculum trainer persists the online world-model weights across episodes, but it does not yet train a separate persistent policy or hypothesis library
-  - bounded scientist pretraining currently solves its own tiny hidden-rule holdout (`simple_success_rate = 1.0`) but still fails the richer repo synthetic families (`rich_success_rate = 0.0`) and does not yet improve local ARC `AR25`
+  - the current scientist curriculum trainer is session-based and now trains a checkpointed spotlight stack with learned `habit`, `executive`, and `adaptation` scorers on top of the online world model and spotlight priors
+  - teacher-shaped synthetic training now produces real override events and measurable attempt-to-attempt improvement, but teacher-free holdout competence is still unstable
+  - real offline ARC now has a genuine positive signal: the current `spotlight_exec_curriculum_best.pkl` checkpoint can complete `AR25` level 1 under an uncapped local harness run, but post-level transfer is still weak
 - current runtime-learning status:
   - the learned agent now beats the synthetic benchmark through live runtime rule learning and explicit online hypothesis competition
   - the full hybrid agent constructs the generic runtime hypothesis controller by default
@@ -120,8 +121,9 @@ This path is intentionally small and explicit:
 Current boundary:
 
 - the scientist path now supports checkpoint save/load and a reproducible curriculum runner
-- its persistent learned state is currently only the online world model
-- it is therefore useful for rapid attack-loop experiments, but it is not yet a full replacement for the main Stage 1 / Stage 2 training stack
+ - its checkpoint now persists the learned spotlight `habit`, `executive`, and `adaptation` scorers together with the online world model and spotlight priors
+ - its synthetic trainer now uses retryable sessions with resets and cross-level carryover instead of only one-shot episodes
+ - it is useful for rapid attack-loop experiments on online learning, but it is not yet a full replacement for the main Stage 1 / Stage 2 training stack
 
 Run the scientist smoke environment:
 
@@ -133,36 +135,49 @@ Run bounded scientist curriculum training:
 
 ```bash
 python -m arcagi.scientist.train \
-  --stage1-episodes 32 \
-  --stage2-episodes 96 \
+  --stage1-sessions 32 \
+  --stage2-sessions 96 \
   --eval-every 32 \
-  --holdout-simple-episodes 6 \
-  --checkpoint-path artifacts/scientist_curriculum_run1_best.pkl \
-  --latest-checkpoint-path artifacts/scientist_curriculum_run1_latest.pkl
+  --holdout-simple-sessions 6 \
+  --checkpoint-path artifacts/spotlight_exec_curriculum_best.pkl \
+  --latest-checkpoint-path artifacts/spotlight_exec_curriculum_latest.pkl
 ```
 
-Evaluate the trained scientist checkpoint on local ARC:
+Evaluate the trained scientist checkpoint on local ARC with the default capped budget:
 
 ```bash
 python -m arcagi.evaluation.harness arc \
   --agent scientist \
-  --checkpoint-path artifacts/scientist_curriculum_run1_best.pkl \
+  --checkpoint-path artifacts/spotlight_exec_curriculum_best.pkl \
   --game-limit 1 \
   --mode offline
 ```
 
+Run an uncapped local ARC probe when you want to know whether a level is ever solved rather than whether it is solved within the default `256`-step budget:
+
+```bash
+python -m arcagi.evaluation.harness arc \
+  --agent scientist \
+  --checkpoint-path artifacts/spotlight_exec_curriculum_best.pkl \
+  --game-id ar25-0c556536 \
+  --mode offline \
+  --max-steps 0 \
+  --progress-every 50
+```
+
 Current measured scientist result on this tree:
 
-- bounded curriculum pretraining reached:
-  - `simple_success_rate = 1.0`
-  - `rich_success_rate = 0.0`
-- local offline ARC `ar25-0c556536` still failed after pretraining:
-  - `success = false`
-  - `return = 0.0`
-  - `steps = 256`
-  - `interaction_steps = 20`
+- synthetic curriculum training now shows nonzero teacher-free attempt-improvement on both simple and rich holdouts, and the checkpointed spotlight stack now logs real move-37-style override candidates and validations
+- the default capped holdout path is still pessimistic:
+  - `simple_success_rate = 0.0`
+  - `rich_session_win_rate = 0.0`
+  - `rich_avg_levels_completed = 0.0`
+- but the uncapped local offline ARC probe is now materially better than zero:
+  - `artifacts/spotlight_exec_curriculum_best.pkl` completed `AR25` level 1 at about step `300`
+  - the same run still plateaued at `levels_completed = 1` through at least step `750`
+  - so the remaining real-ARC bottleneck is post-level transfer and rapid next-level objective reacquisition, not total inability to solve any real level
 
-So the scientist edits improved the experimentation substrate, but they did not close the real ARC semantic-transfer gap yet.
+So the scientist path now has real first-level ARC competence on `AR25`, but it still does not close the cross-level carryover gap.
 
 ## Manual Stage 1 Training
 

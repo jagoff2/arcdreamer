@@ -351,6 +351,42 @@ class LearnedPlanningAgent(BaseAgent):
             self.theory_manager.reset_episode()
         self.rule_inducer.clear()
 
+    def reset_level(self) -> None:
+        super().reset_level()
+        self.hidden = None
+        self.last_hidden_input = None
+        self.last_latent = None
+        self.last_prediction = None
+        self.last_runtime_thought = None
+        self.last_plan_scores = {}
+        self.recent_actions = []
+        self.latest_rule_candidates = ()
+        self.latest_competitions = ()
+        self.online_action_bias = {}
+        self.online_context_bias = {}
+        self.local_action_patches = {}
+        self.local_context_patches = {}
+        self.pending_belief_tokens = ()
+        self.pending_question_tokens = ()
+        self.pending_plan_tokens = ()
+        self.stable_belief_tokens = ()
+        self.stable_question_tokens = ()
+        self.stable_plan_tokens = ()
+        self.global_action_counts.clear()
+        self.global_action_delta_sums.clear()
+        self.global_action_reward_sums.clear()
+        self.global_action_no_effect_counts.clear()
+        self.family_counts.clear()
+        self.family_bins.clear()
+        self.family_no_effect_counts.clear()
+        self.stuck_steps = 0
+        reset_level = getattr(self.runtime_rule_controller, "reset_level", None)
+        if callable(reset_level):
+            reset_level()
+        reset_level = getattr(self.theory_manager, "reset_level", None)
+        if callable(reset_level):
+            reset_level()
+
     def reset_all(self) -> None:
         super().reset_all()
         if self.gradient_world_model_adaptation and self.world_model_optimizer is not None:

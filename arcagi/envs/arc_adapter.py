@@ -21,6 +21,7 @@ except Exception:  # pragma: no cover - optional dependency
 
 
 ARC_ACTION_ROLES: dict[str, str] = {
+    "0": "reset_level",
     "1": "move_up",
     "2": "move_down",
     "3": "move_left",
@@ -413,6 +414,8 @@ def _expand_actions(
     camera_meta: dict[str, int] | None,
 ) -> tuple[ActionName, ...]:
     actions = [action for action in base_actions if action != "6"]
+    if GameAction is not None and hasattr(GameAction, "RESET") and "0" not in actions:
+        actions.insert(0, "0")
     if "6" in base_actions and camera_meta is not None:
         click_actions = _click_actions_for_grid(grid, camera_meta)
         if click_actions:
@@ -545,6 +548,8 @@ def _build_arc_extras(
 def _action_roles(base_actions: tuple[ActionName, ...], affordances: tuple[ActionName, ...]) -> dict[str, str]:
     roles = {action: ARC_ACTION_ROLES.get(action, "raw") for action in base_actions}
     for action in affordances:
+        if action == "0":
+            roles[action] = "reset_level"
         if action.startswith("click:"):
             roles[action] = "click"
     return roles
@@ -558,7 +563,7 @@ def _arc_interface_inventory_flags(
     camera_meta: dict[str, int] | None,
 ) -> tuple[dict[str, str], dict[str, str]]:
     context = build_action_schema_context(affordances, action_roles)
-    counts: dict[str, int] = {key: 0 for key in ("move", "click", "select", "interact", "undo", "wait", "raw", "other")}
+    counts: dict[str, int] = {key: 0 for key in ("move", "click", "select", "interact", "undo", "reset", "wait", "raw", "other")}
     click_bins: set[tuple[int, int]] = set()
     for action in affordances:
         schema = build_action_schema(action, context)
@@ -571,6 +576,7 @@ def _arc_interface_inventory_flags(
         "interface_select_actions": str(counts["select"]),
         "interface_interact_actions": str(counts["interact"]),
         "interface_undo_actions": str(counts["undo"]),
+        "interface_reset_actions": str(counts["reset"]),
         "interface_raw_actions": str(counts["raw"]),
         "interface_click_bin_count": str(len(click_bins)),
         "interface_levels_completed": str(int(getattr(observation, "levels_completed", 0) or 0)),
@@ -584,6 +590,7 @@ def _arc_interface_inventory_flags(
         "interface_has_select": "1" if counts["select"] > 0 else "0",
         "interface_has_interact": "1" if counts["interact"] > 0 else "0",
         "interface_has_undo": "1" if counts["undo"] > 0 else "0",
+        "interface_has_reset": "1" if counts["reset"] > 0 else "0",
         "interface_has_mode_actions": "1" if (counts["click"] + counts["select"]) > 0 else "0",
         "interface_dense_clicks": "1" if counts["click"] >= 8 else "0",
         "interface_parametric_clicks": "1" if any(action.startswith("click:") for action in affordances) else "0",

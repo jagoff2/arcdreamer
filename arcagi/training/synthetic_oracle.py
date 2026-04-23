@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from collections import deque
+from typing import Any, Mapping
 
 import numpy as np
 
 from arcagi.core.types import ActionName
+from arcagi.envs.session import PersistentLevelSessionEnv
 from arcagi.envs.synthetic import (
     AGENT,
     COLLECT_COLORS,
@@ -17,6 +19,7 @@ from arcagi.envs.synthetic import (
     TARGET,
     WALL,
 )
+from arcagi.scientist.synthetic_env import HiddenRuleGridEnv
 
 
 def oracle_action(env: HiddenRuleEnv) -> ActionName:
@@ -48,6 +51,28 @@ def oracle_action(env: HiddenRuleEnv) -> ActionName:
     return _move_toward(env, env._target_pos, goal_required=True)
 
 
+def teacher_action(env: Any, *, observation: Any | None = None) -> ActionName:
+    if isinstance(env, HiddenRuleEnv):
+        return oracle_action(env)
+    if isinstance(env, HiddenRuleGridEnv):
+        return _simple_grid_teacher_action(env)
+    if isinstance(env, PersistentLevelSessionEnv):
+        available_actions = tuple(str(item) for item in getattr(observation, "available_actions", ()) or ())
+        extras = _observation_extras(observation)
+        game_state = str(extras.get("game_state", "") or "").strip().upper()
+        if "0" in available_actions and game_state.endswith("GAME_OVER"):
+            return "0"
+        current_env = env.current_level_env
+        current_env = getattr(current_env, "teacher_env", current_env)
+        if isinstance(current_env, HiddenRuleEnv):
+            return oracle_action(current_env)
+        if isinstance(current_env, HiddenRuleGridEnv):
+            return _simple_grid_teacher_action(current_env)
+        if "0" in available_actions and game_state.endswith("SESSION_ENDED"):
+            return "0"
+    return "wait"
+
+
 def _approach_and_interact_position(env: HiddenRuleEnv, target: tuple[int, int] | None) -> ActionName:
     if target is None:
         return "wait"
@@ -77,6 +102,20 @@ def _move_toward(env: HiddenRuleEnv, target: tuple[int, int], goal_required: boo
     if not path:
         return "wait"
     return _move_action(env._agent, path[0])
+
+
+def _simple_grid_teacher_action(env: HiddenRuleGridEnv) -> ActionName:
+    if env.config.requires_key and not env.has_key:
+        if _simple_manhattan(env.avatar, env.key) <= 1:
+            return "interact"
+        path = _shortest_simple_path(env, env.avatar, {env.key})
+        if path:
+            return _simple_move_action(env.avatar, path[0])
+        return "interact"
+    path = _shortest_simple_path(env, env.avatar, {env.goal})
+    if path:
+        return _simple_move_action(env.avatar, path[0])
+    return "up"
 
 
 def _shortest_path(
@@ -118,6 +157,31 @@ def _adjacent_cells(cell: tuple[int, int]) -> list[tuple[int, int]]:
     return [(cell[0] - 1, cell[1]), (cell[0] + 1, cell[1]), (cell[0], cell[1] - 1), (cell[0], cell[1] + 1)]
 
 
+def _shortest_simple_path(
+    env: HiddenRuleGridEnv,
+    start: tuple[int, int],
+    goals: set[tuple[int, int]],
+) -> list[tuple[int, int]]:
+    frontier: deque[tuple[int, int]] = deque([start])
+    parent: dict[tuple[int, int], tuple[int, int] | None] = {start: None}
+    walls = env._walls()
+    while frontier:
+        cell = frontier.popleft()
+        if cell in goals:
+            return _reconstruct_path(cell, parent)
+        for next_cell in _adjacent_cells(cell):
+            if next_cell in parent:
+                continue
+            y, x = next_cell
+            if y < 0 or x < 0 or y >= env.config.size or x >= env.config.size:
+                continue
+            if next_cell in walls:
+                continue
+            parent[next_cell] = cell
+            frontier.append(next_cell)
+    return []
+
+
 def _cell_passable(grid: np.ndarray, cell: tuple[int, int], allow_goal: bool) -> bool:
     y, x = cell
     if y < 0 or x < 0 or y >= grid.shape[0] or x >= grid.shape[1]:
@@ -136,3 +200,22 @@ def _move_action(start: tuple[int, int], next_cell: tuple[int, int]) -> ActionNa
         if action_delta == delta:
             return action
     return "wait"
+
+
+def _simple_move_action(start: tuple[int, int], next_cell: tuple[int, int]) -> ActionName:
+    delta = (next_cell[0] - start[0], next_cell[1] - start[1])
+    for action, action_delta in MOVE_DELTAS.items():
+        if action_delta == delta:
+            return action
+    return "up"
+
+
+def _simple_manhattan(a: tuple[int, int], b: tuple[int, int]) -> int:
+    return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+
+def _observation_extras(observation: Any | None) -> Mapping[str, Any]:
+    extras = getattr(observation, "extras", None)
+    if isinstance(extras, Mapping):
+        return extras
+    return {}

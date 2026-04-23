@@ -71,3 +71,15 @@ def test_action_schema_groups_parametric_clicks_by_family_and_bin() -> None:
 
     assert first.family == second.family
     assert first.coarse_bin != second.coarse_bin
+
+
+def test_action_schema_recognizes_reset_action_type() -> None:
+    context = build_action_schema_context(
+        affordances=("0", "1", "click:4:4"),
+        action_roles={"0": "reset_level", "1": "move_up", "click:4:4": "click"},
+    )
+
+    schema = build_action_schema("0", context)
+
+    assert schema.action_type == "reset"
+    assert schema.role == "reset_level"

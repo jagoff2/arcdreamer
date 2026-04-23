@@ -42,6 +42,12 @@ TARGETED_FAMILIES = {
     "select_at",
 }
 
+RESET_FAMILIES = {
+    "reset",
+    "restart",
+    "retry",
+}
+
 SELECTOR_FAMILIES = {
     "select",
     "select_cycle",
@@ -110,6 +116,14 @@ def action_family(action: ActionName) -> str:
         "a5": "action5",
         "a6": "action6",
         "a7": "action7",
+        "1": "up",
+        "2": "down",
+        "3": "left",
+        "4": "right",
+        "5": "select_cycle",
+        "6": "action6",
+        "7": "undo",
+        "0": "reset",
     }
     raw = aliases.get(raw, raw)
     if raw in {"move_up", "action1"}:
@@ -125,6 +139,10 @@ def action_family(action: ActionName) -> str:
 
 def is_move_action(action: ActionName) -> bool:
     return action_family(action) in {"up", "down", "left", "right"}
+
+
+def is_reset_action(action: ActionName) -> bool:
+    return action_family(action) in RESET_FAMILIES
 
 
 def action_delta(action: ActionName) -> tuple[int, int] | None:
@@ -431,6 +449,50 @@ def combined_progress_signal(reward: float, score_delta: float) -> float:
     if abs(reward_f) > 1e-12 and abs(score_f) > 1e-12 and abs(reward_f - score_f) <= 1e-9:
         return reward_f
     return reward_f + score_f
+
+
+def observation_game_state(value: Any) -> str:
+    extras: Mapping[str, Any] | None = None
+    if hasattr(value, "frame") and hasattr(value.frame, "extras"):
+        extras = getattr(value.frame, "extras", None)
+    elif hasattr(value, "extras"):
+        extras = getattr(value, "extras", None)
+    elif isinstance(value, Mapping):
+        extras = value.get("extras") if isinstance(value.get("extras"), Mapping) else value
+    if isinstance(extras, Mapping):
+        state = extras.get("game_state", "")
+        if state:
+            return str(state)
+    state = getattr(value, "state", "")
+    return str(state or "")
+
+
+def observation_levels_completed(value: Any) -> int:
+    extras: Mapping[str, Any] | None = None
+    if hasattr(value, "frame") and hasattr(value.frame, "extras"):
+        extras = getattr(value.frame, "extras", None)
+    elif hasattr(value, "extras"):
+        extras = getattr(value, "extras", None)
+    elif isinstance(value, Mapping):
+        extras = value.get("extras") if isinstance(value.get("extras"), Mapping) else value
+    if isinstance(extras, Mapping):
+        try:
+            return int(extras.get("levels_completed", 0) or 0)
+        except Exception:
+            return 0
+    try:
+        return int(getattr(value, "levels_completed", 0) or 0)
+    except Exception:
+        return 0
+
+
+def is_win_game_state(state: str) -> bool:
+    return str(state).strip().upper().endswith("WIN")
+
+
+def is_failure_terminal_game_state(state: str) -> bool:
+    normalized = str(state).strip().upper()
+    return normalized.endswith("GAME_OVER") or normalized.endswith("SESSION_ENDED")
 
 
 def coerce_grid_frame(

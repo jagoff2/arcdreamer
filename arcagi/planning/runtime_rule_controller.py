@@ -494,6 +494,27 @@ class RuntimeRuleController:
         self._pending_action_mode_key = DEFAULT_MODE
         self._recent_selector_action = None
 
+    def reset_level(self) -> None:
+        self.action_visits.clear()
+        self.selector_visits.clear()
+        self._unread_proofs = 0
+        self.current_mode_key = DEFAULT_MODE
+        self.pending_undo = False
+        self.undo_attempts = 0
+        self.exploit_started = False
+        self.active_goal_anchor = None
+        self.active_exploit_action = None
+        self.active_pair_key = None
+        self.active_objective_family = None
+        self.active_probe_anchor = None
+        self.active_probe_pair_key = None
+        self.active_option_key = None
+        self.active_option_index = 0
+        self.reference_state = None
+        self.reference_fingerprint = None
+        self._pending_action_mode_key = DEFAULT_MODE
+        self._recent_selector_action = None
+
     def reset_all(self) -> None:
         self.reset_episode()
 

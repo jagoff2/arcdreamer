@@ -10,7 +10,15 @@ from typing import Any, Mapping
 from arcagi.scientist.agent import ScientistAgent, ScientistAgentConfig, _score_delta
 from arcagi.scientist.perception import compare_states, extract_state
 from arcagi.scientist.spotlight import ActionSpotlight, SpotlightConfig
-from arcagi.scientist.types import ActionName, coerce_grid_frame, combined_progress_signal
+from arcagi.scientist.types import (
+    ActionName,
+    coerce_grid_frame,
+    combined_progress_signal,
+    is_failure_terminal_game_state,
+    is_reset_action,
+    observation_game_state,
+    observation_levels_completed,
+)
 
 
 @dataclass(frozen=True)
@@ -31,6 +39,13 @@ class SpotlightScientistAgent(ScientistAgent):
     def reset_episode(self) -> None:
         super().reset_episode()
         self.spotlight.reset_episode()
+
+    def reset_level(self) -> None:
+        super().reset_level()
+        self.spotlight.reset_level()
+
+    def observe_teacher_action(self, teacher_action: ActionName, *, weight: float = 1.0) -> None:
+        self.spotlight.observe_teacher_action(teacher_action, weight=weight)
 
     def act(self, observation: Any) -> ActionName:
         state = self.perceive(observation)
@@ -96,6 +111,25 @@ class SpotlightScientistAgent(ScientistAgent):
             record=record,
             engine=self.engine,
         )
+        level_success = observation_levels_completed(after) > observation_levels_completed(before)
+        terminal_failure = bool(terminated and is_failure_terminal_game_state(observation_game_state(after)))
+        level_boundary = is_reset_action(action) or level_success
+        self.spotlight.learn_from_transition(
+            record=record,
+            planner=self.planner,
+            engine=self.engine,
+            world_model=self.world_model,
+            memory=self.memory,
+            language=self.language,
+        )
+        if level_boundary or terminal_failure:
+            self.spotlight.finalize_attempt(
+                after,
+                success=bool(level_success),
+                terminal_failure=bool(terminal_failure),
+            )
+        if level_boundary:
+            self.reset_level()
 
         self.current_state = after
         self.transitions_observed += 1
