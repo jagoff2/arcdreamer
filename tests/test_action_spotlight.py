@@ -10,6 +10,7 @@ from arcagi.scientist.planner import PlannerConfig
 from arcagi.scientist.perception import compare_states, extract_state
 from arcagi.scientist.spotlight import (
     ActionSpotlight,
+    ActionEvidence,
     AttemptActionRecord,
     AttemptOutcome,
     CURRENT_FEATURE_SCHEMA_VERSION,
@@ -209,6 +210,17 @@ def test_spotlight_agent_from_checkpoint_restores_saved_config(tmp_path) -> None
     agent.spotlight.binding_success[("5", "4")] = 2
     agent.spotlight.probe_baseline_trials["right"] = 9
     agent.spotlight.probe_baseline_effect_sum["right"] = 1.25
+    agent.spotlight.action_evidence[("exact-a", "4")] = ActionEvidence(
+        attempts=7.0,
+        successes=1.0,
+        failures=4.0,
+        no_effects=3.0,
+        contradictions=1.0,
+        recent_failures=2.5,
+        last_success_step=3,
+        last_attempt_step=9,
+    )
+    agent.spotlight.family_evidence[("abstract-a", "right")] = ActionEvidence(attempts=9.0, failures=6.0, no_effects=5.0)
     agent.spotlight.steps_since_progress = 8
     agent.spotlight.session_reset_count = 2
     agent.spotlight.steps_since_reset = 3
@@ -234,6 +246,8 @@ def test_spotlight_agent_from_checkpoint_restores_saved_config(tmp_path) -> None
     agent.spotlight._current_attempt_level_key = "task/level_0"
     agent.spotlight._current_attempt_reward = 0.1
     agent.spotlight._current_attempt_steps = 1
+    agent.spotlight.micro_attempt_updates = 4
+    agent.spotlight.last_micro_attempt_target = -0.5
     path = tmp_path / "spotlight_roundtrip.pkl"
     agent.save_checkpoint(path)
 
@@ -253,6 +267,14 @@ def test_spotlight_agent_from_checkpoint_restores_saved_config(tmp_path) -> None
     assert restored.spotlight.binding_success[("5", "4")] == 2
     assert restored.spotlight.probe_baseline_trials["right"] == 9
     assert restored.spotlight.probe_baseline_effect_sum["right"] == 1.25
+    restored_exact_evidence = restored.spotlight.action_evidence[("exact-a", "4")]
+    assert restored_exact_evidence.attempts == 7.0
+    assert restored_exact_evidence.successes == 1.0
+    assert restored_exact_evidence.failures == 4.0
+    assert restored_exact_evidence.no_effects == 3.0
+    assert restored_exact_evidence.contradictions == 1.0
+    assert restored_exact_evidence.last_success_step == 3
+    assert restored.spotlight.family_evidence[("abstract-a", "right")].failures == 6.0
     assert restored.spotlight.steps_since_progress == 8
     assert restored.spotlight.session_reset_count == 2
     assert restored.spotlight.steps_since_reset == 3
@@ -262,6 +284,8 @@ def test_spotlight_agent_from_checkpoint_restores_saved_config(tmp_path) -> None
     assert restored.spotlight._current_attempt_level_key == "task/level_0"
     assert restored.spotlight._current_attempt_steps == 1
     assert len(restored.spotlight._current_attempt_actions) == 1
+    assert restored.spotlight.micro_attempt_updates == 4
+    assert restored.spotlight.last_micro_attempt_target == -0.5
 
 
 def test_spotlight_agent_normalizes_mapping_configs_before_runtime_use() -> None:
@@ -508,6 +532,137 @@ def test_spotlight_evidence_score_suppresses_repeated_falsified_action() -> None
 
     assert decision.action == "4"
     assert decision.components["evidence_score"] > 0.0
+
+
+def test_spotlight_reliability_recovers_after_success() -> None:
+    spotlight = ActionSpotlight()
+    state = extract_state(GridFrame("task", "episode", 0, np.array([[0, 1], [0, 0]], dtype=np.int64), ("3",)))
+    for step in range(6):
+        spotlight._observe_action_evidence(
+            state,
+            "3",
+            step=step,
+            no_effect=1.0,
+            contradiction=1.0,
+        )
+
+    failed_reliability = spotlight._reliability(state, "3")
+    failed_penalty = spotlight._falsification_penalty(state, "3")
+
+    spotlight._observe_action_evidence(state, "3", step=7, success=3.0)
+
+    assert spotlight._reliability(state, "3") > failed_reliability
+    assert spotlight._falsification_penalty(state, "3") <= failed_penalty
+
+
+def test_failed_action_remains_candidate_after_reliability_demotes_score() -> None:
+    spotlight = ActionSpotlight()
+    state = extract_state(GridFrame("task", "episode", 0, np.zeros((2, 2), dtype=np.int64), ("3", "4")))
+    for step in range(10):
+        spotlight._observe_action_evidence(state, "3", step=step, no_effect=1.0, contradiction=1.0)
+
+    class Planner:
+        @staticmethod
+        def candidate_actions(_state, *, engine, memory=None, language_tokens=()):
+            return ("3", "4")
+
+    candidates = spotlight._candidate_actions(
+        state,
+        planner=Planner(),
+        engine=SimpleNamespace(),
+        memory=None,
+        lang_tokens=(),
+    )
+
+    assert "3" in candidates
+    assert "4" in candidates
+    assert spotlight._falsification_penalty(state, "3") > spotlight._falsification_penalty(state, "4")
+
+
+def test_micro_attempt_updates_inside_long_nonterminal_episode() -> None:
+    spotlight = ActionSpotlight()
+    spotlight.executive.weights[:] = 0.0
+    spotlight.executive.exploration_bonus = 0.0
+
+    class Planner:
+        @staticmethod
+        def candidate_actions(_state, *, engine, memory=None, language_tokens=()):
+            return ("3",)
+
+    class Engine:
+        @staticmethod
+        def score_action(_state, _action, **_kwargs):
+            return SimpleNamespace(
+                expected_reward=0.0,
+                expected_change=0.0,
+                information_gain=0.0,
+                risk=0.0,
+                rationale=(),
+            )
+
+    class WorldModel:
+        @staticmethod
+        def predict(_state, _action):
+            return SimpleNamespace(reward_mean=0.0, change_mean=0.0, total_uncertainty=0.0)
+
+    class Memory:
+        @staticmethod
+        def action_memory_bonus(_state, _action, _lang_tokens):
+            return 0.0
+
+        @staticmethod
+        def action_option_profile(_state, _action, _lang_tokens):
+            return {}
+
+    class Language:
+        @staticmethod
+        def memory_tokens(_state, _engine):
+            return ()
+
+        @staticmethod
+        def belief_sentences(_engine, *, limit=3):
+            return ()
+
+        @staticmethod
+        def questions(_engine, *, limit=2):
+            return ()
+
+    for step in range(6):
+        before = extract_state(
+            GridFrame(
+                "task",
+                "episode",
+                step,
+                np.array([[0, 1], [0, 0]], dtype=np.int64),
+                ("3",),
+                extras={"session_level_index": 0},
+            )
+        )
+        after = extract_state(
+            GridFrame(
+                "task",
+                "episode",
+                step + 1,
+                np.array([[0, 1], [0, 0]], dtype=np.int64),
+                ("3",),
+                extras={"session_level_index": 0},
+            )
+        )
+        decision = spotlight.choose_action(
+            before,
+            planner=Planner(),
+            engine=Engine(),
+            world_model=WorldModel(),
+            memory=Memory(),
+            language=Language(),
+        )
+        spotlight.notify_transition(record=compare_states(before, after, action=decision.action))
+
+    diagnostics = spotlight.diagnostics()
+    assert diagnostics["micro_attempt_updates"] >= 1
+    assert diagnostics["adaptation_updates"] >= 1
+    assert diagnostics["micro_attempt_steps"] == 0
+    assert spotlight._current_attempt_steps == 6
 
 
 def test_baseline_movement_after_binder_does_not_count_as_binding_success() -> None:

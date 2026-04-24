@@ -418,3 +418,42 @@ Current conclusion:
 
 - Evidence-score selection improves dense action exposure but does not solve ARC.
 - Next action is longer state-carrying ARC training with the repaired checkpoints and evidence-score controller.
+
+Follow-up preservation action:
+
+- Committed the slice:
+  - `17f7672 Use online evidence score in spotlight selection`
+- Pushed to `origin/main`.
+
+## 2026-04-24 11:49 EDT
+
+Operator actions:
+
+1. While the long ARC training/holdout process was active, user requested a GPT-Pro second opinion on current progress.
+2. Asked GPT-Pro for concrete next code changes using the current commit state, eval results, and live 320-step training diagnostics.
+3. Saved the actionable advice summary:
+   - `docs/GPT_PRO_SECOND_OPINION_2026-04-24.md`
+4. Implemented GPT-Pro's first two recommendations:
+   - Added online reliability/falsification evidence for exact actions and action families.
+   - Reliability now gates exploitation-like score terms and adds explicit falsification penalty without pruning legal candidates.
+   - Added within-session micro-attempt updates that finalize learning segments during long nonterminal failures without resetting the environment or clearing level state.
+   - Added checkpoint persistence for the new evidence/micro-attempt counters.
+5. Validation:
+   - `.venv313\Scripts\python.exe -m py_compile arcagi\scientist\spotlight.py tests\test_action_spotlight.py`
+   - Result: passed.
+   - `python -m pytest tests/test_action_spotlight.py -q`
+   - Result: `27 passed in 0.21s`.
+   - `python -m pytest tests/test_action_spotlight.py tests/test_scientist_agent.py tests/test_scientist_training.py tests/test_arc_adapter_helpers.py tests/test_eval_path_constraints.py tests/test_arc_public_training.py -q`
+   - Result: `82 passed in 123.61s`.
+
+Live ARC training status:
+
+- The 2-session, 320-step ARC training command is still running in the original Python process started before this patch.
+- Session 1 holdout failed: `success_rate=0.0`, `avg_levels_completed=0.0`, `avg_return=0.0`, `avg_steps=320`.
+- Session 2 holdout failed: `success_rate=0.0`, `avg_levels_completed=0.0`, `avg_return=0.0`, `avg_steps=320`.
+- The final holdout scorecard is currently running.
+
+Current conclusion:
+
+- The current long run has not achieved ARC success.
+- The new reliability/micro-attempt code has not yet been exercised by an ARC run because the active process predates the patch.
