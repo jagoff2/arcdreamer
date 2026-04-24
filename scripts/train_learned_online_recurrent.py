@@ -11,10 +11,14 @@ from arcagi.learned_online.curriculum import (
     DelayedUnlockTask,
     DenseCoordinateGroundingTask,
     DenseFamilyMassArbitrationTask,
+    LongDenseDecoyTask,
+    LongPostBoundaryCarryoverTask,
+    LongSparseMixedFamilyChainTask,
     MovementRequiredAfterModeTask,
     ModeThenDenseClickTask,
     ActionNameRemapHeldoutTask,
     RandomizedBindingTask,
+    RoleOpaqueRemapTask,
     VisibleMovementTrapTask,
     VisibleUsefulTrapTask,
 )
@@ -36,16 +40,19 @@ def train(
     task_counts: dict[str, int] = {}
     behavior_counts: dict[str, int] = {}
     for episode in range(int(episodes)):
-        task = _make_task(int(rng.integers(9)), seed=seed + episode)
+        task = _make_task(int(rng.integers(_TASK_COUNT)), seed=seed + episode)
         observation = task.reset(seed=seed + episode)
         agent.reset_episode()
         episode_return = 0.0
-        for _step in range(int(max_steps)):
+        episode_max_steps = _episode_max_steps(task, requested=max_steps)
+        for _step in range(episode_max_steps):
             state = agent.observe(observation)
             question = select_question(agent.belief)
             actions = tuple(state.affordances)
             behavior, action = _choose_training_action(
                 agent=agent,
+                task=task,
+                observation=observation,
                 state=state,
                 actions=actions,
                 question=question,
@@ -85,6 +92,9 @@ def train(
     }
 
 
+_TASK_COUNT = 13
+
+
 def _make_task(kind: int, *, seed: int):
     if kind == 0:
         return VisibleUsefulTrapTask(seed=seed)
@@ -102,7 +112,22 @@ def _make_task(kind: int, *, seed: int):
         return DenseFamilyMassArbitrationTask(seed=seed)
     if kind == 7:
         return ModeThenDenseClickTask(seed=seed)
-    return ActionNameRemapHeldoutTask(seed=seed)
+    if kind == 8:
+        return ActionNameRemapHeldoutTask(seed=seed)
+    if kind == 9:
+        return LongSparseMixedFamilyChainTask(seed=seed, chain_length=96)
+    if kind == 10:
+        return LongDenseDecoyTask(seed=seed, chain_length=96)
+    if kind == 11:
+        return RoleOpaqueRemapTask(seed=seed)
+    return LongPostBoundaryCarryoverTask(seed=seed, level_count=4)
+
+
+def _episode_max_steps(task, *, requested: int) -> int:
+    recommended = getattr(task, "recommended_max_steps", None)
+    if callable(recommended):
+        return max(int(requested), int(recommended()))
+    return int(requested)
 
 
 def _exploration_action(actions: tuple[str, ...], rng: np.random.Generator) -> str:
@@ -112,6 +137,8 @@ def _exploration_action(actions: tuple[str, ...], rng: np.random.Generator) -> s
 def _choose_training_action(
     *,
     agent: LearnedOnlineRecurrentAgent,
+    task,
+    observation,
     state,
     actions: tuple[str, ...],
     question,
@@ -122,12 +149,21 @@ def _choose_training_action(
     policy = str(behavior_policy).strip().lower()
     if policy == "mixed":
         draw = float(rng.random())
-        if draw < 0.4:
+        if draw < 0.25:
+            policy = "expert"
+        elif draw < 0.50:
             policy = "random"
-        elif draw < 0.8:
+        elif draw < 0.85:
             policy = "agent"
         else:
             policy = "epsilon_agent"
+    if policy == "expert":
+        expert = getattr(task, "expert_action", None)
+        if callable(expert):
+            candidate = str(expert(observation))
+            if candidate in actions:
+                return "expert", candidate
+        return "expert_random", _exploration_action(actions, rng)
     if policy == "random":
         return "random", _exploration_action(actions, rng)
     if policy == "epsilon_agent":
@@ -161,7 +197,7 @@ def main() -> int:
         "--behavior-policy",
         type=str,
         default="mixed",
-        choices=("random", "agent", "epsilon_agent", "mixed"),
+        choices=("random", "agent", "epsilon_agent", "expert", "mixed"),
     )
     parser.add_argument("--epsilon", type=float, default=0.2)
     args = parser.parse_args()

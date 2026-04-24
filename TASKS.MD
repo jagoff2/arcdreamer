@@ -2,6 +2,16 @@
 
 ## Active
 
+- [x] Verify that the old AR25 level-0 trace is real environment progress, not same-level replay. Diagnostic replay with level-boundary reset disabled reproduces `return=1.0`, `levels_completed=1`.
+- [x] Confirm that current clean learned recurrent checkpoints fail to reproduce the trace: long-credit, old checkpoint under current runtime, greedy, and exact-action diagnostic variants all fail AR25 level 0 at 320 steps.
+- [x] Add long-horizon value credit, value-only return targets, observed-transition ranking, long/carryover synthetic tasks, trace fine-tuning, and an imitation/action-prior head.
+- [x] Run dense all-negative imitation trace fine-tune. It reaches teacher success `12/12` but normal learned runtime eval still fails AR25: `return=0`, `levels_completed=0`, final `GAME_OVER`.
+- [ ] Push updated code and context so GPT-Pro can review the actual repo state, not stale commit `6493d99`.
+- [ ] Ask GPT-Pro for a mechanism-level review with repo URL, branch, commit hash, changed files, and exact failed eval results.
+- [ ] Add anti-replay metadata/tests before making any future trace-assisted success claim.
+- [ ] Decide, with GPT-Pro consensus, whether to do sampled/hard-negative action-prior recovery or pivot to a larger architecture.
+- [ ] If continuing trace-assisted recovery, add teacher-rank diagnostics, sampled/hard negatives, progress logging, checkpoint-every-epoch, and memory clearing before save.
+- [ ] If pivoting, replace scalar-head recurrent scoring with a mechanism that learns state-action semantics and online beliefs over object/event transitions under the full dense action surface.
 - [x] Record the GPT-Pro consensus that Spotlight/TheoryManager is now baseline instrumentation only, not the ARC-facing success-claiming learned agent.
 - [x] Add mechanical claim-eligibility metadata and tests so clean learned eval cannot use Spotlight/TheoryManager/RuntimeRuleController/HybridPlanner/diagnostic-binding control as the primary controller.
 - [x] Build `learned_online_minimal`: a full-dense-action learned decision owner with explicit online belief/action-semantics state, fast prediction/value/info updates, episodic memory features, and grounded question tokens.

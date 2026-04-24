@@ -19,6 +19,7 @@ class MinimalPredictions:
     info_gain: np.ndarray
     cost: np.ndarray
     value: np.ndarray
+    imitation: np.ndarray
     uncertainty: np.ndarray
 
 
@@ -33,7 +34,7 @@ class MinimalOnlineModel:
     online_adapt_updates: int = 0
 
     def __post_init__(self) -> None:
-        self.weights = {name: np.zeros((self.input_dim,), dtype=np.float32) for name in _HEADS}
+        self.weights = {name: np.zeros((self.input_dim,), dtype=np.float32) for name in _PREDICTION_HEADS}
         self.biases = {
             "reward": -2.0,
             "useful": -0.8,
@@ -41,6 +42,7 @@ class MinimalOnlineModel:
             "info_gain": -0.2,
             "cost": -1.2,
             "value": -1.5,
+            "imitation": -6.0,
         }
         self._initialize_generic_belief_priors()
 
@@ -52,6 +54,7 @@ class MinimalOnlineModel:
         info_gain = _sigmoid(x @ self.weights["info_gain"] + self.biases["info_gain"])
         cost = _sigmoid(x @ self.weights["cost"] + self.biases["cost"])
         value = _sigmoid(x @ self.weights["value"] + self.biases["value"])
+        imitation = _sigmoid(x @ self.weights["imitation"] + self.biases["imitation"])
         uncertainty = np.clip((1.0 - np.maximum(useful, cost)) + 0.25 * info_gain, 0.0, 1.0)
         return MinimalPredictions(
             reward=reward.astype(np.float32),
@@ -60,6 +63,7 @@ class MinimalOnlineModel:
             info_gain=info_gain.astype(np.float32),
             cost=cost.astype(np.float32),
             value=value.astype(np.float32),
+            imitation=imitation.astype(np.float32),
             uncertainty=uncertainty.astype(np.float32),
         )
 
@@ -126,6 +130,61 @@ class MinimalOnlineModel:
     def reset_online_adaptation(self) -> None:
         self.online_adapt_updates = 0
 
+    def value_logit(self, feature: np.ndarray) -> float:
+        x = np.asarray(feature, dtype=np.float32)
+        return float(x @ self.weights["value"] + self.biases["value"])
+
+    def ranking_update_value(
+        self,
+        positive_feature: np.ndarray,
+        negative_feature: np.ndarray,
+        *,
+        margin: float = 0.10,
+        weight: float = 0.25,
+    ) -> float:
+        positive = np.asarray(positive_feature, dtype=np.float32)
+        negative = np.asarray(negative_feature, dtype=np.float32)
+        violation = float(margin + self.value_logit(negative) - self.value_logit(positive))
+        if violation <= 0.0:
+            return 0.0
+        rate = float(weight) * self.learning_rate / float((self.online_adapt_updates + 1) ** 0.5)
+        self.weights["value"] += np.asarray(rate * (positive - negative), dtype=np.float32)
+        self.online_adapt_updates += 1
+        self.updates += 1
+        return violation
+
+    def imitation_logit(self, feature: np.ndarray) -> float:
+        x = np.asarray(feature, dtype=np.float32)
+        return float(x @ self.weights["imitation"] + self.biases["imitation"])
+
+    def imitation_update(
+        self,
+        positive_feature: np.ndarray,
+        negative_features: np.ndarray,
+        *,
+        margin: float = 0.20,
+        weight: float = 0.75,
+    ) -> float:
+        positive = np.asarray(positive_feature, dtype=np.float32)
+        negatives = np.asarray(negative_features, dtype=np.float32)
+        if negatives.ndim == 1:
+            negatives = negatives[None, :]
+        if negatives.size == 0:
+            return 0.0
+        positive_logit = self.imitation_logit(positive)
+        negative_logits = negatives @ self.weights["imitation"] + self.biases["imitation"]
+        violations = margin + negative_logits - positive_logit
+        active = violations > 0.0
+        if not bool(np.any(active)):
+            return 0.0
+        active_negatives = negatives[active]
+        rate = float(weight) * self.learning_rate / float((self.online_adapt_updates + 1) ** 0.5)
+        gradient = positive - np.mean(active_negatives, axis=0)
+        self.weights["imitation"] += np.asarray(rate * gradient, dtype=np.float32)
+        self.online_adapt_updates += 1
+        self.updates += 1
+        return float(np.mean(violations[active]))
+
     def state_dict(self) -> dict[str, object]:
         return {
             "input_dim": int(self.input_dim),
@@ -140,7 +199,7 @@ class MinimalOnlineModel:
     def load_state_dict(self, state: dict[str, object]) -> None:
         weights = state.get("weights", {})
         if isinstance(weights, dict):
-            for key in _HEADS:
+            for key in _PREDICTION_HEADS:
                 if key in weights:
                     loaded = np.asarray(weights[key], dtype=np.float32).copy()
                     target = self.weights[key]
@@ -150,7 +209,7 @@ class MinimalOnlineModel:
                         target[:overlap] = loaded[:overlap]
         biases = state.get("biases", {})
         if isinstance(biases, dict):
-            for key in _HEADS:
+            for key in _PREDICTION_HEADS:
                 if key in biases:
                     self.biases[key] = float(biases[key])
         self.updates = int(state.get("updates", self.updates) or 0)
@@ -192,14 +251,15 @@ class MinimalOnlineModel:
         self.weights["info_gain"][memory + 5] += 0.45
 
 
-_HEADS: tuple[str, ...] = ("reward", "useful", "visible", "info_gain", "cost", "value")
+_UPDATE_HEADS: tuple[str, ...] = ("reward", "useful", "visible", "info_gain", "cost", "value")
+_PREDICTION_HEADS: tuple[str, ...] = (*_UPDATE_HEADS, "imitation")
 
 
 def _targets(labels: TransitionLabels, *, realized_info_gain: float, return_credit: float = 0.0) -> dict[str, float]:
     nonprogress = max(float(labels.visible_only_nonprogress), float(labels.no_effect_nonprogress))
     return {
         "reward": float(labels.reward_progress),
-        "useful": float(max(labels.useful_change, return_credit)),
+        "useful": float(labels.useful_change),
         "visible": float(labels.visible_change),
         "info_gain": float(max(0.0, min(1.0, realized_info_gain))),
         "cost": float(max(float(labels.harm), 0.25 * nonprogress)),

@@ -121,6 +121,33 @@ class RecurrentOnlineModel:
             return_credit=return_credit,
         )
 
+    def ranking_update_value(
+        self,
+        positive_feature: np.ndarray,
+        negative_feature: np.ndarray,
+        *,
+        positive_hidden: np.ndarray | None = None,
+        negative_hidden: np.ndarray | None = None,
+        margin: float = 0.10,
+        weight: float = 0.25,
+    ) -> float:
+        positive = self.augment_features(np.asarray(positive_feature, dtype=np.float32), hidden=positive_hidden)
+        negative = self.augment_features(np.asarray(negative_feature, dtype=np.float32), hidden=negative_hidden)
+        return self.fast_heads.ranking_update_value(positive, negative, margin=margin, weight=weight)
+
+    def imitation_update(
+        self,
+        positive_feature: np.ndarray,
+        negative_features: np.ndarray,
+        *,
+        hidden: np.ndarray | None = None,
+        margin: float = 0.20,
+        weight: float = 0.75,
+    ) -> float:
+        positive = self.augment_features(np.asarray(positive_feature, dtype=np.float32), hidden=hidden)
+        negatives = self.augment_features(np.asarray(negative_features, dtype=np.float32), hidden=hidden)
+        return self.fast_heads.imitation_update(positive, negatives, margin=margin, weight=weight)
+
     def state_dict(self) -> dict[str, object]:
         return {
             "candidate_input_dim": int(self.candidate_input_dim),

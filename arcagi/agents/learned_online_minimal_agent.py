@@ -38,8 +38,7 @@ class LearnedOnlineMinimalAgent(BaseAgent):
         self.last_loss: float = 0.0
         self.last_realized_info_gain: float = 0.0
         self.last_prediction_error: float = 0.0
-        self.credit_gamma: float = 0.985
-        self.credit_horizon: int | None = 512
+        self.credit_horizon: int | None = 768
 
     def reset_episode(self) -> None:
         super().reset_episode()
@@ -158,7 +157,6 @@ class LearnedOnlineMinimalAgent(BaseAgent):
     def _credit_current_level_success(self, level_epoch: int) -> None:
         credited = self.memory.credit_recent_success(
             level_epoch=level_epoch,
-            gamma=self.credit_gamma,
             max_entries=self.credit_horizon,
         )
         for entry in credited:

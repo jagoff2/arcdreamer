@@ -104,7 +104,6 @@ class OnlineEpisodicMemory:
         self,
         *,
         level_epoch: int,
-        gamma: float = 0.985,
         max_entries: int | None = None,
     ) -> list[OnlineMemoryEntry]:
         candidates = [
@@ -118,7 +117,7 @@ class OnlineEpisodicMemory:
         credited: list[OnlineMemoryEntry] = []
         for index, entry in enumerate(candidates):
             distance = max(horizon - index - 1, 0)
-            credit = float(gamma**distance)
+            credit = _blended_success_credit(distance)
             entry.return_credit = max(float(entry.return_credit), credit)
             credited.append(entry)
         return credited
@@ -151,3 +150,12 @@ def _cosine(left: np.ndarray, right: np.ndarray) -> float:
     if denom <= 1e-8:
         return 0.0
     return float(np.dot(left, right) / denom)
+
+
+def _blended_success_credit(distance: int) -> float:
+    value = (
+        (0.20 * (0.985 ** max(int(distance), 0)))
+        + (0.30 * (0.995 ** max(int(distance), 0)))
+        + (0.50 * (0.998 ** max(int(distance), 0)))
+    )
+    return float(min(1.0, value))

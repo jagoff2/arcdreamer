@@ -11,9 +11,10 @@ from arcagi.core.types import GridObservation
 from arcagi.evaluation.harness import build_agent, run_episode
 from arcagi.learned_online.action_features import ActionFeatureConfig, encode_action_candidates
 from arcagi.learned_online.curriculum import NullDenseClickTask, RowMajorSweepPolicy
-from arcagi.learned_online.memory import OnlineMemoryEntry
+from arcagi.learned_online.memory import OnlineEpisodicMemory, OnlineMemoryEntry
 from arcagi.learned_online.minimal_model import MinimalOnlineModel
 from arcagi.learned_online.questions import QuestionToken
+from arcagi.learned_online.recurrent_policy import RECURRENT_CANDIDATE_INPUT_DIM
 from arcagi.learned_online.recurrent_model import RecurrentOnlineModel
 from arcagi.learned_online.signals import TransitionLabels
 
@@ -116,6 +117,172 @@ def test_checkpoint_load_resets_online_adaptation_counter_not_pretrain_count() -
     restored.online_update(feature, labels)
     assert restored.online_adapt_updates == 1
     assert restored.updates == 6
+
+
+def test_online_update_counter_increments_once_per_transition_update() -> None:
+    model = MinimalOnlineModel(input_dim=3, learning_rate=0.5)
+    feature = np.asarray([1.0, 0.0, 0.0], dtype=np.float32)
+    labels = TransitionLabels(no_effect_nonprogress=1.0)
+
+    loss = model.online_update(feature, labels, realized_info_gain=0.7, return_credit=0.9)
+
+    assert loss > 0.0
+    assert model.online_adapt_updates == 1
+    assert model.updates == 1
+
+
+def test_return_credit_trains_value_not_immediate_usefulness() -> None:
+    model = MinimalOnlineModel(input_dim=3, learning_rate=0.8)
+    feature = np.asarray([1.0, 0.0, 0.0], dtype=np.float32)
+    labels = TransitionLabels(no_effect_nonprogress=1.0)
+    before = model.predict(feature[None, :])
+
+    model.online_update(feature, labels, return_credit=0.9)
+    after = model.predict(feature[None, :])
+
+    assert float(after.value[0]) > float(before.value[0])
+    assert float(after.useful[0]) < float(before.useful[0])
+
+
+def test_blended_success_credit_keeps_long_prefix_nontrivial() -> None:
+    memory = OnlineEpisodicMemory(capacity=400)
+    labels = TransitionLabels(no_effect_nonprogress=1.0)
+    for index in range(301):
+        memory.entries.append(
+            OnlineMemoryEntry(
+                state_key=np.zeros((2,), dtype=np.float32),
+                context_key="context",
+                action=f"a{index}",
+                question=QuestionToken.TEST_ACTION_MEANING,
+                labels=labels,
+                realized_info_gain=0.0,
+                feature=np.asarray([1.0, 0.0], dtype=np.float32),
+                level_epoch=0,
+            )
+        )
+
+    credited = memory.credit_recent_success(level_epoch=0)
+
+    assert len(credited) == 301
+    assert credited[0].return_credit > 0.30
+    assert credited[-1].return_credit == 1.0
+
+
+def test_value_ranking_raises_success_prefix_above_observed_decoy() -> None:
+    model = MinimalOnlineModel(input_dim=4, learning_rate=0.8)
+    positive = np.asarray([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+    negative = np.asarray([0.0, 1.0, 0.0, 0.0], dtype=np.float32)
+    before_gap = model.value_logit(positive) - model.value_logit(negative)
+
+    violation = model.ranking_update_value(positive, negative, margin=0.2, weight=1.0)
+    after_gap = model.value_logit(positive) - model.value_logit(negative)
+
+    assert violation > 0.0
+    assert after_gap > before_gap
+    assert model.online_adapt_updates == 1
+
+
+def test_imitation_update_ranks_demonstrated_feature_without_changing_value_logit() -> None:
+    model = MinimalOnlineModel(input_dim=4, learning_rate=0.8)
+    positive = np.asarray([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+    negatives = np.asarray(
+        [
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+    before_value = model.value_logit(positive)
+    before_imitation_gap = model.imitation_logit(positive) - model.imitation_logit(negatives[0])
+
+    loss = model.imitation_update(positive, negatives, margin=0.2, weight=1.0)
+    after_imitation_gap = model.imitation_logit(positive) - model.imitation_logit(negatives[0])
+
+    assert loss > 0.0
+    assert after_imitation_gap > before_imitation_gap
+    assert model.value_logit(positive) == before_value
+
+
+def test_recurrent_value_ranking_uses_supplied_hidden_snapshots() -> None:
+    model = RecurrentOnlineModel(candidate_input_dim=2, event_input_dim=2, hidden_dim=2, learning_rate=0.8, seed=2)
+    positive = np.asarray([1.0, 0.0], dtype=np.float32)
+    negative = np.asarray([1.0, 0.0], dtype=np.float32)
+    positive_hidden = np.asarray([1.0, 0.0], dtype=np.float32)
+    negative_hidden = np.asarray([0.0, 1.0], dtype=np.float32)
+    before_gap = model.fast_heads.value_logit(model.augment_features(positive, hidden=positive_hidden)) - model.fast_heads.value_logit(
+        model.augment_features(negative, hidden=negative_hidden)
+    )
+
+    violation = model.ranking_update_value(
+        positive,
+        negative,
+        positive_hidden=positive_hidden,
+        negative_hidden=negative_hidden,
+        margin=0.2,
+        weight=1.0,
+    )
+    after_gap = model.fast_heads.value_logit(model.augment_features(positive, hidden=positive_hidden)) - model.fast_heads.value_logit(
+        model.augment_features(negative, hidden=negative_hidden)
+    )
+
+    assert violation > 0.0
+    assert after_gap > before_gap
+
+
+def test_success_credit_ranks_observed_sequence_action_above_no_effect_decoy() -> None:
+    agent = LearnedOnlineRecurrentAgent(seed=21)
+    level_epoch = 0
+    negative_feature = np.zeros((RECURRENT_CANDIDATE_INPUT_DIM,), dtype=np.float32)
+    positive_feature = np.zeros((RECURRENT_CANDIDATE_INPUT_DIM,), dtype=np.float32)
+    reward_feature = np.zeros((RECURRENT_CANDIDATE_INPUT_DIM,), dtype=np.float32)
+    negative_feature[0] = 1.0
+    positive_feature[1] = 1.0
+    reward_feature[2] = 1.0
+    hidden = np.zeros((agent.hidden_dim,), dtype=np.float32)
+    entries = [
+        OnlineMemoryEntry(
+            state_key=np.zeros((2,), dtype=np.float32),
+            context_key="context",
+            action="decoy",
+            question=QuestionToken.TEST_ACTION_MEANING,
+            labels=TransitionLabels(no_effect_nonprogress=1.0),
+            realized_info_gain=0.0,
+            feature=negative_feature,
+            hidden=hidden,
+            level_epoch=level_epoch,
+        ),
+        OnlineMemoryEntry(
+            state_key=np.zeros((2,), dtype=np.float32),
+            context_key="context",
+            action="setup",
+            question=QuestionToken.TEST_ACTION_MEANING,
+            labels=TransitionLabels(action_availability_changed=1.0, mechanic_change=1.0, visible_change=1.0),
+            realized_info_gain=0.0,
+            feature=positive_feature,
+            hidden=hidden,
+            level_epoch=level_epoch,
+        ),
+        OnlineMemoryEntry(
+            state_key=np.zeros((2,), dtype=np.float32),
+            context_key="context",
+            action="goal",
+            question=QuestionToken.TEST_ACTION_MEANING,
+            labels=TransitionLabels(reward_progress=1.0, objective_progress=1.0, visible_change=1.0),
+            realized_info_gain=0.0,
+            feature=reward_feature,
+            hidden=hidden,
+            level_epoch=level_epoch,
+        ),
+    ]
+    agent.memory.entries.extend(entries)
+
+    agent._credit_current_level_success(level_epoch)
+    positive_logit = agent.model.fast_heads.value_logit(agent.model.augment_features(positive_feature, hidden=hidden))
+    negative_logit = agent.model.fast_heads.value_logit(agent.model.augment_features(negative_feature, hidden=hidden))
+
+    assert entries[0].return_credit > 0.0
+    assert entries[1].return_credit > 0.0
+    assert positive_logit > negative_logit
 
 
 def test_probe_loss_uses_memory_hidden_snapshot_not_current_hidden() -> None:

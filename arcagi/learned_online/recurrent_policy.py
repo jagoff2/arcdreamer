@@ -39,6 +39,7 @@ class RecurrentOnlinePolicy:
         belief: OnlineBeliefState,
         memory: OnlineEpisodicMemory,
         beta_info: float = 0.35,
+        beta_imitation: float = 1.25,
         seed: int = 0,
         selection_mode: str = "factorized_softmax",
         family_temperature: float = 0.10,
@@ -49,6 +50,7 @@ class RecurrentOnlinePolicy:
         self.belief = belief
         self.memory = memory
         self.beta_info = float(beta_info)
+        self.beta_imitation = float(beta_imitation)
         self.rng = np.random.default_rng(seed)
         self.selection_mode = str(selection_mode)
         self.family_temperature = float(family_temperature)
@@ -106,14 +108,17 @@ class RecurrentOnlinePolicy:
             for index, action in enumerate(chunk):
                 q_progress = float(pred.value[index]) + float(pred.reward[index]) + (0.5 * float(pred.useful[index]))
                 q_info = float(pred.info_gain[index])
+                q_imitation = float(pred.imitation[index])
                 learned_cost = float(pred.cost[index])
-                score = q_progress + (self.beta_info * q_info) - learned_cost
+                score = q_progress + (self.beta_info * q_info) + (self.beta_imitation * q_imitation) - learned_cost
                 components = {
                     "q_progress": float(q_progress),
                     "q_info": float(q_info),
+                    "q_imitation": float(q_imitation),
                     "pred_reward": float(pred.reward[index]),
                     "pred_useful": float(pred.useful[index]),
                     "pred_value": float(pred.value[index]),
+                    "pred_imitation": float(pred.imitation[index]),
                     "pred_visible": float(pred.visible[index]),
                     "pred_info_gain": float(pred.info_gain[index]),
                     "pred_uncertainty": float(pred.uncertainty[index]),
@@ -250,6 +255,7 @@ def _policy_diagnostics(
         "mean_pred_cost": _component_mean(components, "learned_cost"),
         "mean_q_progress": _component_mean(components, "q_progress"),
         "mean_q_info": _component_mean(components, "q_info"),
+        "mean_q_imitation": _component_mean(components, "q_imitation"),
     }
 
 

@@ -546,6 +546,7 @@ def _compact_diagnostics(diagnostics: Any) -> dict[str, Any]:
         "mean_pred_cost",
         "mean_q_progress",
         "mean_q_info",
+        "mean_q_imitation",
         "level_epoch",
         "level_step",
         "online_adapt_updates",

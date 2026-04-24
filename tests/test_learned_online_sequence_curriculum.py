@@ -5,8 +5,12 @@ from arcagi.learned_online.curriculum import (
     ActionNameRemapHeldoutTask,
     DelayedUnlockTask,
     DenseFamilyMassArbitrationTask,
+    LongDenseDecoyTask,
+    LongPostBoundaryCarryoverTask,
+    LongSparseMixedFamilyChainTask,
     ModeThenDenseClickTask,
     MovementRequiredAfterModeTask,
+    RoleOpaqueRemapTask,
     VisibleMovementTrapTask,
 )
 
@@ -93,3 +97,54 @@ def test_action_name_remap_uses_role_not_literal_action_name() -> None:
 
     assert wrong_result["return"] == 0.0
     assert right_result["return"] == 1.0
+
+
+def test_long_sparse_chain_requires_full_mixed_family_sequence() -> None:
+    env = LongSparseMixedFamilyChainTask(seed=13, chain_length=24, size=6)
+    env.reset(seed=13)
+    sequence = env.expected_action_sequence()
+    wrong = run_episode(ScriptedAgent(["noop"] * len(sequence)), LongSparseMixedFamilyChainTask(seed=13, chain_length=24, size=6), seed=13, max_steps=32)
+    right = run_episode(ScriptedAgent(sequence), LongSparseMixedFamilyChainTask(seed=13, chain_length=24, size=6), seed=13, max_steps=32)
+
+    assert wrong["return"] == 0.0
+    assert right["return"] == 1.0
+
+
+def test_long_dense_decoy_rewards_target_click_chain_not_decoy_flash() -> None:
+    env = LongDenseDecoyTask(seed=14, chain_length=20, size=6)
+    env.reset(seed=14)
+    sequence = env.expected_action_sequence()
+    decoy_y, decoy_x = env.decoy_cells[0][0]
+    decoy = f"click:{decoy_x}:{decoy_y}"
+
+    wrong = run_episode(ScriptedAgent([decoy] * 24), LongDenseDecoyTask(seed=14, chain_length=20, size=6), seed=14, max_steps=28)
+    right = run_episode(ScriptedAgent(sequence), LongDenseDecoyTask(seed=14, chain_length=20, size=6), seed=14, max_steps=28)
+
+    assert wrong["return"] == 0.0
+    assert right["return"] == 1.0
+
+
+def test_role_opaque_remap_has_no_action_role_shortcut() -> None:
+    env = RoleOpaqueRemapTask(seed=15)
+    env.reset(seed=15)
+    correct = env.expert_action()
+    wrong = next(action for action in env.actions() if action != correct)
+
+    wrong_result = run_episode(ScriptedAgent([wrong]), RoleOpaqueRemapTask(seed=15), seed=15, max_steps=2)
+    right_result = run_episode(ScriptedAgent([correct]), RoleOpaqueRemapTask(seed=15), seed=15, max_steps=2)
+
+    assert wrong_result["return"] == 0.0
+    assert right_result["return"] == 1.0
+
+
+def test_post_boundary_carryover_requires_persistent_selector_after_level_transition() -> None:
+    env = LongPostBoundaryCarryoverTask(seed=16, level_count=3, size=6)
+    env.reset(seed=16)
+    sequence = env.expected_action_sequence()
+    wrong = run_episode(ScriptedAgent(["noop"] * len(sequence)), LongPostBoundaryCarryoverTask(seed=16, level_count=3, size=6), seed=16, max_steps=12)
+    right = run_episode(ScriptedAgent(sequence), LongPostBoundaryCarryoverTask(seed=16, level_count=3, size=6), seed=16, max_steps=12)
+
+    assert wrong["return"] == 0.0
+    assert right["return"] == 3.0
+    assert right["levels_completed"] == 3
+    assert right["won"] is True

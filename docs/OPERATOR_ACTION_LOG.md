@@ -794,3 +794,40 @@ Factorized policy and dense-arbitration curriculum:
    - dense-click fixation is fixed;
    - AR25 still fails with all-negative low-progress scoring;
    - next target is value/progress calibration and harder sparse delayed mixed-family curriculum, not action coverage.
+
+## 2026-04-24 19:20 EDT
+
+Learned recurrent ARC recovery regression and GPT-Pro escalation context:
+
+1. Implemented the next recovery batch after factorized-policy diagnostics:
+   - blended long-horizon return credit;
+   - return credit trains `value`, not immediate `useful`;
+   - observed-transition value ranking;
+   - long sparse/carryover synthetic tasks;
+   - trace fine-tuning script for offline ARC experience;
+   - imitation/action-prior head for recurrent policy scoring.
+2. Validation:
+   - focused recurrent/sequence tests: `31 passed in 3.26s`;
+   - broad targeted regression before imitation-head patch: `140 passed in 134.24s`.
+3. Expanded synthetic checkpoint:
+   - `artifacts\learned_online_recurrent_longcredit_1500.pkl`
+   - train success rate `0.832`;
+   - old nine heldout tasks remain near-solved;
+   - post-boundary carryover heldout `19/20`;
+   - arbitrary long sparse chain and dense decoy heldouts `0/20`, so these tasks exposed a long-horizon sequence-learning gap.
+4. AR25 learned-agent diagnostics:
+   - `artifacts\learned_online_recurrent_longcredit_1500.pkl`: failed `AR25` at 320 steps, `return=0.0`, `levels_completed=0`.
+   - old `artifacts\learned_online_recurrent_synth_actionid_12000.pkl` under current clean runtime: failed `AR25` at 320 steps, `return=0.0`, `levels_completed=0`.
+   - greedy and exact-action-projection diagnostic variants also failed.
+5. Trace integrity check:
+   - the original success trace `artifacts\traces\learned_online_recurrent_synth12000_320.jsonl` replays to `return=1.0`, `levels_completed=1` only when the diagnostic replay agent is not reset on in-game reset actions.
+   - This validates the trace/environment but remains invalid as a solver. It is usable only as labeled offline ARC experience.
+6. Offline trace fine-tuning results:
+   - return-credit-only trace fine-tune reached teacher success `12/12` but normal learned-agent eval still failed.
+   - dense all-negative imitation fine-tune produced `artifacts\learned_online_recurrent_longcredit_traceft_imitation_12.pkl` with teacher success `12/12`.
+   - normal learned-agent eval of that checkpoint still failed: `success=false`, `return=0.0`, `levels_completed=0`, final `GameState.GAME_OVER`, full dense scoring `448/448`, family histogram `select=109`, `move=84`, `undo=58`, `click=67`, `reset=2`.
+   - Final diagnostics showed reset over-weighting: family probability for reset near `0.61`; imitation signal remained weak (`mean_q_imitation ~= 0.001`).
+7. Current conclusion:
+   - the earlier level-1 behavior is not recovered by value credit or dense imitation;
+   - the current scalar-head / heuristic-feature recurrent learner is not sufficient to robustly imitate or rediscover the validated trace;
+   - GPT-Pro must review the pushed updated code and advise whether to continue with sampled/hard-negative action-prior recovery or pivot to a larger mechanism-level architecture.

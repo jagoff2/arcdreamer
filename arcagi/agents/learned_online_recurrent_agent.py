@@ -45,8 +45,8 @@ class LearnedOnlineRecurrentAgent(BaseAgent):
         self.last_loss: float = 0.0
         self.last_realized_info_gain: float = 0.0
         self.last_prediction_error: float = 0.0
-        self.credit_gamma: float = 0.985
-        self.credit_horizon: int | None = 512
+        self.credit_horizon: int | None = 768
+        self.ranking_pairs_per_success: int = 32
 
     def reset_episode(self) -> None:
         super().reset_episode()
@@ -199,9 +199,16 @@ class LearnedOnlineRecurrentAgent(BaseAgent):
         }
 
     def _credit_current_level_success(self, level_epoch: int) -> None:
+        observed_negatives = [
+            entry
+            for entry in self.memory.entries
+            if int(entry.level_epoch) == int(level_epoch)
+            and entry.feature is not None
+            and entry.labels.reward_progress <= 0.0
+            and entry.labels.useful_change <= 0.0
+        ]
         credited = self.memory.credit_recent_success(
             level_epoch=level_epoch,
-            gamma=self.credit_gamma,
             max_entries=self.credit_horizon,
         )
         for entry in credited:
@@ -213,6 +220,28 @@ class LearnedOnlineRecurrentAgent(BaseAgent):
                 realized_info_gain=float(entry.realized_info_gain),
                 hidden=entry.hidden,
                 return_credit=float(entry.return_credit),
+            )
+        positives = [
+            entry
+            for entry in credited
+            if entry.feature is not None
+            and float(entry.return_credit) >= 0.20
+            and entry.labels.no_effect_nonprogress <= 0.0
+            and entry.labels.visible_only_nonprogress <= 0.0
+        ]
+        if not positives or not observed_negatives:
+            return
+        pair_count = min(int(self.ranking_pairs_per_success), len(positives))
+        for index in range(pair_count):
+            positive = positives[-1 - index]
+            negative = observed_negatives[index % len(observed_negatives)]
+            if positive is negative or positive.feature is None or negative.feature is None:
+                continue
+            self.model.ranking_update_value(
+                positive.feature,
+                negative.feature,
+                positive_hidden=positive.hidden,
+                negative_hidden=negative.hidden,
             )
 
     def _last_top_scores(self, *, limit: int) -> list[dict[str, object]]:
@@ -235,6 +264,7 @@ class LearnedOnlineRecurrentAgent(BaseAgent):
             "selection_mode": self.policy.selection_mode,
             "family_temperature": float(self.policy.family_temperature),
             "action_temperature": float(self.policy.action_temperature),
+            "beta_imitation": float(self.policy.beta_imitation),
             "action_feature_config": self.policy.action_feature_config.to_dict(),
         }
 
@@ -247,6 +277,7 @@ class LearnedOnlineRecurrentAgent(BaseAgent):
         self.policy.selection_mode = str(state.get("selection_mode", self.policy.selection_mode) or self.policy.selection_mode)
         self.policy.family_temperature = float(state.get("family_temperature", self.policy.family_temperature) or self.policy.family_temperature)
         self.policy.action_temperature = float(state.get("action_temperature", self.policy.action_temperature) or self.policy.action_temperature)
+        self.policy.beta_imitation = float(state.get("beta_imitation", self.policy.beta_imitation) or self.policy.beta_imitation)
         feature_config = state.get("action_feature_config", {})
         if isinstance(feature_config, dict):
             self.policy.action_feature_config = ActionFeatureConfig(
