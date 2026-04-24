@@ -54,7 +54,7 @@ class OptionItem:
         self.uses += 1
         if success:
             self.successes += 1
-        self.support += 1.0 if (effect_value > 0.0 or reward > 0.0) else 0.25
+        self.support += 1.0 if (reward > 0.0 or effect_value >= 0.12) else 0.25
         decay = 1.0 / max(float(self.uses), 1.0)
         self.relative_cost = float(((1.0 - decay) * self.relative_cost) + (decay * relative_cost))
         self.effect_value = float(((1.0 - decay) * self.effect_value) + (decay * effect_value))
@@ -65,7 +65,7 @@ class OptionItem:
 
     @property
     def value(self) -> float:
-        signal = self.effect_value + (0.85 * self.reward) + (0.35 * self.successes) + (0.20 * self.support)
+        signal = self.effect_value + (0.85 * self.reward) + (0.35 * self.successes) + (0.12 * self.support)
         signal -= 0.15 * self.contradiction
         return float(signal / max(self.relative_cost, 1.0))
 
@@ -97,7 +97,7 @@ class EffectSchema:
     def value(self) -> float:
         signal = self.avg_effect_value + (0.85 * self.avg_reward)
         signal += 0.25 * (float(self.successes) / max(float(self.uses), 1.0))
-        signal += 0.15 * self.support
+        signal += 0.10 * self.support
         signal -= 0.12 * self.contradiction
         return float(signal / max(self.avg_relative_cost, 1.0))
 
@@ -123,7 +123,7 @@ class EffectSchema:
         self.uses += 1
         if success:
             self.successes += 1
-        self.support += 1.0 if (effect_value > 0.0 or reward > 0.0) else 0.25
+        self.support += 1.0 if (reward > 0.0 or effect_value >= 0.12) else 0.25
         decay = 1.0 / max(float(self.uses), 1.0)
         self.avg_relative_cost = float(((1.0 - decay) * self.avg_relative_cost) + (decay * relative_cost))
         self.avg_effect_value = float(((1.0 - decay) * self.avg_effect_value) + (decay * effect_value))
@@ -356,7 +356,7 @@ class EpisodicMemory:
                         reward=reward,
                         uses=1,
                         successes=1 if reward > 0.0 else 0,
-                        support=1.0,
+                        support=1.0 if (reward > 0.0 or mechanic_value >= 0.12) else 0.25,
                         contradiction=0.0,
                     )
                 )
@@ -497,13 +497,16 @@ class EpisodicMemory:
         weighted = lambda key, default=0.0: float(
             sum(entry["weight"] * entry[key] for entry in weighted_entries) / max(total_weight, 1e-6)
         )
+        base_bonus = float(max(best["schema_bonus"], 0.0))
+        continuation_depth = weighted("continuation_depth")
+        continuation_bonus = 0.35 * continuation_depth * min(base_bonus, 1.0)
         return {
-            "schema_bonus": float(max(best["schema_bonus"], 0.0) + (0.35 * weighted("continuation_depth"))),
+            "schema_bonus": float(base_bonus + continuation_bonus),
             "relative_cost": weighted("relative_cost", default=1.0),
             "efficiency": weighted("efficiency"),
             "support": weighted("support"),
             "contradiction": weighted("contradiction"),
-            "continuation_depth": weighted("continuation_depth"),
+            "continuation_depth": continuation_depth,
         }
 
     def _update_schema(
@@ -626,6 +629,15 @@ def _mechanic_option_value(record: TransitionRecord, *, effect_tags: frozenset[s
         value += 0.10
     if "effect:numeric_rewrite" in effect_tags:
         value += 0.08
+    structural = bool(
+        record.delta.is_positive
+        or "effect:disappear" in effect_tags
+        or "effect:action_regime_change" in effect_tags
+        or "effect:numeric_increase" in effect_tags
+        or "effect:numeric_rewrite" in effect_tags
+    )
+    if not structural:
+        value = min(value, 0.08)
     return float(min(value, 0.45))
 
 

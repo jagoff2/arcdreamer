@@ -610,20 +610,27 @@ class ActionSpotlight:
             if contradiction:
                 self.active_intention.contradiction += 1.0 + surprise
                 self.contradiction_counts[exact_key] += 1.0 + surprise
-            elif visible_effect or probe_supported or progress > 0.0:
+            elif probe_supported or progress > 0.0 or level_progress > 0:
                 self.active_intention.support += 1.0 + max(0.0, progress)
+            elif visible_effect:
+                self.active_intention.support += 0.20
             self.active_intention.probe_count += 1
 
         if not visible_effect and not binding_action:
             self.no_effect_counts[exact_key] += 1
             self.no_effect_family_counts[abstract_family_key] += 1
 
+        objective_success = bool(progress > 1e-8 or level_progress > 0 or probe_supported)
+        visible_only_failure = 0.0
+        if visible_effect and not objective_success and not contradiction and not binding_action:
+            stall = max(0, self.steps_since_progress - 4)
+            visible_only_failure = min(0.12, 0.015 * float(stall))
         self._observe_action_evidence(
             record.before,
             record.action,
             step=record.before.step_index,
-            success=1.0 if (progress > 1e-8 or level_progress > 0 or probe_supported) else (0.35 if visible_effect and not contradiction else 0.0),
-            failure=1.0 if probe_failed else 0.0,
+            success=1.0 if objective_success else 0.0,
+            failure=(1.0 if probe_failed else 0.0) + visible_only_failure,
             no_effect=1.0 if (not visible_effect and not binding_action and progress <= 1e-8 and not probe_supported) else 0.0,
             contradiction=1.5 if contradiction else 0.0,
         )
@@ -820,7 +827,23 @@ class ActionSpotlight:
                 if self.last_attempt_improvement > self.config.reset_positive_improvement_guard:
                     reset_penalty += 0.35
                 reset_penalty += 0.12 * min(float(self._reset_over_budget()), 8.0)
-        target = float(progress + level_delta + (self.executive.gamma * bootstrap) - pending.habit_baseline - reset_penalty)
+        no_progress_penalty = 0.0
+        if progress <= 1e-8 and level_delta <= 0:
+            bootstrap *= 0.35
+            no_progress_penalty = 0.08
+            if record.delta.has_visible_effect and not _is_binding_action(record.action):
+                no_progress_penalty += 0.20
+            if _family(record.action) == "undo":
+                no_progress_penalty += 0.20
+            no_progress_penalty += 0.01 * min(float(self.steps_since_progress), 50.0)
+        target = float(
+            progress
+            + level_delta
+            + (self.executive.gamma * bootstrap)
+            - pending.habit_baseline
+            - reset_penalty
+            - no_progress_penalty
+        )
         self.last_executive_loss = float(self.executive.update(pending.feature_vector, target))
         self.last_executive_target = float(target)
         self.pending_update = None
@@ -1178,6 +1201,7 @@ class ActionSpotlight:
                 "commitment_bonus": commitment,
                 "penalty": penalty,
             }
+            components["perseveration_penalty"] = self._perseveration_penalty(state, action)
             if self._uses_extended_feature_schema():
                 components.update(
                     {
@@ -1191,7 +1215,6 @@ class ActionSpotlight:
                 )
             components["reliability"] = self._reliability(state, action)
             components["falsification_penalty"] = self._falsification_penalty(state, action)
-            components["evidence_score"] = self._evidence_score(components)
             intent_kind = self._intent_kind(action, components)
             precomputed.append(
                 {
@@ -1207,11 +1230,27 @@ class ActionSpotlight:
         norm = {name: _normalise(values) for name, values in raw.items() if name != "penalty"}
         for item in precomputed:
             action = item["action"]
+            norm_for_action = {name: values.get(action, 0.0) for name, values in norm.items()}
+            components = item["components"]
+            components.update(
+                {
+                    "norm_expected_reward": norm_for_action.get("reward", 0.0),
+                    "norm_information_gain": norm_for_action.get("info", 0.0),
+                    "norm_expected_change": norm_for_action.get("change", 0.0),
+                    "norm_world_uncertainty": norm_for_action.get("uncertainty", 0.0),
+                    "norm_memory_bonus": norm_for_action.get("memory", 0.0),
+                    "norm_coverage": norm_for_action.get("coverage", 0.0),
+                    "norm_binder_bonus": norm_for_action.get("binder", 0.0),
+                    "norm_post_binder_probe_bonus": norm_for_action.get("probe", 0.0),
+                    "norm_reset_bonus": norm_for_action.get("reset", 0.0),
+                }
+            )
+            components["evidence_score"] = self._evidence_score(components)
             feature_map = self._workspace_feature_map(
                 state,
                 action,
-                components=item["components"],
-                norm_components={name: values.get(action, 0.0) for name, values in norm.items()},
+                components=components,
+                norm_components=norm_for_action,
                 intent_kind=item["intent_kind"],
             )
             feature_vector = encode_feature_map(feature_map, feature_dim=self.habit.feature_dim)
@@ -1508,10 +1547,12 @@ class ActionSpotlight:
         target = 0.0
         target += 5.0 * float(level_progress)
         target += 2.0 * max(float(progress), 0.0)
-        target += 0.10 * float(self._micro_attempt_visible_effects)
+        target += 0.02 * float(self._micro_attempt_visible_effects)
         target -= 0.08 * float(self._micro_attempt_no_effects)
         target -= 0.20 * float(self._micro_attempt_contradictions)
-        target -= 0.06 * max(float(self._micro_attempt_max_same_action_streak - 3), 0.0)
+        target -= 0.08 * max(float(self._micro_attempt_max_same_action_streak - 3), 0.0)
+        if level_progress <= 0 and progress <= 1e-8:
+            target -= 0.04 * float(self._micro_attempt_steps)
         target = float(max(-1.0, min(1.0, target)))
         losses: list[float] = []
         for record in self._micro_attempt_actions:
@@ -1671,15 +1712,27 @@ class ActionSpotlight:
         reliability = _safe_float(components.get("reliability", 0.55), default=0.55)
         exploitation_gate = 0.20 + (0.80 * reliability)
         information_gate = max(0.15, reliability)
-        score += self.config.reward_weight * _safe_float(components.get("expected_reward", 0.0))
-        score += self.config.information_weight * information_gate * _safe_float(components.get("information_gain", 0.0))
-        score += self.config.change_weight * exploitation_gate * _safe_float(components.get("expected_change", 0.0))
-        score += self.config.uncertainty_weight * information_gate * _safe_float(components.get("world_uncertainty", 0.0))
-        score += self.config.memory_weight * exploitation_gate * _safe_float(components.get("memory_bonus", 0.0))
-        score += self.config.coverage_weight * _safe_float(components.get("coverage", 0.0))
-        score += self.config.binder_weight * exploitation_gate * _safe_float(components.get("binder_bonus", 0.0))
-        score += self.config.post_binder_probe_weight * information_gate * _safe_float(components.get("post_binder_probe_bonus", 0.0))
-        score += self.config.reset_weight * _safe_float(components.get("reset_bonus", 0.0))
+        score += self.config.reward_weight * max(_safe_float(components.get("expected_reward", 0.0)), 0.0)
+        score += self.config.information_weight * information_gate * _safe_float(
+            components.get("norm_information_gain", components.get("information_gain", 0.0))
+        )
+        score += self.config.change_weight * exploitation_gate * _safe_float(
+            components.get("norm_expected_change", components.get("expected_change", 0.0))
+        )
+        score += self.config.uncertainty_weight * information_gate * _safe_float(
+            components.get("norm_world_uncertainty", components.get("world_uncertainty", 0.0))
+        )
+        score += self.config.memory_weight * exploitation_gate * _safe_float(
+            components.get("norm_memory_bonus", components.get("memory_bonus", 0.0))
+        )
+        score += self.config.coverage_weight * _safe_float(components.get("norm_coverage", components.get("coverage", 0.0)))
+        score += self.config.binder_weight * exploitation_gate * _safe_float(
+            components.get("norm_binder_bonus", components.get("binder_bonus", 0.0))
+        )
+        score += self.config.post_binder_probe_weight * information_gate * _safe_float(
+            components.get("norm_post_binder_probe_bonus", components.get("post_binder_probe_bonus", 0.0))
+        )
+        score += self.config.reset_weight * _safe_float(components.get("norm_reset_bonus", components.get("reset_bonus", 0.0)))
         score += self.config.commitment_bonus * _safe_float(components.get("commitment_bonus", 0.0))
         if self._uses_extended_feature_schema():
             option_value = _safe_float(components.get("option_schema_bonus", 0.0))
@@ -1692,6 +1745,7 @@ class ActionSpotlight:
             score += 0.35 * _safe_float(components.get("family_efficiency", 0.0))
         score -= self.config.risk_weight * _safe_float(components.get("risk", 0.0))
         score -= _safe_float(components.get("penalty", 0.0))
+        score -= _safe_float(components.get("perseveration_penalty", 0.0))
         score -= _safe_float(components.get("falsification_penalty", 0.0))
         return float(score)
 
@@ -1818,17 +1872,7 @@ class ActionSpotlight:
         return max(0, int(self.session_reset_count) - int(self.config.reset_session_budget))
 
     def _allow_nonterminal_reset(self, state: StructuredState) -> bool:
-        if self.pending_binder_probe is not None:
-            return False
-        if self.steps_since_reset < self.config.reset_cooldown_steps:
-            return False
-        if self.steps_since_progress <= self.config.reset_stall_threshold:
-            return False
-        if self.last_attempt_improvement > self.config.reset_positive_improvement_guard:
-            return False
-        if self._reset_over_budget() > 0 and self.last_attempt_improvement >= 0.0:
-            return False
-        return not is_failure_terminal_game_state(observation_game_state(state))
+        return False
 
     def _reset_choice_allowed(self, state: StructuredState, candidate: SpotlightCandidate) -> bool:
         if not is_reset_action(candidate.action):
@@ -1917,6 +1961,53 @@ class ActionSpotlight:
             penalty *= 0.25
         return float(penalty)
 
+    def _perseveration_penalty(self, state: StructuredState, action: ActionName) -> float:
+        if is_reset_action(action):
+            return 0.0
+        action_text = str(action)
+        family = _family(action)
+        recent = list(self.trace)[-16:]
+        if not recent:
+            return 0.0
+
+        exact_streak = 0
+        family_streak = 0
+        for row in reversed(recent):
+            row_action = str(row.get("action", ""))
+            row_family = str(row.get("family", "")).lower()
+            if exact_streak == family_streak and row_action == action_text:
+                exact_streak += 1
+            if row_family == family:
+                family_streak += 1
+            else:
+                break
+
+        window_exact = 0
+        window_family = 0
+        window_nonprogress_family = 0
+        for row in recent[-12:]:
+            row_action = str(row.get("action", ""))
+            row_family = str(row.get("family", "")).lower()
+            if row_action == action_text:
+                window_exact += 1
+            if row_family == family:
+                window_family += 1
+                progress = _safe_float(row.get("progress", 0.0))
+                if progress <= 1e-8:
+                    window_nonprogress_family += 1
+
+        penalty = 0.0
+        penalty += 0.38 * max(0, exact_streak - 2)
+        penalty += 0.18 * max(0, family_streak - 4)
+        penalty += 0.08 * max(0, window_exact - 3)
+        penalty += 0.07 * max(0, window_family - 7)
+        penalty += 0.04 * max(0, window_nonprogress_family - 6)
+        if family == "undo" and self.steps_since_progress > 0:
+            penalty += 0.20 * max(0, window_family - 1)
+        if _is_binding_action(action):
+            penalty *= 0.35
+        return float(min(4.5, max(0.0, penalty)))
+
     def _commitment_bonus(self, action: ActionName, state: StructuredState) -> float:
         intention = self.active_intention
         if intention is None:
@@ -1945,7 +2036,9 @@ class ActionSpotlight:
     def _default_choice(self, state: StructuredState, scored: list[SpotlightCandidate]) -> SpotlightCandidate:
         best_combined = scored[0]
         habit_best = self._habit_best_candidate(scored)
-        if best_combined.action == habit_best.action:
+        if int(getattr(self.habit, "updates", 0)) <= 0:
+            choice = best_combined
+        elif best_combined.action == habit_best.action:
             choice = best_combined
         else:
             score_margin = best_combined.score - habit_best.score

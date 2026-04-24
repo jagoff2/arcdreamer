@@ -665,6 +665,229 @@ def test_micro_attempt_updates_inside_long_nonterminal_episode() -> None:
     assert spotlight._current_attempt_steps == 6
 
 
+def test_visible_motion_without_progress_trains_negative_micro_attempt() -> None:
+    spotlight = ActionSpotlight()
+    spotlight.executive.weights[:] = 0.0
+    spotlight.executive.exploration_bonus = 0.0
+
+    class Planner:
+        @staticmethod
+        def candidate_actions(_state, *, engine, memory=None, language_tokens=()):
+            return ("4",)
+
+    class Engine:
+        @staticmethod
+        def score_action(_state, _action, **_kwargs):
+            return SimpleNamespace(
+                expected_reward=0.0,
+                expected_change=0.0,
+                information_gain=0.0,
+                risk=0.0,
+                rationale=(),
+            )
+
+    class WorldModel:
+        @staticmethod
+        def predict(_state, _action):
+            return SimpleNamespace(reward_mean=0.0, change_mean=0.0, total_uncertainty=0.0)
+
+    class Memory:
+        @staticmethod
+        def action_memory_bonus(_state, _action, _lang_tokens):
+            return 0.0
+
+        @staticmethod
+        def action_option_profile(_state, _action, _lang_tokens):
+            return {}
+
+    class Language:
+        @staticmethod
+        def memory_tokens(_state, _engine):
+            return ()
+
+        @staticmethod
+        def belief_sentences(_engine, *, limit=3):
+            return ()
+
+        @staticmethod
+        def questions(_engine, *, limit=2):
+            return ()
+
+    last_before = None
+    for step in range(6):
+        before_grid = np.array([[1, 0]], dtype=np.int64) if step % 2 == 0 else np.array([[0, 1]], dtype=np.int64)
+        after_grid = np.array([[0, 1]], dtype=np.int64) if step % 2 == 0 else np.array([[1, 0]], dtype=np.int64)
+        before = extract_state(
+            GridFrame("task", "episode", step, before_grid, ("4",), extras={"session_level_index": 0})
+        )
+        after = extract_state(
+            GridFrame("task", "episode", step + 1, after_grid, ("4",), extras={"session_level_index": 0})
+        )
+        decision = spotlight.choose_action(
+            before,
+            planner=Planner(),
+            engine=Engine(),
+            world_model=WorldModel(),
+            memory=Memory(),
+            language=Language(),
+        )
+        spotlight.notify_transition(record=compare_states(before, after, action=decision.action))
+        last_before = before
+
+    diagnostics = spotlight.diagnostics()
+    assert diagnostics["micro_attempt_updates"] >= 1
+    assert diagnostics["last_micro_attempt_target"] < 0.0
+    assert last_before is not None
+    assert spotlight._reliability(last_before, "4") < 0.55
+
+
+def test_repeated_nonprogress_action_is_demoted_without_pruning() -> None:
+    spotlight = ActionSpotlight()
+    spotlight.executive.weights[:] = 0.0
+    spotlight.executive.exploration_bonus = 0.0
+    spotlight.steps_since_progress = 10
+    for step in range(8):
+        spotlight.trace.append(
+            {
+                "step": step,
+                "action": "4",
+                "family": "right",
+                "progress": 0.0,
+                "visible_effect": True,
+            }
+        )
+
+    state = extract_state(GridFrame("task", "episode", 8, np.array([[0, 1], [0, 0]], dtype=np.int64), ("4", "3")))
+
+    class Planner:
+        @staticmethod
+        def candidate_actions(_state, *, engine, memory=None, language_tokens=()):
+            return ("4", "3")
+
+    class Engine:
+        @staticmethod
+        def score_action(_state, _action, **_kwargs):
+            return SimpleNamespace(
+                expected_reward=0.0,
+                expected_change=0.4,
+                information_gain=0.2,
+                risk=0.0,
+                rationale=(),
+            )
+
+    class WorldModel:
+        @staticmethod
+        def predict(_state, _action):
+            return SimpleNamespace(reward_mean=0.0, change_mean=0.0, total_uncertainty=0.0)
+
+    class Memory:
+        @staticmethod
+        def action_memory_bonus(_state, _action, _lang_tokens):
+            return 0.0
+
+        @staticmethod
+        def action_option_profile(_state, _action, _lang_tokens):
+            return {}
+
+    class Language:
+        @staticmethod
+        def memory_tokens(_state, _engine):
+            return ()
+
+        @staticmethod
+        def belief_sentences(_engine, *, limit=3):
+            return ()
+
+        @staticmethod
+        def questions(_engine, *, limit=2):
+            return ()
+
+    candidates = spotlight._candidate_actions(
+        state,
+        planner=Planner(),
+        engine=SimpleNamespace(),
+        memory=None,
+        lang_tokens=(),
+    )
+    decision = spotlight.choose_action(
+        state,
+        planner=Planner(),
+        engine=Engine(),
+        world_model=WorldModel(),
+        memory=Memory(),
+        language=Language(),
+    )
+
+    assert "4" in candidates
+    assert "3" in candidates
+    assert decision.action == "3"
+    assert spotlight._last_scored_candidates["4"].components["perseveration_penalty"] > 0.0
+    assert spotlight._last_scored_candidates["3"].components["perseveration_penalty"] == 0.0
+
+
+def test_untrained_habit_prior_cannot_override_evidence_score() -> None:
+    spotlight = ActionSpotlight()
+    spotlight.executive.weights[:] = 0.0
+    spotlight.executive.exploration_bonus = 0.0
+    state = extract_state(GridFrame("task", "episode", 0, np.array([[0, 1], [0, 0]], dtype=np.int64), ("3", "4")))
+
+    class Planner:
+        @staticmethod
+        def candidate_actions(_state, *, engine, memory=None, language_tokens=()):
+            return ("3", "4")
+
+    class Engine:
+        @staticmethod
+        def score_action(_state, action, **_kwargs):
+            return SimpleNamespace(
+                expected_reward=0.05 if action == "4" else 0.0,
+                expected_change=0.0,
+                information_gain=0.0,
+                risk=0.0,
+                rationale=(),
+            )
+
+    class WorldModel:
+        @staticmethod
+        def predict(_state, _action):
+            return SimpleNamespace(reward_mean=0.0, change_mean=0.0, total_uncertainty=0.0)
+
+    class Memory:
+        @staticmethod
+        def action_memory_bonus(_state, _action, _lang_tokens):
+            return 0.0
+
+        @staticmethod
+        def action_option_profile(_state, _action, _lang_tokens):
+            return {}
+
+    class Language:
+        @staticmethod
+        def memory_tokens(_state, _engine):
+            return ()
+
+        @staticmethod
+        def belief_sentences(_engine, *, limit=3):
+            return ()
+
+        @staticmethod
+        def questions(_engine, *, limit=2):
+            return ()
+
+    decision = spotlight.choose_action(
+        state,
+        planner=Planner(),
+        engine=Engine(),
+        world_model=WorldModel(),
+        memory=Memory(),
+        language=Language(),
+    )
+
+    assert spotlight.diagnostics()["habit_updates"] == 0
+    assert decision.action == "4"
+    assert decision.components["evidence_score"] > spotlight._last_scored_candidates["3"].components["evidence_score"]
+
+
 def test_baseline_movement_after_binder_does_not_count_as_binding_success() -> None:
     spotlight = ActionSpotlight()
 
@@ -710,6 +933,21 @@ def test_reset_guard_schema_makes_nonterminal_reset_more_conservative() -> None:
 
     assert spotlight._reset_bonus(state, "0") == 0.0
     assert spotlight._penalty(state, "0") > 6.0
+
+
+def test_nonterminal_reset_has_no_scripted_stall_bonus() -> None:
+    spotlight = ActionSpotlight()
+    spotlight.feature_schema_version = CURRENT_FEATURE_SCHEMA_VERSION
+    spotlight.steps_since_progress = spotlight.config.reset_stall_threshold + 48
+    spotlight.steps_since_reset = spotlight.config.reset_cooldown_steps + 10
+    spotlight.session_reset_count = 0
+    spotlight.last_attempt_improvement = 0.0
+    state = extract_state(
+        GridFrame("task", "episode", 0, np.array([[0, 1], [0, 0]], dtype=np.int64), ("0", "1"))
+    )
+
+    assert not spotlight._allow_nonterminal_reset(state)
+    assert spotlight._reset_bonus(state, "0") == 0.0
 
 
 def test_reset_ended_attempt_scores_worse_under_reset_guard_schema() -> None:

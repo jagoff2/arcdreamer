@@ -451,9 +451,76 @@ Live ARC training status:
 - The 2-session, 320-step ARC training command is still running in the original Python process started before this patch.
 - Session 1 holdout failed: `success_rate=0.0`, `avg_levels_completed=0.0`, `avg_return=0.0`, `avg_steps=320`.
 - Session 2 holdout failed: `success_rate=0.0`, `avg_levels_completed=0.0`, `avg_return=0.0`, `avg_steps=320`.
-- The final holdout scorecard is currently running.
+- Final holdout failed: `success_rate=0.0`, `avg_levels_completed=0.0`, `avg_return=0.0`, `avg_steps=320`, `dense_action_surface=true`.
 
 Current conclusion:
 
 - The current long run has not achieved ARC success.
 - The new reliability/micro-attempt code has not yet been exercised by an ARC run because the active process predates the patch.
+
+Follow-up preservation action:
+
+- Committed the slice:
+  - `e5c4a9c Add reliability gates and micro-attempt learning`
+- Pushed to `origin/main`.
+
+## 2026-04-24 12:03 EDT
+
+Operator actions:
+
+1. Resumed after context compaction and found the saved terminal session handle was gone, so reconstructed state from the process table and trace files instead of killing any Python process.
+2. Read the clean reliability/micro eval trace:
+   - `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent spotlight --game-id ar25-0c556536 --mode offline --max-steps 80 --progress-every 20 --trace-path artifacts\traces\post_reliability_micro_spotlight_clean_80.jsonl`
+   - Result: `success=false`, `won=false`, `levels_completed=0`, `return=0.0`, `steps=80`, `dense_action_surface=true`.
+   - Action histogram: `click=2`, `move=48`, `select=2`, `undo=28`.
+   - Diagnostics: `micro_attempt_updates=6`, `adaptation_updates=70`, `executive_updates=80`, `binding_failure_total=4`, `no_effect_count_total=1`, `max_same_action_streak=13`.
+
+Current conclusion:
+
+- Reliability and micro-attempt learning are active, but clean ARC success is still zero.
+- The failure mode shifted from sparse interaction and binder failure to overvaluing visible reversible movement and undo as information/progress.
+- Next implementation target is score normalization plus anti-perseveration and objective-progress separation, without pruning legal actions or adding scripted/search control.
+
+## 2026-04-24 12:45 EDT
+
+Operator actions:
+
+1. Implemented score normalization, score-only anti-perseveration, weaker visible-only evidence, negative micro-attempt targets for nonprogress motion, and a guard preventing zero-update habit priors from overriding evidence.
+2. Implemented follow-up reset/option-memory fixes:
+   - Disabled the hand-authored nonterminal reset escape hatch in the ARC-facing spotlight controller.
+   - Kept rewardless salient option memory, but capped reversible visible-motion option value and gated continuation bonus by option value.
+3. Validation:
+   - `python -m pytest tests/test_action_spotlight.py -q`
+   - Result after habit patch: `30 passed in 0.23s`.
+   - `python -m pytest tests/test_action_spotlight.py tests/test_scientist_agent.py -q`
+   - Result after reset/option patch: `53 passed in 4.95s`.
+   - `python -m pytest tests/test_action_spotlight.py tests/test_scientist_agent.py tests/test_scientist_training.py tests/test_arc_adapter_helpers.py tests/test_eval_path_constraints.py tests/test_arc_public_training.py -q`
+   - Result after reset/option patch: `86 passed in 279.99s`.
+4. Ran clean normalized/anti-perseveration eval:
+   - `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent spotlight --game-id ar25-0c556536 --mode offline --max-steps 80 --progress-every 20 --trace-path artifacts\traces\post_norm_antipersev_spotlight_clean_80.jsonl`
+   - Result: `success=false`, `won=false`, `levels_completed=0`, `return=0.0`, `steps=80`.
+   - Action histogram: `click=5`, `move=55`, `select=3`, `undo=17`, `max_same_action_streak=5`, `micro_attempt_updates=2`, `last_micro_attempt_target=-1.0`.
+5. Ran clean habit-gated eval:
+   - `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent spotlight --game-id ar25-0c556536 --mode offline --max-steps 80 --progress-every 20 --trace-path artifacts\traces\post_habit_gate_spotlight_clean_80.jsonl`
+   - Result: `success=false`, `won=false`, `levels_completed=0`, `return=0.0`, `steps=80`.
+   - Action histogram: `click=3`, `move=63`, `select=2`, `undo=11`, `reset=1`, `max_same_action_streak=4`.
+6. Ran clean reset/option-gated eval:
+   - `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent spotlight --game-id ar25-0c556536 --mode offline --max-steps 80 --progress-every 20 --trace-path artifacts\traces\post_option_reset_gate_spotlight_clean_80.jsonl`
+   - Result: `success=false`, `won=false`, `levels_completed=0`, `return=0.0`, `steps=80`.
+   - Action histogram: `click=4`, `move=57`, `select=3`, `undo=16`, `reset=0`, `max_same_action_streak=4`.
+   - Last-decision diagnostics: `memory_bonus=0.0023`, `option_schema_bonus=0.0`, `last_micro_attempt_target=-0.94`.
+
+Current conclusion:
+
+- Clean ARC success is still zero.
+- The fixed regressions are real: repeated-action streaks are down, nonterminal reset is gone, and rewardless option memory no longer dominates scoring.
+- Remaining failure: executive/world-model scoring still assigns positive value to reversible motion and undo hypotheses despite 80 steps with no reward or level progress.
+
+Follow-up preservation action:
+
+- Patched executive TD target to discount bootstrap value and add a learned penalty for no-objective-progress transitions, especially visible-only motion and undo.
+- Validation:
+  - `.venv313\Scripts\python.exe -m py_compile arcagi\scientist\spotlight.py arcagi\scientist\memory.py tests\test_action_spotlight.py tests\test_scientist_agent.py`
+  - Result: passed.
+  - `python -m pytest tests\test_action_spotlight.py tests\test_scientist_agent.py -q`
+  - Result: `53 passed in 5.12s`.

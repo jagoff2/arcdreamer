@@ -150,6 +150,8 @@ def test_episodic_memory_records_option_for_salient_effect_without_reward() -> N
 
     assert len(memory.options) == 1
     assert memory.options[0].effect_value > 0.0
+    assert memory.options[0].effect_value <= 0.08
+    assert memory.options[0].support <= 0.25
     assert memory.schemas
 
 
@@ -227,6 +229,7 @@ def test_episodic_memory_option_profile_supports_sequence_continuation() -> None
 
     profile = memory.action_option_profile(before, "right", ("effect:large_motion",))
     assert profile["schema_bonus"] > 0.0
+    assert profile["schema_bonus"] < 0.25
     assert profile["continuation_depth"] > 0.0
     assert profile["relative_cost"] < memory.options[0].relative_cost
 
