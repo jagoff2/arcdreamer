@@ -28,7 +28,7 @@ class BeliefStats:
         self.useful_sum += float(labels.useful_change)
         self.reward_sum += float(labels.reward_progress)
         self.info_sum += float(max(realized_info_gain, 0.0))
-        self.cost_sum += float(max(labels.visible_only_nonprogress, labels.harm))
+        self.cost_sum += float(max(labels.visible_only_nonprogress, labels.no_effect_nonprogress, labels.harm))
 
     def features(self) -> list[float]:
         denom = max(float(self.trials), 1.0)
@@ -63,12 +63,19 @@ class OnlineBeliefState:
         self.recent_objective_rate = 0.0
 
     def features_for(self, state: StructuredState, action: ActionName) -> np.ndarray:
+        context = build_action_schema_context(state.affordances, dict(state.action_roles))
+        schema = build_action_schema(str(action), context)
         family_key = self.family_key(state, action)
         context_key = action_context_key(state, action)
+        family_stats = self.family_stats.get(family_key, BeliefStats())
+        context_stats = self.context_stats.get(context_key, BeliefStats())
+        exact_stats = self.exact_stats.get(str(action), BeliefStats())
+        if schema.click is not None:
+            exact_stats = context_stats if context_stats.trials > 0 else family_stats
         values: list[float] = []
-        values.extend(self.family_stats.get(family_key, BeliefStats()).features())
-        values.extend(self.exact_stats.get(str(action), BeliefStats()).features())
-        values.extend(self.context_stats.get(context_key, BeliefStats()).features())
+        values.extend(family_stats.features())
+        values.extend(exact_stats.features())
+        values.extend(context_stats.features())
         values.extend(
             [
                 math.tanh(float(self.online_update_count) / 32.0),
@@ -112,9 +119,13 @@ class OnlineBeliefState:
         return f"{schema.action_type}:{schema.direction or 'none'}"
 
     def uncertainty_for(self, state: StructuredState, action: ActionName) -> float:
+        schema_context = build_action_schema_context(state.affordances, dict(state.action_roles))
+        schema = build_action_schema(str(action), schema_context)
         family = self.family_stats.get(self.family_key(state, action), BeliefStats())
-        exact = self.exact_stats.get(str(action), BeliefStats())
         context = self.context_stats.get(action_context_key(state, action), BeliefStats())
+        exact = self.exact_stats.get(str(action), BeliefStats())
+        if schema.click is not None:
+            exact = context if context.trials > 0 else family
         return float(np.mean([family.features()[-1], exact.features()[-1], context.features()[-1]]))
 
     def summary(self) -> dict[str, float | int]:

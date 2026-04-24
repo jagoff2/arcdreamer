@@ -11,6 +11,12 @@ def test_agent_less_sweep_like_than_row_major_baseline_on_null_task() -> None:
     assert _monotone_sweep_score(agent_coords) < _monotone_sweep_score(sweep_coords)
 
 
+def test_null_dense_task_does_not_keep_covering_unique_clicks_after_family_failure() -> None:
+    coords = _rollout_click_coords(LearnedOnlineMinimalAgent(seed=19), NullDenseClickTask(width=10, height=10), steps=60)
+
+    assert len(set(coords)) < 45
+
+
 def _rollout_click_coords(agent, env: NullDenseClickTask, *, steps: int) -> list[tuple[int, int]]:
     observation = env.reset(seed=0)
     reset = getattr(agent, "reset_episode", None)

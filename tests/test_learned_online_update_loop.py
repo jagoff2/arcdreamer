@@ -34,6 +34,60 @@ def test_same_state_scores_change_after_contradictory_evidence() -> None:
     assert abs(rescored["trap"].components["pred_visible"] - trap_before) > 1e-4
 
 
+def test_no_effect_nonprogress_raises_learned_cost() -> None:
+    agent = LearnedOnlineMinimalAgent(seed=6)
+    observation = GridObservation("noop", "0", 0, np.zeros((2, 2), dtype=np.int64), ("noop", "other"))
+    state = agent.observe(observation)
+    before = agent.score_actions_for_state(state, ("noop", "other"))
+    cost_before = before["noop"].components["learned_cost"]
+
+    agent.last_state = state
+    agent.last_action = "noop"
+    agent.last_question = before["noop"].question
+    agent.update_after_step(observation, reward=0.0, terminated=False, info={})
+    state_again = agent.observe(observation)
+    after = agent.score_actions_for_state(state_again, ("noop", "other"))
+
+    assert after["noop"].components["learned_cost"] > cost_before
+
+
+def test_same_sample_fit_does_not_create_positive_ig_without_probe_batch() -> None:
+    agent = LearnedOnlineMinimalAgent(seed=7)
+    observation = GridObservation("ig", "0", 0, np.zeros((2, 2), dtype=np.int64), ("a", "b"))
+    state = agent.observe(observation)
+    before = agent.score_actions_for_state(state, ("a", "b"))
+
+    agent.last_state = state
+    agent.last_action = "a"
+    agent.last_question = before["a"].question
+    agent.update_after_step(observation, reward=0.0, terminated=False, info={})
+
+    assert agent.diagnostics()["last_realized_info_gain"] == 0.0
+
+
+def test_info_gain_positive_only_when_probe_loss_decreases() -> None:
+    agent = LearnedOnlineMinimalAgent(seed=8)
+    observation = GridObservation("ig_probe", "0", 0, np.zeros((2, 2), dtype=np.int64), ("a", "b"))
+    state = agent.observe(observation)
+    scored = agent.score_actions_for_state(state, ("a", "b"))
+    feature = agent.policy.feature_for_action(state, "a", question=scored["a"].question)
+
+    agent.last_state = state
+    agent.last_action = "b"
+    agent.last_question = scored["b"].question
+    reward_after = GridObservation("ig_probe", "0", 1, np.ones((2, 2), dtype=np.int64), ("a", "b"))
+    agent.update_after_step(reward_after, reward=1.0, terminated=False, info={})
+    agent.memory.entries[-1].feature = feature.copy()
+    agent.memory.entries[-1].action = "probe"
+
+    agent.last_state = state
+    agent.last_action = "a"
+    agent.last_question = scored["a"].question
+    agent.update_after_step(reward_after, reward=1.0, terminated=False, info={})
+
+    assert agent.diagnostics()["last_realized_info_gain"] > 0.0
+
+
 def test_online_agent_beats_frozen_on_visible_useful_trap_sanity() -> None:
     class FrozenTrapAgent:
         name = "frozen_trap"

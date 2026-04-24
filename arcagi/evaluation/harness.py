@@ -30,6 +30,8 @@ def build_agent(agent_name: str, checkpoint_path: str | None = None, device: Any
     if normalized in {"learned_online_minimal", "learned_online", "online_minimal"}:
         from arcagi.agents.learned_online_minimal_agent import LearnedOnlineMinimalAgent
 
+        if checkpoint_path and Path(checkpoint_path).exists():
+            return LearnedOnlineMinimalAgent.from_checkpoint(checkpoint_path)
         return LearnedOnlineMinimalAgent()
     if normalized in {"scientist", "hyper_scientist", "hyper-generalizing-scientist", "spotlight", "spotlight_scientist"}:
         from arcagi.agents.scientist_agent import (
@@ -177,12 +179,20 @@ def _agent_claim_metadata(agent: Any) -> dict[str, Any]:
     controller_kind = getattr(agent, "controller_kind", diagnostics.get("controller_kind", type(agent).__name__))
     claim_eligible = getattr(agent, "claim_eligible_arc_controller", diagnostics.get("claim_eligible", False))
     learned_online = getattr(agent, "learned_online_controller", diagnostics.get("learned_online_controller", False))
+    arc_competence_validated = getattr(
+        agent,
+        "arc_competence_validated",
+        diagnostics.get("arc_competence_validated", False),
+    )
+    role = getattr(agent, "role", diagnostics.get("role", ""))
     scored_action_count = diagnostics.get("scored_action_count", diagnostics.get("last_scored_action_count", 0))
     legal_action_count = diagnostics.get("legal_action_count", diagnostics.get("last_legal_action_count", 0))
     return {
         "controller_kind": str(controller_kind),
         "claim_eligible": bool(claim_eligible),
         "learned_online_controller": bool(learned_online),
+        "arc_competence_validated": bool(arc_competence_validated),
+        "controller_role": str(role),
         "scored_action_count": int(scored_action_count or 0),
         "legal_action_count": int(legal_action_count or 0),
     }
@@ -501,6 +511,8 @@ def _compact_diagnostics(diagnostics: Any) -> dict[str, Any]:
         "controller_kind",
         "claim_eligible",
         "learned_online_controller",
+        "arc_competence_validated",
+        "role",
         "scored_action_count",
         "legal_action_count",
         "last_scored_action_count",

@@ -21,6 +21,7 @@ class OnlineMemoryEntry:
     question: QuestionToken
     labels: TransitionLabels
     realized_info_gain: float
+    feature: np.ndarray | None = None
 
 
 class OnlineEpisodicMemory:
@@ -39,6 +40,7 @@ class OnlineEpisodicMemory:
         question: QuestionToken,
         labels: TransitionLabels,
         realized_info_gain: float,
+        feature: np.ndarray | None = None,
     ) -> None:
         self.entries.append(
             OnlineMemoryEntry(
@@ -48,6 +50,7 @@ class OnlineEpisodicMemory:
                 question=question,
                 labels=labels,
                 realized_info_gain=float(realized_info_gain),
+                feature=None if feature is None else np.asarray(feature, dtype=np.float32).copy(),
             )
         )
         if len(self.entries) > self.capacity:
@@ -74,7 +77,8 @@ class OnlineEpisodicMemory:
                 math.tanh(float(len(selected)) / float(top_k)),
                 sum(entry.labels.useful_change for entry in selected) / denom,
                 sum(entry.labels.visible_change for entry in selected) / denom,
-                sum(entry.labels.visible_only_nonprogress for entry in selected) / denom,
+                sum(max(entry.labels.visible_only_nonprogress, entry.labels.no_effect_nonprogress) for entry in selected)
+                / denom,
                 sum(entry.labels.reward_progress for entry in selected) / denom,
                 sum(max(entry.realized_info_gain, 0.0) for entry in selected) / denom,
             ],
@@ -83,6 +87,21 @@ class OnlineEpisodicMemory:
 
     def summary(self) -> dict[str, int]:
         return {"entries": int(len(self.entries))}
+
+    def sample_probe_batch(
+        self,
+        *,
+        k: int = 8,
+        exclude_action: ActionName | None = None,
+    ) -> list[OnlineMemoryEntry]:
+        candidates = [
+            entry
+            for entry in self.entries
+            if entry.feature is not None and (exclude_action is None or entry.action != str(exclude_action))
+        ]
+        if not candidates:
+            return []
+        return candidates[-max(int(k), 1) :]
 
 
 def _state_key(state: StructuredState) -> np.ndarray:

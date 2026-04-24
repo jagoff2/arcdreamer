@@ -573,3 +573,48 @@ Validation:
 - Combined targeted regression:
   - `python -m pytest tests\test_learned_online_claim_boundary.py tests\test_learned_online_dense_surface.py tests\test_learned_online_update_loop.py tests\test_learned_online_no_sweep.py tests\test_learned_online_synthetic_gates.py tests\test_learned_online_ablation_gates.py tests\test_action_spotlight.py tests\test_scientist_agent.py tests\test_scientist_training.py tests\test_arc_adapter_helpers.py tests\test_eval_path_constraints.py tests\test_arc_public_training.py -q`
   - Result: `104 passed in 123.95s`.
+
+## 2026-04-24 14:18 EDT
+
+Operator actions:
+
+1. Ran clean `learned_online_minimal` ARC smoke through `.venv313` because system Python lacks the ARC toolkit:
+   - `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent learned_online_minimal --game-id ar25-0c556536 --mode offline --max-steps 80 --progress-every 20 --trace-path artifacts\traces\learned_online_minimal_clean_80.jsonl`
+   - Result: `success=false`, `return=0.0`, `levels_completed=0`, `select=64`, `max_same_action_streak=63`.
+2. Added a generic no-effect nonprogress cost label and reran:
+   - Trace: `artifacts\traces\learned_online_minimal_noeffect_cost_80.jsonl`
+   - Result: `success=false`, `return=0.0`, `levels_completed=0`, `click=39`, `select=35`, `max_same_action_streak=34`.
+3. Strengthened generic learned cost priors and trained a synthetic outcome checkpoint:
+   - `python -m scripts.train_learned_online_minimal --output artifacts\learned_online_minimal_synth_2000.pkl --episodes 2000 --max-steps 12 --seed 41`
+   - Result: synthetic `success_rate=0.76`, `model_updates=22546`.
+4. ARC with that checkpoint still failed:
+   - Trace: `artifacts\traces\learned_online_minimal_synth2000_80.jsonl`
+   - Result: `success=false`, `return=0.0`, `levels_completed=0`, `click=74`, `max_same_action_streak=1`.
+5. Added parametric-click family/context evidence inheritance and null dense coverage tests to avoid every dense click coordinate getting a clean exact-action slate.
+6. ARC with the synthetic checkpoint after parametric inheritance still failed:
+   - Trace: `artifacts\traces\learned_online_minimal_param_belief_80.jsonl`
+   - Result: `success=false`, `return=0.0`, `levels_completed=0`, `move=73`, `click=5`, `max_same_action_streak=21`.
+7. Asked GPT-Pro for a focused stop-condition review. GPT-Pro agreed:
+   - `learned_online_minimal` is valid infrastructure and falsification scaffold.
+   - It is not validated ARC competence.
+   - Stop ARC tuning on the shallow scorer.
+   - Next path is a clean recurrent latent-state learned online agent with stronger synthetic sequence gates.
+8. Implemented the immediate non-ARC-tuning fixes:
+   - Marked `learned_online_minimal` as `role="falsification_gate_scaffold"` and `arc_competence_validated=False`.
+   - Fixed information-gain targets to use replay/probe memory loss reduction instead of same-sample fitting.
+   - Removed raw uncertainty from direct policy value; uncertainty remains diagnostic/question/exploration state only.
+
+Validation:
+
+- Learned-online focused tests:
+  - `python -m pytest tests\test_learned_online_claim_boundary.py tests\test_learned_online_dense_surface.py tests\test_learned_online_update_loop.py tests\test_learned_online_no_sweep.py tests\test_learned_online_synthetic_gates.py tests\test_learned_online_ablation_gates.py tests\test_eval_path_constraints.py -q`
+  - Result: `25 passed in 9.09s`.
+- Combined targeted regression:
+  - `python -m pytest tests\test_learned_online_claim_boundary.py tests\test_learned_online_dense_surface.py tests\test_learned_online_update_loop.py tests\test_learned_online_no_sweep.py tests\test_learned_online_synthetic_gates.py tests\test_learned_online_ablation_gates.py tests\test_action_spotlight.py tests\test_scientist_agent.py tests\test_scientist_training.py tests\test_arc_adapter_helpers.py tests\test_eval_path_constraints.py tests\test_arc_public_training.py -q`
+  - Result: `110 passed in 127.47s`.
+
+Current conclusion:
+
+- No ARC success yet.
+- The clean minimal path is preserved as scaffolding and gates, not as competence.
+- Further ARC runs before recurrent synthetic gates would be misleading and would invite forbidden family/cost tuning.

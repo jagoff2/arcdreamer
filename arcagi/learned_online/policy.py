@@ -89,7 +89,7 @@ class LearnedOnlinePolicy:
             total_scored += len(chunk)
             for index, action in enumerate(chunk):
                 q_progress = float(pred.reward[index]) + float(pred.useful[index])
-                q_info = float(pred.info_gain[index]) + 0.15 * float(pred.uncertainty[index])
+                q_info = float(pred.info_gain[index])
                 learned_cost = float(pred.cost[index])
                 score = q_progress + (self.beta_info * q_info) - learned_cost
                 components = {

@@ -17,6 +17,7 @@ class TransitionLabels:
     action_availability_changed: float = 0.0
     appeared_or_disappeared: float = 0.0
     mechanic_change: float = 0.0
+    no_effect_nonprogress: float = 0.0
     visible_only_nonprogress: float = 0.0
     harm: float = 0.0
 
@@ -43,6 +44,7 @@ def labels_from_transition(transition: Transition) -> TransitionLabels:
     appeared_or_disappeared = 1.0 if len(before.objects) != len(after.objects) else 0.0
     mechanic_change = 1.0 if action_availability_changed or appeared_or_disappeared else 0.0
     visible_only_nonprogress = 1.0 if visible_change and not objective_progress and not mechanic_change else 0.0
+    no_effect_nonprogress = 1.0 if not visible_change and not objective_progress and not mechanic_change else 0.0
     harm = 1.0 if reward < 0.0 or _terminal_failure(after, info) else 0.0
     return TransitionLabels(
         visible_change=float(visible_change),
@@ -52,6 +54,7 @@ def labels_from_transition(transition: Transition) -> TransitionLabels:
         action_availability_changed=float(action_availability_changed),
         appeared_or_disappeared=float(appeared_or_disappeared),
         mechanic_change=float(mechanic_change),
+        no_effect_nonprogress=float(no_effect_nonprogress),
         visible_only_nonprogress=float(visible_only_nonprogress),
         harm=float(harm),
     )

@@ -113,3 +113,24 @@ def test_clean_learned_agent_source_has_no_spotlight_controller_dependency() -> 
     )
     for token in forbidden:
         assert token not in source
+
+
+def test_learned_online_minimal_checkpoint_roundtrip(tmp_path) -> None:
+    agent = build_agent("learned_online_minimal")
+    agent.model.biases["reward"] = 0.25
+    path = tmp_path / "learned_online.pkl"
+    agent.save_checkpoint(path)
+
+    restored = build_agent("learned_online_minimal", checkpoint_path=str(path))
+
+    assert restored.model.biases["reward"] == 0.25
+    assert restored.controller_kind == "learned_online_minimal"
+
+
+def test_learned_online_minimal_is_scaffold_not_validated_arc_competence() -> None:
+    agent = build_agent("learned_online_minimal")
+
+    assert agent.claim_eligible_arc_controller is True
+    assert agent.arc_competence_validated is False
+    assert agent.role == "falsification_gate_scaffold"
+    assert agent.diagnostics()["arc_competence_validated"] is False

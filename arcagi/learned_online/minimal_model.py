@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Sequence
 
 import numpy as np
 
@@ -65,6 +66,25 @@ class MinimalOnlineModel:
             loss += (value - float(target)) ** 2
         return float(loss / max(float(len(targets)), 1.0))
 
+    def batch_prediction_loss(self, entries: Sequence[object]) -> float:
+        losses: list[float] = []
+        for entry in entries:
+            feature = getattr(entry, "feature", None)
+            labels = getattr(entry, "labels", None)
+            if feature is None or labels is None:
+                continue
+            realized_info_gain = float(getattr(entry, "realized_info_gain", 0.0) or 0.0)
+            losses.append(
+                self.prediction_loss(
+                    np.asarray(feature, dtype=np.float32),
+                    labels,
+                    realized_info_gain=realized_info_gain,
+                )
+            )
+        if not losses:
+            return 0.0
+        return float(np.mean(losses))
+
     def online_update(
         self,
         feature: np.ndarray,
@@ -95,6 +115,19 @@ class MinimalOnlineModel:
             "updates": int(self.updates),
         }
 
+    def load_state_dict(self, state: dict[str, object]) -> None:
+        weights = state.get("weights", {})
+        if isinstance(weights, dict):
+            for key in _HEADS:
+                if key in weights:
+                    self.weights[key] = np.asarray(weights[key], dtype=np.float32).copy()
+        biases = state.get("biases", {})
+        if isinstance(biases, dict):
+            for key in _HEADS:
+                if key in biases:
+                    self.biases[key] = float(biases[key])
+        self.updates = int(state.get("updates", self.updates) or 0)
+
     def _initialize_generic_belief_priors(self) -> None:
         if self.input_dim < ACTION_FEATURE_DIM + BELIEF_FEATURE_DIM + MEMORY_FEATURE_DIM:
             return
@@ -103,13 +136,13 @@ class MinimalOnlineModel:
         family = belief
         exact = belief + 7
         context = belief + 14
-        for offset, scale in ((family, 0.35), (exact, 0.95), (context, 0.70)):
-            self.weights["visible"][offset + 1] += scale
-            self.weights["useful"][offset + 2] += scale
-            self.weights["reward"][offset + 3] += scale
-            self.weights["info_gain"][offset + 4] += 0.45 * scale
-            self.weights["cost"][offset + 5] += scale
-            self.weights["info_gain"][offset + 6] += 0.30 * scale
+        for offset, value_scale, cost_scale in ((family, 0.30, 0.85), (exact, 0.85, 2.10), (context, 0.60, 1.65)):
+            self.weights["visible"][offset + 1] += value_scale
+            self.weights["useful"][offset + 2] += value_scale
+            self.weights["reward"][offset + 3] += value_scale
+            self.weights["info_gain"][offset + 4] += 0.40 * value_scale
+            self.weights["cost"][offset + 5] += cost_scale
+            self.weights["info_gain"][offset + 6] += 0.25 * value_scale
         self.weights["useful"][memory + 1] += 0.55
         self.weights["visible"][memory + 2] += 0.35
         self.weights["cost"][memory + 3] += 0.55
@@ -126,7 +159,7 @@ def _targets(labels: TransitionLabels, *, realized_info_gain: float) -> dict[str
         "useful": float(labels.useful_change),
         "visible": float(labels.visible_change),
         "info_gain": float(max(0.0, min(1.0, realized_info_gain))),
-        "cost": float(max(labels.visible_only_nonprogress, labels.harm)),
+        "cost": float(max(labels.visible_only_nonprogress, labels.no_effect_nonprogress, labels.harm)),
     }
 
 
