@@ -278,3 +278,34 @@ Known code/documentation changes in this slice:
 Next action should not begin until the user resumes:
 
 - If resumed, continue by logging every operator action here before moving to the next execution slice.
+
+## 2026-04-24 09:35 EDT
+
+Operator actions:
+
+1. Resumed after user instructed that GPT-Pro's response should be used for immediate implementation, not repeated back as prose.
+2. Applied GPT-Pro's highest-priority repo-review fixes:
+   - Added `ScientistAgent.handles_level_boundaries = True`.
+   - Changed `arcagi.evaluation.harness.run_episode` so the harness does not call a second level reset when an agent declares it handles level boundaries internally.
+   - Changed `ActionSpotlight.reset_level()` to preserve online session evidence across ARC level transitions while still clearing transient current-attempt state.
+   - Changed `ScientistPlanner.candidate_actions()` and `ActionSpotlight._candidate_actions()` so `max_candidates` cannot truncate the legal ARC action surface.
+3. Added regression tests:
+   - `test_spotlight_reset_level_preserves_online_session_evidence`
+   - `test_spotlight_candidate_surface_includes_legal_actions_when_planner_drops_them`
+   - `test_spotlight_max_candidates_never_truncates_legal_surface`
+   - `test_harness_does_not_double_reset_agent_that_handles_level_boundaries`
+
+Validation:
+
+- Compile check:
+  - `.venv313\Scripts\python.exe -m py_compile arcagi\scientist\agent.py arcagi\evaluation\harness.py arcagi\scientist\spotlight.py arcagi\scientist\planner.py tests\test_action_spotlight.py tests\test_scientist_agent.py`
+  - Result: passed.
+- Targeted tests:
+  - `python -m pytest tests/test_action_spotlight.py tests/test_scientist_agent.py tests/test_arc_adapter_helpers.py tests/test_eval_path_constraints.py -q`
+  - Result: `59 passed in 6.02s`.
+
+Current conclusion:
+
+- The known double-reset state wipe at ARC level boundaries is fixed and guarded.
+- The known legal-action candidate truncation path is fixed and guarded.
+- This is not an ARC success claim. It removes two blockers that could invalidate online learning and dense action training.

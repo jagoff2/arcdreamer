@@ -100,6 +100,8 @@ def normalize_scientist_agent_config(
 
 
 class ScientistAgent:
+    handles_level_boundaries = True
+
     def __init__(self, config: ScientistAgentConfig | None = None) -> None:
         self.config = normalize_scientist_agent_config(config)
         self.engine = HypothesisEngine(max_hypotheses=self.config.max_hypotheses)

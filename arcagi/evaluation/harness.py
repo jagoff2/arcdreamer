@@ -100,6 +100,10 @@ def _reset_agent_for_level(agent: Any) -> None:
     _reset_agent_for_episode(agent)
 
 
+def _agent_handles_level_boundaries(agent: Any) -> bool:
+    return bool(getattr(agent, "handles_level_boundaries", False))
+
+
 def _reset_agent_for_family(agent: Any) -> None:
     reset_all = getattr(agent, "reset_all", None)
     if callable(reset_all):
@@ -227,7 +231,7 @@ def run_episode(
             levels_completed = max(levels_completed, after_levels)
             won = won or _is_win_state(observation)
             level_boundary = bool(reset_action or after_levels > before_levels)
-            if level_boundary and not won:
+            if level_boundary and not won and not _agent_handles_level_boundaries(agent):
                 _reset_agent_for_level(agent)
             if result.reward > 0.9:
                 success = True

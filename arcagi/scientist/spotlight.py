@@ -354,25 +354,7 @@ class ActionSpotlight:
         self.pending_teacher_binding = None
         self.pending_update = None
         self._last_scored_candidates.clear()
-        self.state_action_visits.clear()
-        self.abstract_action_visits.clear()
-        self.global_action_visits.clear()
-        self.no_effect_counts.clear()
-        self.no_effect_family_counts.clear()
-        self.contradiction_counts.clear()
-        self.binding_success.clear()
-        self.binding_failure.clear()
-        self.probe_baseline_trials.clear()
-        self.probe_baseline_effect_sum.clear()
         self.steps_since_progress = 0
-        self.last_surprise = 0.0
-        self.last_executive_target = 0.0
-        self.last_executive_loss = 0.0
-        self.last_habit_loss = 0.0
-        self.last_adaptation_loss = 0.0
-        self.last_attempt_improvement = 0.0
-        self.last_teacher_action = ""
-        self.last_move37_event = None
         self._current_attempt_actions.clear()
         self._current_attempt_level_key = None
         self._current_attempt_reward = 0.0
@@ -872,6 +854,7 @@ class ActionSpotlight:
         memory: Any | None = None,
         lang_tokens: tuple[str, ...] = (),
     ) -> tuple[ActionName, ...]:
+        legal = tuple(dict.fromkeys(getattr(state, "available_actions", ()) or ()))
         candidates: Iterable[ActionName]
         if hasattr(planner, "candidate_actions"):
             if self._uses_extended_feature_schema():
@@ -882,11 +865,16 @@ class ActionSpotlight:
             else:
                 candidates = planner.candidate_actions(state, engine=engine)
         else:
-            candidates = tuple(getattr(state, "available_actions", ()) or ())
-        deduped = tuple(dict.fromkeys(candidates))
+            candidates = legal
+        deduped = tuple(dict.fromkeys((*legal, *tuple(candidates))))
+        missing = [action for action in legal if action not in deduped]
+        if missing:
+            raise RuntimeError(f"candidate surface lost legal actions: {missing[:8]}")
         max_candidates = int(self.config.max_candidates)
         if max_candidates > 0:
-            return deduped[:max_candidates]
+            legal_set = set(legal)
+            extras = [action for action in deduped if action not in legal_set]
+            return (*legal, *extras[: max(0, max_candidates - len(legal))])
         return deduped
 
     def _score_candidates(

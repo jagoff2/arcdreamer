@@ -302,7 +302,9 @@ class ScientistPlanner:
         deduped = tuple(dict.fromkeys(candidates))
         max_candidates = int(self.config.max_candidates)
         if max_candidates > 0:
-            return deduped[:max_candidates]
+            legal_set = set(legal)
+            extras = [action for action in deduped if action not in legal_set]
+            return (*legal, *extras[: max(0, max_candidates - len(legal))])
         return deduped
 
 

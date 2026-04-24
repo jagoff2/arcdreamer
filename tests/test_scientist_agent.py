@@ -623,3 +623,63 @@ def test_harness_run_episode_continues_after_terminal_until_reset_and_win() -> N
     assert result["success"] is True
     assert agent.reset_calls == 1
     assert agent.level_reset_calls == 1
+
+
+def test_harness_does_not_double_reset_agent_that_handles_level_boundaries() -> None:
+    class ScriptedAgent:
+        handles_level_boundaries = True
+
+        def __init__(self) -> None:
+            self.reset_calls = 0
+            self.level_reset_calls = 0
+            self.latest_language: tuple[str, ...] = ()
+
+        def reset_episode(self) -> None:
+            self.reset_calls += 1
+
+        def reset_level(self) -> None:
+            self.level_reset_calls += 1
+
+        def act(self, observation):
+            return "1"
+
+        def update_after_step(self, *, next_observation, reward=0.0, terminated=False, info=None):
+            self.reset_level()
+
+        def diagnostics(self):
+            return {"ok": True}
+
+    class ScriptedEnv:
+        family_id = "arc/test"
+
+        def reset(self, seed=None):
+            return self._obs(levels_completed=0)
+
+        def step(self, action):
+            assert action == "1"
+            return SimpleNamespace(
+                observation=self._obs(levels_completed=1),
+                reward=0.0,
+                terminated=False,
+                truncated=False,
+                info={},
+            )
+
+        @staticmethod
+        def _obs(*, levels_completed: int):
+            return SimpleNamespace(
+                available_actions=("1",),
+                extras={
+                    "game_state": "GameState.NOT_FINISHED",
+                    "levels_completed": levels_completed,
+                    "action_roles": {"1": "select_cycle"},
+                },
+            )
+
+    agent = ScriptedAgent()
+    result = run_harness_episode(agent, ScriptedEnv(), seed=0, max_steps=1)
+
+    assert result["steps"] == 1
+    assert result["levels_completed"] == 1
+    assert agent.reset_calls == 1
+    assert agent.level_reset_calls == 1

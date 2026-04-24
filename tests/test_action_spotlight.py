@@ -288,6 +288,87 @@ def test_spotlight_persists_family_binding_priors_across_episode_reset() -> None
     assert diagnostics["prior_binding_success_total"] >= 1
 
 
+def test_spotlight_reset_level_preserves_online_session_evidence() -> None:
+    spotlight = ActionSpotlight()
+    spotlight.state_action_visits[("state-a", "click:1:1")] = 2
+    spotlight.abstract_action_visits[("abstract-a", "click")] = 3
+    spotlight.global_action_visits["click:1:1"] = 4
+    spotlight.no_effect_counts[("state-a", "click:1:1")] = 5
+    spotlight.no_effect_family_counts[("state-a", "click")] = 6
+    spotlight.contradiction_counts[("state-a", "click:1:1")] = 0.75
+    spotlight.binding_success[("click", "right")] = 7
+    spotlight.binding_failure[("click", "left")] = 8
+    spotlight.probe_baseline_trials["right"] = 9
+    spotlight.probe_baseline_effect_sum["right"] = 1.5
+    spotlight.prior_binding_success[("click", "right")] = 10
+    spotlight.prior_binding_failure[("click", "left")] = 11
+    spotlight.pending_update = SimpleNamespace(action="click:1:1")
+    spotlight.steps_since_progress = 12
+    spotlight._current_attempt_actions.append(SimpleNamespace(action="click:1:1"))
+
+    spotlight.reset_level()
+
+    assert spotlight.state_action_visits[("state-a", "click:1:1")] == 2
+    assert spotlight.abstract_action_visits[("abstract-a", "click")] == 3
+    assert spotlight.global_action_visits["click:1:1"] == 4
+    assert spotlight.no_effect_counts[("state-a", "click:1:1")] == 5
+    assert spotlight.no_effect_family_counts[("state-a", "click")] == 6
+    assert spotlight.contradiction_counts[("state-a", "click:1:1")] == 0.75
+    assert spotlight.binding_success[("click", "right")] == 7
+    assert spotlight.binding_failure[("click", "left")] == 8
+    assert spotlight.probe_baseline_trials["right"] == 9
+    assert spotlight.probe_baseline_effect_sum["right"] == 1.5
+    assert spotlight.prior_binding_success[("click", "right")] == 10
+    assert spotlight.prior_binding_failure[("click", "left")] == 11
+    assert spotlight.pending_update is None
+    assert spotlight.steps_since_progress == 0
+    assert spotlight._current_attempt_actions == []
+
+
+def test_spotlight_candidate_surface_includes_legal_actions_when_planner_drops_them() -> None:
+    spotlight = ActionSpotlight()
+    legal = ("1", "2", "click:0:0", "click:1:0", "click:0:1", "click:1:1")
+    state = extract_state(GridFrame("task", "episode", 0, np.zeros((2, 2), dtype=np.int64), legal))
+
+    class Planner:
+        @staticmethod
+        def candidate_actions(_state, *, engine, memory=None, language_tokens=()):
+            return ("1",)
+
+    candidates = spotlight._candidate_actions(
+        state,
+        planner=Planner(),
+        engine=SimpleNamespace(),
+        memory=None,
+        lang_tokens=(),
+    )
+
+    assert set(legal).issubset(set(candidates))
+    assert candidates[: len(legal)] == legal
+
+
+def test_spotlight_max_candidates_never_truncates_legal_surface() -> None:
+    spotlight = ActionSpotlight(SpotlightConfig(max_candidates=3))
+    legal = tuple(f"click:{index}:0" for index in range(12))
+    state = extract_state(GridFrame("task", "episode", 0, np.zeros((1, 12), dtype=np.int64), legal))
+
+    class Planner:
+        @staticmethod
+        def candidate_actions(_state, *, engine, memory=None, language_tokens=()):
+            return ("extra",)
+
+    candidates = spotlight._candidate_actions(
+        state,
+        planner=Planner(),
+        engine=SimpleNamespace(),
+        memory=None,
+        lang_tokens=(),
+    )
+
+    assert len(candidates) == len(legal)
+    assert candidates == legal
+
+
 def test_baseline_movement_after_binder_does_not_count_as_binding_success() -> None:
     spotlight = ActionSpotlight()
 
