@@ -14,6 +14,7 @@ from arcagi.scientist.agent import (
     _score_delta,
     normalize_scientist_agent_config,
 )
+from arcagi.scientist.boundary import CLAIM_ELIGIBLE_ARC_CONTROLLER, SCIENTIST_STACK_ROLE
 from arcagi.scientist.planner import PlannerConfig
 from arcagi.scientist.perception import compare_states, extract_state
 from arcagi.scientist.spotlight import ActionSpotlight, LEGACY_FEATURE_SCHEMA_VERSION, SpotlightConfig
@@ -91,6 +92,9 @@ def normalize_spotlight_scientist_config(
 
 class SpotlightScientistAgent(ScientistAgent):
     """Online scientist agent with serial action commitments and delayed binder credit."""
+
+    controller_kind = SCIENTIST_STACK_ROLE
+    claim_eligible_arc_controller = CLAIM_ELIGIBLE_ARC_CONTROLLER
 
     def __init__(self, config: SpotlightScientistConfig | None = None, **_: Any) -> None:
         normalized = normalize_spotlight_scientist_config(config)
@@ -176,14 +180,24 @@ class SpotlightScientistAgent(ScientistAgent):
                 option_mode = "contradict"
             elif bool(spotlight_feedback.get("pending_binder_before")):
                 option_mode = "skip"
+            elif bool(spotlight_feedback.get("visible_only_nonobjective")):
+                option_mode = "contradict"
         self.memory.write_transition(record, surprise=surprise, language_tokens=tokens, option_mode=option_mode)
 
+        level_success = observation_levels_completed(after) > observation_levels_completed(before)
+        action_regime_changed = set(before.available_actions) != set(after.available_actions)
+        structural_change = bool(
+            abs(progress) > 1e-8
+            or level_success
+            or action_regime_changed
+            or record.delta.appeared
+            or record.delta.disappeared
+        )
         self.planner.notify_transition(
-            changed=record.delta.has_visible_effect or abs(progress) > 1e-8,
+            changed=structural_change,
             record=record,
             engine=self.engine,
         )
-        level_success = observation_levels_completed(after) > observation_levels_completed(before)
         terminal_failure = bool(terminated and is_failure_terminal_game_state(observation_game_state(after)))
         level_boundary = is_reset_action(action) or level_success
         self.spotlight.learn_from_transition(
@@ -217,6 +231,8 @@ class SpotlightScientistAgent(ScientistAgent):
 
     def diagnostics(self) -> dict[str, Any]:
         base = super().diagnostics()
+        base["controller_kind"] = self.controller_kind
+        base["claim_eligible"] = bool(self.claim_eligible_arc_controller)
         base["spotlight"] = self.spotlight.diagnostics()
         return base
 

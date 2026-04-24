@@ -216,6 +216,8 @@ def test_spotlight_agent_from_checkpoint_restores_saved_config(tmp_path) -> None
         failures=4.0,
         no_effects=3.0,
         contradictions=1.0,
+        visible_only_failures=2.0,
+        objective_failures=1.5,
         recent_failures=2.5,
         last_success_step=3,
         last_attempt_step=9,
@@ -273,6 +275,8 @@ def test_spotlight_agent_from_checkpoint_restores_saved_config(tmp_path) -> None
     assert restored_exact_evidence.failures == 4.0
     assert restored_exact_evidence.no_effects == 3.0
     assert restored_exact_evidence.contradictions == 1.0
+    assert restored_exact_evidence.visible_only_failures == 2.0
+    assert restored_exact_evidence.objective_failures == 1.5
     assert restored_exact_evidence.last_success_step == 3
     assert restored.spotlight.family_evidence[("abstract-a", "right")].failures == 6.0
     assert restored.spotlight.steps_since_progress == 8
@@ -736,9 +740,11 @@ def test_visible_motion_without_progress_trains_negative_micro_attempt() -> None
 
     diagnostics = spotlight.diagnostics()
     assert diagnostics["micro_attempt_updates"] >= 1
-    assert diagnostics["last_micro_attempt_target"] < 0.0
+    assert diagnostics["last_micro_attempt_target"] <= -0.60
     assert last_before is not None
     assert spotlight._reliability(last_before, "4") < 0.55
+    assert spotlight._visible_only_failure_rate(last_before, "4") >= 0.50
+    assert diagnostics["visible_only_failure_total"] > 0.0
 
 
 def test_repeated_nonprogress_action_is_demoted_without_pruning() -> None:
@@ -886,6 +892,89 @@ def test_untrained_habit_prior_cannot_override_evidence_score() -> None:
     assert spotlight.diagnostics()["habit_updates"] == 0
     assert decision.action == "4"
     assert decision.components["evidence_score"] > spotlight._last_scored_candidates["3"].components["evidence_score"]
+
+
+def test_visible_only_failure_gates_motion_below_untried_binding_probe() -> None:
+    spotlight = ActionSpotlight()
+    spotlight.executive.weights[:] = 0.0
+    spotlight.executive.exploration_bonus = 0.0
+    state = extract_state(
+        GridFrame("task", "episode", 8, np.array([[0, 1], [0, 0]], dtype=np.int64), ("4", "click:1:1"))
+    )
+    spotlight.steps_since_progress = spotlight.config.diagnostic_binding_min_stall
+    for step in range(6):
+        spotlight._observe_action_evidence(
+            state,
+            "4",
+            step=step,
+            visible_only_failure=1.0,
+            objective_failure=0.25,
+        )
+
+    class Planner:
+        @staticmethod
+        def candidate_actions(_state, *, engine, memory=None, language_tokens=()):
+            return ("4", "click:1:1")
+
+    class Engine:
+        @staticmethod
+        def score_action(_state, action, **_kwargs):
+            return SimpleNamespace(
+                expected_reward=0.0,
+                expected_change=1.0 if action == "4" else 0.0,
+                information_gain=0.4 if action == "4" else 0.05,
+                risk=0.0,
+                rationale=(),
+            )
+
+    class WorldModel:
+        @staticmethod
+        def predict(_state, _action):
+            return SimpleNamespace(reward_mean=0.0, change_mean=0.0, total_uncertainty=0.0)
+
+    class Memory:
+        @staticmethod
+        def action_memory_bonus(_state, _action, _lang_tokens):
+            return 0.0
+
+        @staticmethod
+        def action_option_profile(_state, _action, _lang_tokens):
+            return {}
+
+    class Language:
+        @staticmethod
+        def memory_tokens(_state, _engine):
+            return ()
+
+        @staticmethod
+        def belief_sentences(_engine, *, limit=3):
+            return ()
+
+        @staticmethod
+        def questions(_engine, *, limit=2):
+            return ()
+
+    candidates = spotlight._candidate_actions(
+        state,
+        planner=Planner(),
+        engine=SimpleNamespace(),
+        memory=None,
+        lang_tokens=(),
+    )
+    decision = spotlight.choose_action(
+        state,
+        planner=Planner(),
+        engine=Engine(),
+        world_model=WorldModel(),
+        memory=Memory(),
+        language=Language(),
+    )
+
+    assert "4" in candidates
+    assert "click:1:1" in candidates
+    assert decision.action == "click:1:1"
+    assert spotlight._last_scored_candidates["4"].components["visible_only_failure_rate"] >= 0.50
+    assert spotlight._last_scored_candidates["4"].components["evidence_score"] < 0.0
 
 
 def test_baseline_movement_after_binder_does_not_count_as_binding_success() -> None:

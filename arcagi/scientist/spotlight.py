@@ -25,6 +25,7 @@ from .types import (
     StructuredState,
     TransitionRecord,
     action_family,
+    action_target_to_grid_cell,
     combined_progress_signal,
     is_failure_terminal_game_state,
     is_interact_action,
@@ -155,6 +156,13 @@ class SpotlightConfig:
     reset_retry_penalty: float = 1.15
     reset_positive_improvement_guard: float = 0.08
     diagnostic_binding_stall_threshold: int = 24
+    diagnostic_binding_min_stall: int = 8
+    visible_only_failure_base: float = 0.60
+    visible_only_failure_stall_scale: float = 0.045
+    visible_only_failure_cap: float = 1.40
+    visible_only_score_penalty: float = 1.35
+    visible_only_gate_strength: float = 0.85
+    diagnostic_trap_threshold: float = 0.35
 
 
 @dataclass
@@ -267,6 +275,8 @@ class ActionEvidence:
     failures: float = 0.0
     no_effects: float = 0.0
     contradictions: float = 0.0
+    visible_only_failures: float = 0.0
+    objective_failures: float = 0.0
     recent_failures: float = 0.0
     last_success_step: int = -1
     last_attempt_step: int = -1
@@ -279,10 +289,20 @@ class ActionEvidence:
         failure: float = 0.0,
         no_effect: float = 0.0,
         contradiction: float = 0.0,
+        visible_only_failure: float = 0.0,
+        objective_failure: float = 0.0,
     ) -> None:
         self.attempts += 1.0
         self.successes += max(0.0, float(success))
-        total_failure = max(0.0, float(failure)) + max(0.0, float(no_effect)) + max(0.0, float(contradiction))
+        self.visible_only_failures += max(0.0, float(visible_only_failure))
+        self.objective_failures += max(0.0, float(objective_failure))
+        total_failure = (
+            max(0.0, float(failure))
+            + max(0.0, float(no_effect))
+            + max(0.0, float(contradiction))
+            + max(0.0, float(visible_only_failure))
+            + max(0.0, float(objective_failure))
+        )
         self.failures += total_failure
         self.no_effects += max(0.0, float(no_effect))
         self.contradictions += max(0.0, float(contradiction))
@@ -331,7 +351,7 @@ class ActionSpotlight:
         self.abstract_action_visits: defaultdict[tuple[str, str], int] = defaultdict(int)
         self.global_action_visits: defaultdict[ActionName, int] = defaultdict(int)
         self.no_effect_counts: defaultdict[tuple[str, ActionName], int] = defaultdict(int)
-        self.no_effect_family_counts: defaultdict[tuple[str, str], int] = defaultdict(int)
+        self.no_effect_family_counts: defaultdict[tuple[str, str], float] = defaultdict(float)
         self.contradiction_counts: defaultdict[tuple[str, ActionName], float] = defaultdict(float)
         self.action_evidence: defaultdict[tuple[str, ActionName], ActionEvidence] = defaultdict(ActionEvidence)
         self.family_evidence: defaultdict[tuple[str, str], ActionEvidence] = defaultdict(ActionEvidence)
@@ -555,6 +575,7 @@ class ActionSpotlight:
         before_levels = observation_levels_completed(record.before)
         after_levels = observation_levels_completed(record.after)
         level_progress = max(0, after_levels - before_levels)
+        action_set_changed = set(record.before.available_actions) != set(record.after.available_actions)
         self.max_levels_completed = max(self.max_levels_completed, after_levels)
         self._ensure_attempt(record.before)
         self._current_attempt_reward += float(progress)
@@ -621,10 +642,31 @@ class ActionSpotlight:
             self.no_effect_family_counts[abstract_family_key] += 1
 
         objective_success = bool(progress > 1e-8 or level_progress > 0 or probe_supported)
+        structural_effect = bool(
+            progress > 1e-8
+            or level_progress > 0
+            or action_set_changed
+            or record.delta.appeared
+            or record.delta.disappeared
+        )
+        visible_only_nonobjective = bool(
+            visible_effect
+            and not objective_success
+            and not structural_effect
+            and not contradiction
+            and not binding_action
+        )
         visible_only_failure = 0.0
-        if visible_effect and not objective_success and not contradiction and not binding_action:
-            stall = max(0, self.steps_since_progress - 4)
-            visible_only_failure = min(0.12, 0.015 * float(stall))
+        objective_failure = 0.0
+        if not objective_success and not binding_action:
+            objective_failure = 0.25
+        if visible_only_nonobjective:
+            stall = max(0, self.steps_since_progress - 1)
+            visible_only_failure = min(
+                self.config.visible_only_failure_cap,
+                self.config.visible_only_failure_base + (self.config.visible_only_failure_stall_scale * float(stall)),
+            )
+            self.no_effect_family_counts[abstract_family_key] += 0.5
         self._observe_action_evidence(
             record.before,
             record.action,
@@ -633,6 +675,8 @@ class ActionSpotlight:
             failure=(1.0 if probe_failed else 0.0) + visible_only_failure,
             no_effect=1.0 if (not visible_effect and not binding_action and progress <= 1e-8 and not probe_supported) else 0.0,
             contradiction=1.5 if contradiction else 0.0,
+            visible_only_failure=visible_only_failure,
+            objective_failure=objective_failure,
         )
         self._observe_micro_attempt(
             record=record,
@@ -640,6 +684,8 @@ class ActionSpotlight:
             progress=progress,
             level_progress=level_progress,
             contradiction=contradiction,
+            structural_effect=structural_effect,
+            objective_success=objective_success,
         )
 
         if self.active_intention is not None:
@@ -679,6 +725,9 @@ class ActionSpotlight:
                 "binding_action": bool(binding_action),
                 "pending_binder_probe": None if self.pending_binder_probe is None else str(self.pending_binder_probe.binder_action),
                 "contradiction": bool(contradiction),
+                "structural_effect": bool(structural_effect),
+                "visible_only_nonobjective": bool(visible_only_nonobjective),
+                "visible_only_failure": float(visible_only_failure),
             }
         )
         return {
@@ -687,6 +736,9 @@ class ActionSpotlight:
             "probe_failed": bool(probe_failed),
             "pending_binder_before": bool(pending_before is not None),
             "pending_binder_after": bool(self.pending_binder_probe is not None),
+            "visible_only_failure": float(visible_only_failure),
+            "visible_only_nonobjective": bool(visible_only_nonobjective),
+            "structural_effect": bool(structural_effect),
         }
 
     def observe_teacher_action(self, teacher_action: ActionName, *, weight: float = 1.0) -> None:
@@ -836,6 +888,18 @@ class ActionSpotlight:
             if _family(record.action) == "undo":
                 no_progress_penalty += 0.20
             no_progress_penalty += 0.01 * min(float(self.steps_since_progress), 50.0)
+        action_set_changed = set(record.before.available_actions) != set(record.after.available_actions)
+        structural_effect = bool(action_set_changed or record.delta.appeared or record.delta.disappeared)
+        visible_only_nonobjective = bool(
+            record.delta.has_visible_effect
+            and progress <= 1e-8
+            and level_delta <= 0
+            and not structural_effect
+            and not _is_binding_action(record.action)
+        )
+        if visible_only_nonobjective:
+            no_progress_penalty += 0.35
+            no_progress_penalty += 0.25 * self._visible_only_failure_rate(record.before, record.action)
         target = float(
             progress
             + level_delta
@@ -846,6 +910,11 @@ class ActionSpotlight:
         )
         self.last_executive_loss = float(self.executive.update(pending.feature_vector, target))
         self.last_executive_target = float(target)
+        if visible_only_nonobjective:
+            adaptation_target = min(-0.60, target)
+            self.last_adaptation_loss = float(
+                self.adaptation.update(pending.feature_vector, adaptation_target, weight=0.35)
+            )
         self.pending_update = None
 
     def diagnostics(self) -> dict[str, Any]:
@@ -881,6 +950,13 @@ class ActionSpotlight:
             "binding_failure_total": int(sum(self.binding_failure.values())),
             "prior_binding_success_total": int(sum(self.prior_binding_success.values())),
             "prior_binding_failure_total": int(sum(self.prior_binding_failure.values())),
+            "visible_only_failure_total": float(
+                sum(evidence.visible_only_failures for evidence in self.action_evidence.values())
+            ),
+            "objective_failure_total": float(
+                sum(evidence.objective_failures for evidence in self.action_evidence.values())
+            ),
+            "movement_trap_pressure": float(self._movement_trap_pressure()),
             "probe_baseline_trials": {family: int(value) for family, value in self.probe_baseline_trials.items()},
             "steps_since_progress": int(self.steps_since_progress),
             "session_reset_count": int(self.session_reset_count),
@@ -916,7 +992,7 @@ class ActionSpotlight:
             "abstract_action_visits": [(list(key), int(value)) for key, value in self.abstract_action_visits.items()],
             "global_action_visits": [(str(key), int(value)) for key, value in self.global_action_visits.items()],
             "no_effect_counts": [(list(key), int(value)) for key, value in self.no_effect_counts.items()],
-            "no_effect_family_counts": [(list(key), int(value)) for key, value in self.no_effect_family_counts.items()],
+            "no_effect_family_counts": [(list(key), float(value)) for key, value in self.no_effect_family_counts.items()],
             "contradiction_counts": [(list(key), float(value)) for key, value in self.contradiction_counts.items()],
             "action_evidence": [(list(key), self._evidence_state(value)) for key, value in self.action_evidence.items()],
             "family_evidence": [(list(key), self._evidence_state(value)) for key, value in self.family_evidence.items()],
@@ -1007,7 +1083,7 @@ class ActionSpotlight:
         for key, value in state.get("no_effect_counts", []):
             self.no_effect_counts[(str(key[0]), str(key[1]))] = int(value)
         for key, value in state.get("no_effect_family_counts", []):
-            self.no_effect_family_counts[(str(key[0]), str(key[1]))] = int(value)
+            self.no_effect_family_counts[(str(key[0]), str(key[1]))] = float(value)
         for key, value in state.get("contradiction_counts", []):
             self.contradiction_counts[(str(key[0]), str(key[1]))] = float(value)
         for key, value in state.get("action_evidence", []):
@@ -1088,6 +1164,8 @@ class ActionSpotlight:
             "failures": float(evidence.failures),
             "no_effects": float(evidence.no_effects),
             "contradictions": float(evidence.contradictions),
+            "visible_only_failures": float(evidence.visible_only_failures),
+            "objective_failures": float(evidence.objective_failures),
             "recent_failures": float(evidence.recent_failures),
             "last_success_step": int(evidence.last_success_step),
             "last_attempt_step": int(evidence.last_attempt_step),
@@ -1101,6 +1179,8 @@ class ActionSpotlight:
             failures=float(state.get("failures", 0.0)),
             no_effects=float(state.get("no_effects", 0.0)),
             contradictions=float(state.get("contradictions", 0.0)),
+            visible_only_failures=float(state.get("visible_only_failures", 0.0)),
+            objective_failures=float(state.get("objective_failures", 0.0)),
             recent_failures=float(state.get("recent_failures", 0.0)),
             last_success_step=int(state.get("last_success_step", -1)),
             last_attempt_step=int(state.get("last_attempt_step", -1)),
@@ -1214,6 +1294,11 @@ class ActionSpotlight:
                     }
                 )
             components["reliability"] = self._reliability(state, action)
+            components["visible_only_failure_rate"] = self._visible_only_failure_rate(state, action)
+            components["objective_failure_pressure"] = self._objective_failure_pressure(state, action)
+            components["movement_trap_pressure"] = self._movement_trap_pressure(state)
+            components["is_binding_action"] = float(_is_binding_action(action))
+            components["is_probe_action"] = float(_is_probe_action(action))
             components["falsification_penalty"] = self._falsification_penalty(state, action)
             intent_kind = self._intent_kind(action, components)
             precomputed.append(
@@ -1510,6 +1595,8 @@ class ActionSpotlight:
         progress: float,
         level_progress: int,
         contradiction: bool,
+        structural_effect: bool = False,
+        objective_success: bool = False,
     ) -> None:
         self._micro_attempt_steps += 1
         if self._micro_attempt_last_action == record.action:
@@ -1521,7 +1608,7 @@ class ActionSpotlight:
             self._micro_attempt_max_same_action_streak,
             self._micro_attempt_same_action_streak,
         )
-        if visible_effect or progress > 1e-8 or level_progress > 0:
+        if objective_success or structural_effect:
             self._micro_attempt_visible_effects += 1
         else:
             self._micro_attempt_no_effects += 1
@@ -1710,22 +1797,33 @@ class ActionSpotlight:
     def _evidence_score(self, components: Mapping[str, float]) -> float:
         score = 0.0
         reliability = _safe_float(components.get("reliability", 0.55), default=0.55)
+        trap_rate = max(0.0, min(1.0, _safe_float(components.get("visible_only_failure_rate", 0.0))))
+        objective_pressure = max(0.0, min(1.0, _safe_float(components.get("objective_failure_pressure", 0.0))))
+        movement_trap = max(0.0, min(1.0, _safe_float(components.get("movement_trap_pressure", 0.0))))
+        is_binding = _safe_float(components.get("is_binding_action", 0.0)) > 0.5
+        is_post_binder_probe = _safe_float(components.get("post_binder_probe_bonus", 0.0)) > 0.0
         exploitation_gate = 0.20 + (0.80 * reliability)
         information_gate = max(0.15, reliability)
+        trap_gate = 1.0
+        if not is_binding and not is_post_binder_probe:
+            trap_gate = max(0.05, 1.0 - (self.config.visible_only_gate_strength * trap_rate))
+
         score += self.config.reward_weight * max(_safe_float(components.get("expected_reward", 0.0)), 0.0)
-        score += self.config.information_weight * information_gate * _safe_float(
+        score += self.config.information_weight * information_gate * max(0.20, trap_gate) * _safe_float(
             components.get("norm_information_gain", components.get("information_gain", 0.0))
         )
-        score += self.config.change_weight * exploitation_gate * _safe_float(
+        score += self.config.change_weight * exploitation_gate * trap_gate * _safe_float(
             components.get("norm_expected_change", components.get("expected_change", 0.0))
         )
-        score += self.config.uncertainty_weight * information_gate * _safe_float(
+        score += self.config.uncertainty_weight * information_gate * max(0.10, trap_gate) * _safe_float(
             components.get("norm_world_uncertainty", components.get("world_uncertainty", 0.0))
         )
-        score += self.config.memory_weight * exploitation_gate * _safe_float(
+        score += self.config.memory_weight * exploitation_gate * trap_gate * _safe_float(
             components.get("norm_memory_bonus", components.get("memory_bonus", 0.0))
         )
-        score += self.config.coverage_weight * _safe_float(components.get("norm_coverage", components.get("coverage", 0.0)))
+        score += self.config.coverage_weight * max(0.10, trap_gate) * _safe_float(
+            components.get("norm_coverage", components.get("coverage", 0.0))
+        )
         score += self.config.binder_weight * exploitation_gate * _safe_float(
             components.get("norm_binder_bonus", components.get("binder_bonus", 0.0))
         )
@@ -1734,15 +1832,22 @@ class ActionSpotlight:
         )
         score += self.config.reset_weight * _safe_float(components.get("norm_reset_bonus", components.get("reset_bonus", 0.0)))
         score += self.config.commitment_bonus * _safe_float(components.get("commitment_bonus", 0.0))
+        if is_binding and movement_trap >= self.config.diagnostic_trap_threshold:
+            score += 0.45 * movement_trap
         if self._uses_extended_feature_schema():
             option_value = _safe_float(components.get("option_schema_bonus", 0.0))
             option_value += 0.25 * _safe_float(components.get("option_continuation", 0.0))
+            if not is_binding and not is_post_binder_probe:
+                option_value *= trap_gate
             score += self.config.memory_weight * exploitation_gate * option_value
-            score += self.config.change_weight * exploitation_gate * _safe_float(components.get("option_efficiency", 0.0))
+            score += self.config.change_weight * exploitation_gate * trap_gate * _safe_float(components.get("option_efficiency", 0.0))
             cost = _safe_float(components.get("action_cost", 1.0), default=1.0)
             budget_pressure = _safe_float(components.get("budget_pressure", 0.0))
             score -= 0.5 * cost * budget_pressure
-            score += 0.35 * _safe_float(components.get("family_efficiency", 0.0))
+            score += 0.35 * trap_gate * _safe_float(components.get("family_efficiency", 0.0))
+        if not is_binding and not is_post_binder_probe:
+            score -= self.config.visible_only_score_penalty * trap_rate
+            score -= 0.45 * objective_pressure
         score -= self.config.risk_weight * _safe_float(components.get("risk", 0.0))
         score -= _safe_float(components.get("penalty", 0.0))
         score -= _safe_float(components.get("perseveration_penalty", 0.0))
@@ -1759,6 +1864,8 @@ class ActionSpotlight:
         failure: float = 0.0,
         no_effect: float = 0.0,
         contradiction: float = 0.0,
+        visible_only_failure: float = 0.0,
+        objective_failure: float = 0.0,
     ) -> None:
         self._observe_action_evidence_by_keys(
             exact_fingerprint=state.exact_fingerprint,
@@ -1769,6 +1876,8 @@ class ActionSpotlight:
             failure=failure,
             no_effect=no_effect,
             contradiction=contradiction,
+            visible_only_failure=visible_only_failure,
+            objective_failure=objective_failure,
         )
 
     def _observe_action_evidence_by_keys(
@@ -1782,6 +1891,8 @@ class ActionSpotlight:
         failure: float = 0.0,
         no_effect: float = 0.0,
         contradiction: float = 0.0,
+        visible_only_failure: float = 0.0,
+        objective_failure: float = 0.0,
     ) -> None:
         family = _family(action)
         self.action_evidence[(str(exact_fingerprint), action)].observe(
@@ -1790,6 +1901,8 @@ class ActionSpotlight:
             failure=failure,
             no_effect=no_effect,
             contradiction=contradiction,
+            visible_only_failure=visible_only_failure,
+            objective_failure=objective_failure,
         )
         for key in ((str(abstract_fingerprint), family), ("*", family)):
             self.family_evidence[key].observe(
@@ -1798,16 +1911,22 @@ class ActionSpotlight:
                 failure=failure,
                 no_effect=no_effect,
                 contradiction=contradiction,
+                visible_only_failure=visible_only_failure,
+                objective_failure=objective_failure,
             )
 
-    def _reliability(self, state: StructuredState, action: ActionName) -> float:
+    def _evidence_items_for(self, state: StructuredState, action: ActionName) -> tuple[tuple[ActionEvidence | None, float], ...]:
         family = _family(action)
-        exact = self.action_evidence.get((state.exact_fingerprint, action))
-        local_family = self.family_evidence.get((state.abstract_fingerprint, family))
-        global_family = self.family_evidence.get(("*", family))
+        return (
+            (self.action_evidence.get((state.exact_fingerprint, action)), 0.55),
+            (self.family_evidence.get((state.abstract_fingerprint, family)), 0.30),
+            (self.family_evidence.get(("*", family)), 0.15),
+        )
+
+    def _reliability(self, state: StructuredState, action: ActionName) -> float:
         weighted = 0.0
         weight = 0.0
-        for evidence, evidence_weight in ((exact, 0.55), (local_family, 0.30), (global_family, 0.15)):
+        for evidence, evidence_weight in self._evidence_items_for(state, action):
             if evidence is None or evidence.attempts <= 0.0:
                 continue
             weighted += evidence_weight * evidence.reliability
@@ -1815,6 +1934,38 @@ class ActionSpotlight:
         if weight <= 0.0:
             return 0.55
         return float(weighted / weight)
+
+    def _visible_only_failure_rate(self, state: StructuredState, action: ActionName) -> float:
+        weighted = 0.0
+        weight = 0.0
+        for evidence, evidence_weight in self._evidence_items_for(state, action):
+            if evidence is None or evidence.attempts <= 0.0:
+                continue
+            weighted += evidence_weight * min(evidence.visible_only_failures / max(evidence.attempts, 1.0), 1.0)
+            weight += evidence_weight
+        return 0.0 if weight <= 0.0 else float(weighted / weight)
+
+    def _objective_failure_pressure(self, state: StructuredState, action: ActionName) -> float:
+        weighted = 0.0
+        weight = 0.0
+        for evidence, evidence_weight in self._evidence_items_for(state, action):
+            if evidence is None or evidence.attempts <= 0.0:
+                continue
+            weighted += evidence_weight * min(evidence.objective_failures / max(evidence.attempts, 1.0), 1.0)
+            weight += evidence_weight
+        return 0.0 if weight <= 0.0 else float(weighted / weight)
+
+    def _movement_trap_pressure(self, state: StructuredState | None = None) -> float:
+        del state
+        pressures: list[float] = []
+        for family in ("up", "down", "left", "right", "move", "undo"):
+            evidence = self.family_evidence.get(("*", family))
+            if evidence is None or evidence.attempts <= 0.0:
+                continue
+            visible_rate = evidence.visible_only_failures / max(evidence.attempts, 1.0)
+            success_rate = evidence.successes / max(evidence.attempts, 1.0)
+            pressures.append(max(0.0, min(1.0, visible_rate - success_rate)))
+        return float(max(pressures, default=0.0))
 
     def _falsification_penalty(self, state: StructuredState, action: ActionName) -> float:
         family = _family(action)
@@ -1829,6 +1980,10 @@ class ActionSpotlight:
                 continue
             penalty += scale * 0.12 * min(evidence.no_effects, 12.0)
             penalty += scale * 0.35 * min(evidence.contradictions, 8.0)
+            penalty += scale * 0.32 * min(evidence.visible_only_failures, 12.0)
+            penalty += scale * 0.18 * min(evidence.objective_failures, 12.0)
+            if evidence.attempts >= 4.0 and evidence.successes <= 0.0 and evidence.visible_only_failures >= 3.0:
+                penalty += scale * 0.85
             if evidence.attempts >= 8.0 and evidence.successes <= 0.0 and evidence.failures >= 6.0:
                 penalty += scale * 2.0
             if evidence.attempts >= 12.0 and (evidence.failures / max(evidence.attempts, 1.0)) >= 0.75:
@@ -2068,7 +2223,11 @@ class ActionSpotlight:
             return None
         if is_failure_terminal_game_state(observation_game_state(state)):
             return None
-        if self.steps_since_progress < int(self.config.diagnostic_binding_stall_threshold):
+        trap_pressure = self._movement_trap_pressure(state)
+        dynamic_threshold = int(self.config.diagnostic_binding_stall_threshold)
+        if trap_pressure >= self.config.diagnostic_trap_threshold:
+            dynamic_threshold = min(dynamic_threshold, int(self.config.diagnostic_binding_min_stall))
+        if self.steps_since_progress < dynamic_threshold:
             return None
         candidates: list[SpotlightCandidate] = []
         for candidate in scored:

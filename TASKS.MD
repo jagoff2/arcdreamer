@@ -2,6 +2,11 @@
 
 ## Active
 
+- [x] Record the GPT-Pro consensus that Spotlight/TheoryManager is now baseline instrumentation only, not the ARC-facing success-claiming learned agent.
+- [x] Add mechanical claim-eligibility metadata and tests so clean learned eval cannot use Spotlight/TheoryManager/RuntimeRuleController/HybridPlanner/diagnostic-binding control as the primary controller.
+- [x] Build `learned_online_minimal`: a full-dense-action learned decision owner with explicit online belief/action-semantics state, fast prediction/value/info updates, episodic memory features, and grounded question tokens.
+- [ ] Add randomized online-adaptation synthetic gates: visible-vs-useful traps, randomized binding, dense coordinate grounding, and mode/carryover mechanics with frozen/table/sweep baselines.
+- [ ] Pass learned-online gates before any ARC success claim: online beats frozen, learned beats count baselines where required, no-sweep tests pass, dense action scoring is complete, and memory/question ablations matter.
 - [x] Record the new hard prohibition in repo docs: no hand-coded action search patterns, movement sweeps, counted probes, scripted reset/replay loops, graph-search controller fallback, shortest-path frontier expansion, or coverage search may be used as the ARC-facing learned-agent solver.
 - [x] Record the no-pretraining-limit prerequisite in repo docs: the ARC-facing learner must see the full currently legal action surface, including dense click parameters, before any learned pruning or abstraction can be trusted.
 - [x] Record the required minimum online-learning prerequisites: live belief state, agent-owned prediction/action/error/update loop, learned action arbitration, internal question formation, learned counterfactual imagination, memory consolidation, and same-session adaptation proof.

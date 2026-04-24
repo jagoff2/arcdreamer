@@ -628,19 +628,29 @@ class ScientistPlanner:
 
     def _observed_effect_value(self, record: TransitionRecord) -> float:
         progress = max(0.0, combined_progress_signal(record.reward, record.delta.score_delta))
-        value = progress
-        value += 0.20 * min(record.delta.changed_fraction, 1.0)
-        if record.delta.disappeared:
-            value += 0.20
-        large_motions = sum(1 for motion in record.delta.moved_objects if motion.distance > 1.25)
-        value += 0.18 * min(float(large_motions), 2.0)
-        if tuple(record.before.available_actions) != tuple(record.after.available_actions):
-            value += 0.16
+        action_regime_changed = tuple(record.before.available_actions) != tuple(record.after.available_actions)
         numeric_deltas = transition_numeric_deltas(record)
-        if any(delta > 0.0 for delta in numeric_deltas.values()):
-            value += 0.12
-        if len(numeric_deltas) >= 2:
-            value += 0.06
+        structural = bool(
+            progress > 0.0
+            or record.delta.disappeared
+            or action_regime_changed
+            or any(delta > 0.0 for delta in numeric_deltas.values())
+        )
+        value = progress
+        if structural:
+            value += 0.20 * min(record.delta.changed_fraction, 1.0)
+            if record.delta.disappeared:
+                value += 0.20
+            large_motions = sum(1 for motion in record.delta.moved_objects if motion.distance > 1.25)
+            value += 0.18 * min(float(large_motions), 2.0)
+            if action_regime_changed:
+                value += 0.16
+            if any(delta > 0.0 for delta in numeric_deltas.values()):
+                value += 0.12
+            if len(numeric_deltas) >= 2:
+                value += 0.06
+        else:
+            value += 0.02 * min(record.delta.changed_fraction, 1.0)
         return float(min(value, 2.5))
 
     def _observed_action_cost(self, record: TransitionRecord, *, observed_effect: float) -> float:

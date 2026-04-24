@@ -524,3 +524,52 @@ Follow-up preservation action:
   - Result: passed.
   - `python -m pytest tests\test_action_spotlight.py tests\test_scientist_agent.py -q`
   - Result: `53 passed in 5.12s`.
+
+## 2026-04-24 13:40 EDT
+
+Operator actions:
+
+1. Asked GPT-Pro to continue the same review thread and work through epistemics, process, architecture, training, and code realization instead of another local Spotlight patch.
+2. Ran two follow-up consensus rounds in the same GPT-Pro thread:
+   - First round established that the last 24 hours improved falsification telemetry but did not prove ARC learning.
+   - Second round stress-tested the learned-online plan and clarified the boundary between acceptable inductive bias and forbidden scripted/search control.
+   - Third round locked the immediate implementation order and stop conditions.
+3. Saved the consensus document:
+   - `docs/GPT_PRO_CONSENSUS_2026-04-24.md`
+
+Current conclusion:
+
+- Spotlight/TheoryManager is now treated as `instrumented_spotlight_baseline`.
+- The dirty visible-only/objective-failure Spotlight patch can be preserved only as non-claimable telemetry and trace-generation infrastructure.
+- The next valid code path is a minimal learned online decision owner with full dense action scoring and synthetic online-adaptation gates before ARC claiming eval.
+
+Follow-up implementation:
+
+1. Added `arcagi.scientist.boundary` and harness claim metadata:
+   - `controller_kind`
+   - `claim_eligible`
+   - `learned_online_controller`
+   - `legal_action_count`
+   - `scored_action_count`
+2. Added `arcagi.learned_online` with a minimal learned decision owner:
+   - generic transition labels;
+   - full dense action feature encoding;
+   - explicit online belief/action-semantics state;
+   - fast online prediction heads;
+   - episodic memory features;
+   - grounded question tokens;
+   - chunked all-action scoring.
+3. Registered `--agent learned_online_minimal`.
+4. Added learned-online gate tests for boundary enforcement, dense action scoring, same-state score change after evidence, no-sweep behavior, synthetic online-vs-frozen sanity, and controlled memory/question ablations.
+
+Validation:
+
+- Compile check:
+  - `.venv313\Scripts\python.exe -m py_compile arcagi\evaluation\harness.py arcagi\agents\learned_online_minimal_agent.py arcagi\learned_online\signals.py arcagi\learned_online\action_features.py arcagi\learned_online\fast_belief.py arcagi\learned_online\questions.py arcagi\learned_online\memory.py arcagi\learned_online\minimal_model.py arcagi\learned_online\policy.py arcagi\learned_online\curriculum.py`
+  - Result: passed.
+- Learned-online focused tests:
+  - `python -m pytest tests\test_learned_online_claim_boundary.py tests\test_learned_online_dense_surface.py tests\test_learned_online_update_loop.py tests\test_learned_online_no_sweep.py tests\test_learned_online_synthetic_gates.py tests\test_learned_online_ablation_gates.py tests\test_eval_path_constraints.py -q`
+  - Result: `19 passed in 3.75s`.
+- Combined targeted regression:
+  - `python -m pytest tests\test_learned_online_claim_boundary.py tests\test_learned_online_dense_surface.py tests\test_learned_online_update_loop.py tests\test_learned_online_no_sweep.py tests\test_learned_online_synthetic_gates.py tests\test_learned_online_ablation_gates.py tests\test_action_spotlight.py tests\test_scientist_agent.py tests\test_scientist_training.py tests\test_arc_adapter_helpers.py tests\test_eval_path_constraints.py tests\test_arc_public_training.py -q`
+  - Result: `104 passed in 123.95s`.

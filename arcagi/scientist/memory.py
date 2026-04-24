@@ -614,6 +614,18 @@ def _effect_signature_tags(record: TransitionRecord) -> frozenset[str]:
 
 
 def _mechanic_option_value(record: TransitionRecord, *, effect_tags: frozenset[str]) -> float:
+    action_regime_changed = tuple(record.before.available_actions) != tuple(record.after.available_actions)
+    structural = bool(
+        record.delta.is_positive
+        or record.delta.disappeared
+        or action_regime_changed
+        or "effect:numeric_increase" in effect_tags
+        or "effect:numeric_rewrite" in effect_tags
+    )
+    pure_visible_nonprogress = bool(record.delta.has_visible_effect and not structural and not record.delta.is_positive)
+    if pure_visible_nonprogress:
+        return 0.0
+
     value = 0.0
     if "effect:disappear" in effect_tags:
         value += 0.18
@@ -629,20 +641,15 @@ def _mechanic_option_value(record: TransitionRecord, *, effect_tags: frozenset[s
         value += 0.10
     if "effect:numeric_rewrite" in effect_tags:
         value += 0.08
-    structural = bool(
-        record.delta.is_positive
-        or "effect:disappear" in effect_tags
-        or "effect:action_regime_change" in effect_tags
-        or "effect:numeric_increase" in effect_tags
-        or "effect:numeric_rewrite" in effect_tags
-    )
-    if not structural:
-        value = min(value, 0.08)
     return float(min(value, 0.45))
 
 
 def _relative_option_cost(action_sequence: tuple[ActionName, ...], record: TransitionRecord) -> float:
     cost = float(max(len(action_sequence), 1))
+    action_regime_changed = tuple(record.before.available_actions) != tuple(record.after.available_actions)
+    structural = bool(record.delta.is_positive or record.delta.disappeared or action_regime_changed)
+    if record.delta.has_visible_effect and not structural:
+        cost += 0.55
     if not record.delta.has_visible_effect and not record.delta.is_positive:
         cost += 0.35
     if record.delta.terminated and not record.delta.is_positive:

@@ -27,6 +27,10 @@ def build_agent(agent_name: str, checkpoint_path: str | None = None, device: Any
         return RandomHeuristicAgent()
     if normalized == "graph":
         return GraphExplorerAgent()
+    if normalized in {"learned_online_minimal", "learned_online", "online_minimal"}:
+        from arcagi.agents.learned_online_minimal_agent import LearnedOnlineMinimalAgent
+
+        return LearnedOnlineMinimalAgent()
     if normalized in {"scientist", "hyper_scientist", "hyper-generalizing-scientist", "spotlight", "spotlight_scientist"}:
         from arcagi.agents.scientist_agent import (
             HyperGeneralizingScientistAgent,
@@ -160,6 +164,30 @@ def _spotlight_feature_schema_version(agent: Any) -> int:
         return 0
 
 
+def _agent_claim_metadata(agent: Any) -> dict[str, Any]:
+    diagnostics_fn = getattr(agent, "diagnostics", None)
+    diagnostics: dict[str, Any] = {}
+    if callable(diagnostics_fn):
+        try:
+            raw = diagnostics_fn()
+            if isinstance(raw, dict):
+                diagnostics = raw
+        except Exception:
+            diagnostics = {}
+    controller_kind = getattr(agent, "controller_kind", diagnostics.get("controller_kind", type(agent).__name__))
+    claim_eligible = getattr(agent, "claim_eligible_arc_controller", diagnostics.get("claim_eligible", False))
+    learned_online = getattr(agent, "learned_online_controller", diagnostics.get("learned_online_controller", False))
+    scored_action_count = diagnostics.get("scored_action_count", diagnostics.get("last_scored_action_count", 0))
+    legal_action_count = diagnostics.get("legal_action_count", diagnostics.get("last_legal_action_count", 0))
+    return {
+        "controller_kind": str(controller_kind),
+        "claim_eligible": bool(claim_eligible),
+        "learned_online_controller": bool(learned_online),
+        "scored_action_count": int(scored_action_count or 0),
+        "legal_action_count": int(legal_action_count or 0),
+    }
+
+
 def run_episode(
     agent: Any,
     env: Any,
@@ -181,6 +209,7 @@ def run_episode(
     language_traces: list[str] = []
     done = False
     spotlight_feature_schema_version = _spotlight_feature_schema_version(agent)
+    claim_metadata = _agent_claim_metadata(agent)
     action_counts: Counter[str] = Counter()
     family_counts: Counter[str] = Counter()
     max_same_action_streak = 0
@@ -204,6 +233,7 @@ def run_episode(
                     "initial_levels_completed": levels_completed,
                     "initial_available_action_count": len(tuple(getattr(observation, "available_actions", ()) or ())),
                     "spotlight_feature_schema_version": spotlight_feature_schema_version,
+                    **claim_metadata,
                 },
             )
         while not done and (max_steps is None or steps < max_steps):
@@ -305,6 +335,7 @@ def run_episode(
                             "action_repeat_count": action_counts[action_text],
                             "family_counts": dict(family_counts),
                             "spotlight_feature_schema_version": spotlight_feature_schema_version,
+                            **_agent_claim_metadata(agent),
                         },
                         sort_keys=True,
                     )
@@ -327,6 +358,7 @@ def run_episode(
                     "family_histogram": dict(family_counts),
                     "max_same_action_streak": max_same_action_streak,
                     "diagnostics": _compact_diagnostics(getattr(agent, "diagnostics", lambda: {})()),
+                    **_agent_claim_metadata(agent),
                 },
             )
             trace_handle.close()
@@ -342,6 +374,7 @@ def run_episode(
         "language": language_traces[-1] if language_traces else "",
         "family_id": getattr(env, "family_id", getattr(env, "task_id", "unknown")),
         "spotlight_feature_schema_version": spotlight_feature_schema_version,
+        **_agent_claim_metadata(agent),
         "action_histogram": dict(action_counts),
         "family_histogram": dict(family_counts),
         "max_same_action_streak": max_same_action_streak,
@@ -465,6 +498,13 @@ def _compact_diagnostics(diagnostics: Any) -> dict[str, Any]:
     if not isinstance(diagnostics, dict):
         return {}
     keep_keys = {
+        "controller_kind",
+        "claim_eligible",
+        "learned_online_controller",
+        "scored_action_count",
+        "legal_action_count",
+        "last_scored_action_count",
+        "last_legal_action_count",
         "runtime_controller_active",
         "objective_stall_steps",
         "level_stall_steps",

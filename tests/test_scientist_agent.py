@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from arcagi.evaluation.harness import build_agent, run_episode as run_harness_episode
+from arcagi.agents.spotlight_scientist_agent import SpotlightScientistAgent
 from arcagi.scientist import HiddenRuleGridEnv, ScientistAgent, SyntheticConfig, load_scientist_checkpoint, run_episode, save_scientist_checkpoint
 from arcagi.scientist.hypotheses import HypothesisEngine
 from arcagi.scientist.memory import EpisodicMemory
@@ -136,7 +137,7 @@ def test_hypothesis_engine_induces_generic_effect_beliefs_for_disappearance_and_
     assert 1 in effect_priors or 2 in effect_priors
 
 
-def test_episodic_memory_records_option_for_salient_effect_without_reward() -> None:
+def test_episodic_memory_remembers_visible_motion_without_positive_option() -> None:
     memory = EpisodicMemory()
     before = extract_state(
         GridFrame("t", "e", 0, np.array([[0, 0, 0, 0], [1, 0, 0, 0], [0, 0, 0, 0]], dtype=np.int64), ("right",))
@@ -148,17 +149,15 @@ def test_episodic_memory_records_option_for_salient_effect_without_reward() -> N
 
     memory.write_transition(record, surprise=0.5, language_tokens=("effect", "motion"))
 
-    assert len(memory.options) == 1
-    assert memory.options[0].effect_value > 0.0
-    assert memory.options[0].effect_value <= 0.08
-    assert memory.options[0].support <= 0.25
-    assert memory.schemas
+    assert len(memory.items) == 1
+    assert len(memory.options) == 0
+    assert memory.schemas == {}
 
 
 def test_episodic_memory_can_skip_and_contradict_option_writes() -> None:
     memory = EpisodicMemory()
     before = extract_state(
-        GridFrame("t", "e", 0, np.array([[0, 0, 0, 0], [1, 0, 0, 0], [0, 0, 0, 0]], dtype=np.int64), ("right",))
+        GridFrame("t", "e", 0, np.array([[0, 2, 0, 0], [1, 0, 0, 0], [0, 0, 0, 0]], dtype=np.int64), ("right",))
     )
     after = extract_state(
         GridFrame("t", "e", 1, np.array([[0, 0, 0, 0], [0, 0, 0, 1], [0, 0, 0, 0]], dtype=np.int64), ("right",))
@@ -214,7 +213,7 @@ def test_episodic_memory_option_profile_tracks_effect_tags_and_relative_cost() -
 def test_episodic_memory_option_profile_supports_sequence_continuation() -> None:
     memory = EpisodicMemory()
     before = extract_state(
-        GridFrame("t", "e", 0, np.array([[0, 0, 0, 0], [1, 0, 0, 0], [0, 0, 0, 0]], dtype=np.int64), ("right",))
+        GridFrame("t", "e", 0, np.array([[0, 2, 0, 0], [1, 0, 0, 0], [0, 0, 0, 0]], dtype=np.int64), ("right",))
     )
     after = extract_state(
         GridFrame("t", "e", 1, np.array([[0, 0, 0, 0], [0, 0, 0, 1], [0, 0, 0, 0]], dtype=np.int64), ("right",))
@@ -229,7 +228,6 @@ def test_episodic_memory_option_profile_supports_sequence_continuation() -> None
 
     profile = memory.action_option_profile(before, "right", ("effect:large_motion",))
     assert profile["schema_bonus"] > 0.0
-    assert profile["schema_bonus"] < 0.25
     assert profile["continuation_depth"] > 0.0
     assert profile["relative_cost"] < memory.options[0].relative_cost
 
@@ -284,6 +282,25 @@ def test_planner_candidate_actions_only_adds_option_entries_compatible_with_curr
 
     assert "4" in candidates
     assert "click:9:9" not in candidates
+
+
+def test_spotlight_agent_reports_structural_change_not_visible_motion_to_planner() -> None:
+    agent = SpotlightScientistAgent()
+    before = GridFrame("t", "e", 0, np.array([[1, 0]], dtype=np.int64), ("4",))
+    after = GridFrame("t", "e", 1, np.array([[0, 1]], dtype=np.int64), ("4",))
+
+    agent.observe_result(
+        before_observation=before,
+        action="4",
+        after_observation=after,
+        reward=0.0,
+        terminated=False,
+        info={},
+    )
+
+    assert agent.planner.stall_count == 1
+    assert len(agent.memory.items) == 1
+    assert len(agent.memory.options) == 0
 
 
 def test_planner_budget_pressure_penalizes_high_cost_families() -> None:
