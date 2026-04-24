@@ -125,6 +125,7 @@ class SpotlightConfig:
     adaptation_weight: float = 0.70
     habit_weight: float = 1.0
     executive_weight: float = 1.0
+    evidence_weight: float = 1.0
     reward_weight: float = 2.20
     information_weight: float = 1.85
     change_weight: float = 0.65
@@ -1069,6 +1070,7 @@ class ActionSpotlight:
                         "family_efficiency": self._planner_family_efficiency(planner, action, option_profile),
                     }
                 )
+            components["evidence_score"] = self._evidence_score(components)
             intent_kind = self._intent_kind(action, components)
             precomputed.append(
                 {
@@ -1122,7 +1124,8 @@ class ActionSpotlight:
             adaptation_prediction = item["adaptation_prediction"]
             habit_prediction = item["habit_prediction"]
             combined_score = (
-                self.config.adaptation_weight * float(item["adaptation_value"])
+                self.config.evidence_weight * float(item["components"].get("evidence_score", 0.0))
+                + self.config.adaptation_weight * float(item["adaptation_value"])
                 + self.config.habit_weight * float(item["habit_prior"])
                 + self.config.executive_weight * float(item["executive_advantage"])
             )
@@ -1469,6 +1472,31 @@ class ActionSpotlight:
                 pass
         return 0.0
 
+    def _evidence_score(self, components: Mapping[str, float]) -> float:
+        score = 0.0
+        score += self.config.reward_weight * _safe_float(components.get("expected_reward", 0.0))
+        score += self.config.information_weight * _safe_float(components.get("information_gain", 0.0))
+        score += self.config.change_weight * _safe_float(components.get("expected_change", 0.0))
+        score += self.config.uncertainty_weight * _safe_float(components.get("world_uncertainty", 0.0))
+        score += self.config.memory_weight * _safe_float(components.get("memory_bonus", 0.0))
+        score += self.config.coverage_weight * _safe_float(components.get("coverage", 0.0))
+        score += self.config.binder_weight * _safe_float(components.get("binder_bonus", 0.0))
+        score += self.config.post_binder_probe_weight * _safe_float(components.get("post_binder_probe_bonus", 0.0))
+        score += self.config.reset_weight * _safe_float(components.get("reset_bonus", 0.0))
+        score += self.config.commitment_bonus * _safe_float(components.get("commitment_bonus", 0.0))
+        if self._uses_extended_feature_schema():
+            option_value = _safe_float(components.get("option_schema_bonus", 0.0))
+            option_value += 0.25 * _safe_float(components.get("option_continuation", 0.0))
+            score += self.config.memory_weight * option_value
+            score += self.config.change_weight * _safe_float(components.get("option_efficiency", 0.0))
+            cost = _safe_float(components.get("action_cost", 1.0), default=1.0)
+            budget_pressure = _safe_float(components.get("budget_pressure", 0.0))
+            score -= 0.5 * cost * budget_pressure
+            score += 0.35 * _safe_float(components.get("family_efficiency", 0.0))
+        score -= self.config.risk_weight * _safe_float(components.get("risk", 0.0))
+        score -= _safe_float(components.get("penalty", 0.0))
+        return float(score)
+
     def _coverage_bonus(self, state: StructuredState, action: ActionName) -> float:
         exact_visits = self.state_action_visits[(state.exact_fingerprint, action)]
         family_visits = self.abstract_action_visits[(state.abstract_fingerprint, _family(action))]
@@ -1636,8 +1664,11 @@ class ActionSpotlight:
         if best_combined.action == habit_best.action:
             choice = best_combined
         else:
+            score_margin = best_combined.score - habit_best.score
             override_margin = best_combined.executive_advantage - habit_best.executive_advantage
-            if override_margin >= self.config.override_margin and best_combined.score > habit_best.score:
+            if score_margin >= self.config.override_margin:
+                choice = best_combined
+            elif override_margin >= self.config.override_margin and best_combined.score > habit_best.score:
                 choice = best_combined
             else:
                 choice = habit_best

@@ -428,6 +428,88 @@ def test_spotlight_max_candidates_never_truncates_legal_surface() -> None:
     assert candidates == legal
 
 
+def test_spotlight_evidence_score_suppresses_repeated_falsified_action() -> None:
+    spotlight = ActionSpotlight()
+    spotlight.executive.weights[:] = 0.0
+    spotlight.executive.exploration_bonus = 0.0
+    state = extract_state(
+        GridFrame(
+            "task",
+            "episode",
+            0,
+            np.array([[0, 1], [0, 0]], dtype=np.int64),
+            ("3", "4"),
+        )
+    )
+    spotlight.no_effect_counts[(state.exact_fingerprint, "3")] = 8
+    spotlight.no_effect_family_counts[(state.abstract_fingerprint, "left")] = 12
+    spotlight.contradiction_counts[(state.exact_fingerprint, "3")] = 8.0
+    spotlight.global_action_visits["3"] = 20
+
+    class Planner:
+        @staticmethod
+        def candidate_actions(_state, *, engine, memory=None, language_tokens=()):
+            return ("3", "4")
+
+    class Engine:
+        @staticmethod
+        def score_action(_state, action, **_kwargs):
+            if action == "3":
+                return SimpleNamespace(
+                    expected_reward=0.0,
+                    expected_change=1.0,
+                    information_gain=0.0,
+                    risk=0.0,
+                    rationale=("stale",),
+                )
+            return SimpleNamespace(
+                expected_reward=0.0,
+                expected_change=0.0,
+                information_gain=0.15,
+                risk=0.0,
+                rationale=("alternative",),
+            )
+
+    class WorldModel:
+        @staticmethod
+        def predict(_state, _action):
+            return SimpleNamespace(reward_mean=0.0, change_mean=0.0, total_uncertainty=0.0)
+
+    class Memory:
+        @staticmethod
+        def action_memory_bonus(_state, _action, _lang_tokens):
+            return 0.0
+
+        @staticmethod
+        def action_option_profile(_state, _action, _lang_tokens):
+            return {}
+
+    class Language:
+        @staticmethod
+        def memory_tokens(_state, _engine):
+            return ()
+
+        @staticmethod
+        def belief_sentences(_engine, *, limit=3):
+            return ()
+
+        @staticmethod
+        def questions(_engine, *, limit=2):
+            return ()
+
+    decision = spotlight.choose_action(
+        state,
+        planner=Planner(),
+        engine=Engine(),
+        world_model=WorldModel(),
+        memory=Memory(),
+        language=Language(),
+    )
+
+    assert decision.action == "4"
+    assert decision.components["evidence_score"] > 0.0
+
+
 def test_baseline_movement_after_binder_does_not_count_as_binding_success() -> None:
     spotlight = ActionSpotlight()
 
@@ -786,7 +868,7 @@ def test_spotlight_learns_from_attempt_improvement() -> None:
     first_after = extract_state(
         GridFrame("task", "episode", 1, np.array([[0, 1], [0, 0]], dtype=np.int64), ("3", "4"), extras={"session_level_index": 0})
     )
-    spotlight.choose_action(
+    first_decision = spotlight.choose_action(
         first_before,
         planner=Planner(),
         engine=Engine(),
@@ -794,7 +876,7 @@ def test_spotlight_learns_from_attempt_improvement() -> None:
         memory=Memory(),
         language=Language(),
     )
-    spotlight.notify_transition(record=compare_states(first_before, first_after, action="3", reward=0.0, terminated=True))
+    spotlight.notify_transition(record=compare_states(first_before, first_after, action=first_decision.action, reward=0.0, terminated=True))
     spotlight.finalize_attempt(first_after, success=False, terminal_failure=True)
 
     second_before = extract_state(
@@ -803,7 +885,7 @@ def test_spotlight_learns_from_attempt_improvement() -> None:
     second_after = extract_state(
         GridFrame("task", "episode", 1, np.array([[1, 0], [0, 0]], dtype=np.int64), ("3", "4"), extras={"session_level_index": 0})
     )
-    spotlight.choose_action(
+    second_decision = spotlight.choose_action(
         second_before,
         planner=Planner(),
         engine=Engine(),
@@ -811,7 +893,7 @@ def test_spotlight_learns_from_attempt_improvement() -> None:
         memory=Memory(),
         language=Language(),
     )
-    spotlight.notify_transition(record=compare_states(second_before, second_after, action="3", reward=1.0, terminated=True))
+    spotlight.notify_transition(record=compare_states(second_before, second_after, action=second_decision.action, reward=1.0, terminated=True))
     spotlight.finalize_attempt(second_after, success=True, terminal_failure=False)
 
     diagnostics = spotlight.diagnostics()

@@ -385,3 +385,36 @@ Current conclusion:
 
 - Clean ARC train/eval paths now fail fast if the sparse-click debug baseline would hide dense legal click parameters.
 - Explicit smoke/debug reduced-action runs remain possible but are labeled by metadata and cannot be confused with clean success.
+
+Follow-up preservation action:
+
+- Committed the slice:
+  - `d73ca8b Guard ARC eval against sparse click surface`
+- Pushed to `origin/main`.
+
+## 2026-04-24 10:15 EDT
+
+Operator actions:
+
+1. Ran clean repaired baseline eval:
+   - `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent spotlight --game-id ar25-0c556536 --mode offline --max-steps 80 --progress-every 20 --trace-path artifacts\traces\post_repair_spotlight_clean_80.jsonl`
+   - Result: `success=false`, `won=false`, `levels_completed=0`, `return=0.0`, `steps=80`.
+   - Failure mode: only 2 clicks, 62 moves, max same-action streak 17.
+2. Implemented direct evidence-score action selection in `ActionSpotlight`:
+   - Combines expected reward, information gain, expected change, uncertainty, memory, coverage, binder/probe/reset utility, action cost, and online no-effect/contradiction penalties.
+   - Lets a sufficiently better combined online evidence score override habit tie-breaking.
+   - Added regression proving repeated falsified actions lose to alternative diagnostic actions.
+3. Ran targeted tests:
+   - `python -m pytest tests/test_action_spotlight.py -q`
+   - Result: `24 passed in 0.18s`.
+   - `python -m pytest tests/test_action_spotlight.py tests/test_scientist_agent.py tests/test_scientist_training.py tests/test_arc_adapter_helpers.py tests/test_eval_path_constraints.py tests/test_arc_public_training.py -q`
+   - Result: `79 passed in 113.56s`.
+4. Ran clean evidence-score eval:
+   - `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent spotlight --game-id ar25-0c556536 --mode offline --max-steps 80 --progress-every 20 --trace-path artifacts\traces\post_evidence_score_spotlight_clean_80.jsonl`
+   - Result: `success=false`, `won=false`, `levels_completed=0`, `return=0.0`, `steps=80`.
+   - Behavior changed: clicks increased from 2 to 14, move count dropped from 62 to 57, option memory wrote 2 options, max same-action streak dropped from 17 to 14.
+
+Current conclusion:
+
+- Evidence-score selection improves dense action exposure but does not solve ARC.
+- Next action is longer state-carrying ARC training with the repaired checkpoints and evidence-score controller.
