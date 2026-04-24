@@ -160,3 +160,133 @@ Interpretation:
 - The new checkpoint regressed the original AR25 level-1 success.
 - The new failure mode is dense-click fixation under all-negative tiny-margin scores, not the older post-level movement/undo carryover failure.
 - The next target is learned policy calibration/exploration under all-negative uncertainty without introducing forbidden action-pattern search or dense-click caps.
+
+## GPT-Pro Follow-Up And Factorized Policy Patch
+
+GPT-Pro reviewed the post-validity AR25 regression and diagnosed the new failure as a greedy-policy stop condition:
+
+- the score surface was all-negative and nearly flat;
+- `score_entropy=6.076` was close to `ln(447)`;
+- `score_margin_top2=0.00158`;
+- deterministic greedy argmax therefore turned arbitrary tiny score differences into a repeated dense click.
+
+Implemented:
+
+- disabled exact full-action-string stable projection for the clean recurrent action features while preserving role/family/geometry features;
+- kept feature dimensionality unchanged by zeroing the exact-action projection slot;
+- added factorized full-support stochastic selection for the recurrent policy:
+  - every legal action is still scored;
+  - every legal action has nonzero probability;
+  - family probability is count-normalized through log-mean-exp aggregation;
+  - action probability is `p(family) * p(action | family)`;
+  - greedy remains available as a diagnostic mode;
+- added policy diagnostics:
+  - selection mode;
+  - selected action probability;
+  - selected family probability;
+  - effective action/family support;
+  - family/action temperatures;
+  - family probabilities;
+  - action feature config;
+- added synthetic gates:
+  - `DenseFamilyMassArbitrationTask`;
+  - `ModeThenDenseClickTask`;
+  - `ActionNameRemapHeldoutTask`;
+- expanded recurrent trainer to sample nine tasks.
+
+Focused tests:
+
+```powershell
+python -m pytest tests\test_learned_online_recurrent_gates.py tests\test_learned_online_sequence_curriculum.py tests\test_learned_online_update_loop.py tests\test_learned_online_no_sweep.py -q
+```
+
+Result: `27 passed in 11.99s`.
+
+Broad targeted regression:
+
+```powershell
+python -m pytest tests\test_learned_online_recurrent_gates.py tests\test_learned_online_sequence_curriculum.py tests\test_learned_online_claim_boundary.py tests\test_learned_online_dense_surface.py tests\test_learned_online_update_loop.py tests\test_learned_online_no_sweep.py tests\test_learned_online_synthetic_gates.py tests\test_learned_online_ablation_gates.py tests\test_action_spotlight.py tests\test_scientist_agent.py tests\test_scientist_training.py tests\test_arc_adapter_helpers.py tests\test_eval_path_constraints.py tests\test_arc_public_training.py -q
+```
+
+Result: `130 passed in 237.90s`.
+
+Flat-score data point requested by GPT-Pro:
+
+- action surface: `400` clicks plus reset/move/select/undo
+- family probabilities:
+  - `click:none=0.2`
+  - `reset:none=0.2`
+  - `move:none=0.2`
+  - `select:none=0.2`
+  - `undo:none=0.2`
+- total click mass: `0.2`
+- one click probability: `0.0005`
+
+Old checkpoint with exact action projection disabled:
+
+- `artifacts\learned_online_recurrent_mixed_localbelief_2000.pkl` still passes the old six heldout gates at `40/40` each.
+
+Expanded factorized synthetic training:
+
+```powershell
+.venv313\Scripts\python.exe -m scripts.train_learned_online_recurrent --output artifacts\learned_online_recurrent_factorized_densemix_3000.pkl --episodes 3000 --max-steps 16 --seed 94 --behavior-policy mixed
+```
+
+Result:
+
+- `success_rate=0.99`
+- `avg_return=0.99`
+- `model_updates=23708`
+
+Heldout result over seeds `80..119`:
+
+- visible useful trap: `40/40`, avg steps `1.325`
+- randomized binding: `40/40`, avg steps `2.525`
+- dense coordinate grounding: `40/40`, avg steps `1.0`
+- visible movement trap: `40/40`, avg steps `1.05`
+- movement-required-after-mode: `40/40`, avg steps `5.925`
+- delayed unlock: `40/40`, avg steps `2.0`
+- dense family mass arbitration: `40/40`, avg steps `1.075`
+- mode then dense click: `40/40`, avg steps `2.625`
+- action name remap heldout: `40/40`, avg steps `2.25`
+
+AR25 80-step diagnostic:
+
+```powershell
+.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent learned_online_recurrent --checkpoint-path artifacts\learned_online_recurrent_factorized_densemix_3000.pkl --game-id ar25-0c556536 --mode offline --max-steps 80 --progress-every 20 --trace-path artifacts\traces\learned_online_recurrent_factorized_densemix_3000_ar25_80.jsonl
+```
+
+Result:
+
+- `success=false`
+- `won=false`
+- `return=0.0`
+- `levels_completed=0`
+- `steps=80`
+- `interaction_steps=62`
+- family histogram:
+  - `click=26`
+  - `select=36`
+  - `undo=10`
+  - `move=8`
+- max same-action streak: `5`
+- final diagnostics:
+  - `selection_mode=factorized_softmax`
+  - `all_negative_scores=true`
+  - `mean_pred_cost=0.4991`
+  - `mean_q_progress=0.00171`
+  - `mean_q_info=0.00197`
+  - `score_margin_top2=0.00592`
+  - `score_entropy=6.0918`
+  - family probabilities:
+    - `select:none=0.5842`
+    - `click:none=0.1645`
+    - `move:none=0.1582`
+    - `undo:none=0.0930`
+
+Interpretation:
+
+- Factorized full-support stochastic selection fixed the dense-click fixation.
+- It did not solve AR25 level 1.
+- The current failure is still all-negative low-progress scoring under sparse reward, now with diverse mixed-family action selection.
+- The next correction should target value/progress calibration and harder sparse delayed mixed-family curriculum, not action-surface coverage or deterministic tie-breaking.

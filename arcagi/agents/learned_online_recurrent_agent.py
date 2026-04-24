@@ -9,6 +9,7 @@ from arcagi.agents.base import BaseAgent
 from arcagi.core.types import ActionName, GridObservation, StructuredState, Transition
 from arcagi.learned_online.fast_belief import OnlineBeliefState
 from arcagi.learned_online.memory import OnlineEpisodicMemory
+from arcagi.learned_online.action_features import ActionFeatureConfig
 from arcagi.learned_online.questions import QuestionToken, question_tokens, select_question
 from arcagi.learned_online.recurrent_model import RecurrentOnlineModel
 from arcagi.learned_online.recurrent_policy import RECURRENT_CANDIDATE_INPUT_DIM, RecurrentOnlinePolicy, RecurrentPolicyDecision
@@ -192,6 +193,8 @@ class LearnedOnlineRecurrentAgent(BaseAgent):
             "level_step": int(self.belief.level_step),
             "belief": self.belief.summary(),
             **self.policy.last_policy_diagnostics,
+            "family_probabilities": dict(self.policy.last_family_probabilities),
+            "action_feature_config": self.policy.action_feature_config.to_dict(),
             "last_top_scores": self._last_top_scores(limit=12),
         }
 
@@ -229,6 +232,10 @@ class LearnedOnlineRecurrentAgent(BaseAgent):
             "chunk_size": int(self.chunk_size),
             "hidden_dim": int(self.hidden_dim),
             "model": self.model.state_dict(),
+            "selection_mode": self.policy.selection_mode,
+            "family_temperature": float(self.policy.family_temperature),
+            "action_temperature": float(self.policy.action_temperature),
+            "action_feature_config": self.policy.action_feature_config.to_dict(),
         }
 
     def load_state_dict(self, state: dict[str, object]) -> None:
@@ -237,6 +244,16 @@ class LearnedOnlineRecurrentAgent(BaseAgent):
         model_state = state.get("model", {})
         if isinstance(model_state, dict):
             self.model.load_state_dict(model_state)
+        self.policy.selection_mode = str(state.get("selection_mode", self.policy.selection_mode) or self.policy.selection_mode)
+        self.policy.family_temperature = float(state.get("family_temperature", self.policy.family_temperature) or self.policy.family_temperature)
+        self.policy.action_temperature = float(state.get("action_temperature", self.policy.action_temperature) or self.policy.action_temperature)
+        feature_config = state.get("action_feature_config", {})
+        if isinstance(feature_config, dict):
+            self.policy.action_feature_config = ActionFeatureConfig(
+                include_exact_action_projection=bool(feature_config.get("include_exact_action_projection", False)),
+                include_role_projection=bool(feature_config.get("include_role_projection", True)),
+                include_family_projection=bool(feature_config.get("include_family_projection", True)),
+            )
 
     def save_checkpoint(self, path: str | Path) -> None:
         target = Path(path)

@@ -213,6 +213,126 @@ class DelayedUnlockTask:
         return GridObservation("delayed_unlock", str(self.seed), self.step_index, grid, actions)
 
 
+@dataclass
+class DenseFamilyMassArbitrationTask:
+    seed: int = 0
+    size: int = 20
+    step_index: int = 0
+
+    def reset(self, seed: int | None = None) -> GridObservation:
+        if seed is not None:
+            self.seed = int(seed)
+        self.step_index = 0
+        return self._observation()
+
+    def step(self, action: ActionName) -> StepResult:
+        self.step_index += 1
+        reward = 1.0 if str(action) == "5" else 0.0
+        return StepResult(self._observation(), reward, bool(reward > 0.0), False, {})
+
+    def _observation(self) -> GridObservation:
+        grid = np.zeros((self.size, self.size), dtype=np.int64)
+        grid[self.size // 2, self.size // 2] = 1
+        actions = tuple(f"click:{x}:{y}" for y in range(self.size) for x in range(self.size)) + ("1", "5", "7")
+        return GridObservation(
+            "dense_family_mass_arbitration",
+            str(self.seed),
+            self.step_index,
+            grid,
+            actions,
+            extras={"action_roles": {"1": "move_up", "5": "select_cycle", "7": "undo"}},
+        )
+
+
+@dataclass
+class ModeThenDenseClickTask:
+    seed: int = 0
+    size: int = 8
+    step_index: int = 0
+    mode: bool = False
+    target_cell: tuple[int, int] = (0, 0)
+
+    def reset(self, seed: int | None = None) -> GridObservation:
+        if seed is not None:
+            self.seed = int(seed)
+        rng = np.random.default_rng(self.seed)
+        self.step_index = 0
+        self.mode = False
+        self.target_cell = (int(rng.integers(self.size)), int(rng.integers(self.size)))
+        return self._observation()
+
+    def step(self, action: ActionName) -> StepResult:
+        self.step_index += 1
+        reward = 0.0
+        if str(action) == "5":
+            self.mode = True
+        elif self.mode:
+            parts = str(action).split(":")
+            if len(parts) == 3 and parts[0] == "click":
+                x = int(parts[1])
+                y = int(parts[2])
+                if (y, x) == self.target_cell:
+                    reward = 1.0
+        return StepResult(self._observation(), reward, bool(reward > 0.0), False, {})
+
+    def _observation(self) -> GridObservation:
+        grid = np.zeros((self.size, self.size), dtype=np.int64)
+        y, x = self.target_cell
+        grid[y, x] = 2 if self.mode else 1
+        actions = tuple(f"click:{x}:{y}" for y in range(self.size) for x in range(self.size)) + ("5", "noop")
+        return GridObservation(
+            "mode_then_dense_click",
+            str(self.seed),
+            self.step_index,
+            grid,
+            actions,
+            extras={"action_roles": {"5": "select_cycle", "noop": "wait"}},
+        )
+
+
+@dataclass
+class ActionNameRemapHeldoutTask:
+    seed: int = 0
+    step_index: int = 0
+    action_names: tuple[ActionName, ...] = ("a0", "a1", "a2", "a3")
+    roles: tuple[str, ...] = ("move_up", "move_down", "select_cycle", "undo")
+    target_role: str = "select_cycle"
+
+    def reset(self, seed: int | None = None) -> GridObservation:
+        if seed is not None:
+            self.seed = int(seed)
+        rng = np.random.default_rng(self.seed)
+        self.step_index = 0
+        names = [f"a{self.seed % 997}_{idx}" for idx in range(4)]
+        rng.shuffle(names)
+        self.action_names = tuple(names)
+        self.roles = ("move_up", "move_down", "select_cycle", "undo")
+        self.target_role = self.roles[int(rng.integers(len(self.roles)))]
+        return self._observation()
+
+    def step(self, action: ActionName) -> StepResult:
+        self.step_index += 1
+        roles = self._action_roles()
+        reward = 1.0 if roles.get(str(action)) == self.target_role else 0.0
+        return StepResult(self._observation(), reward, bool(reward > 0.0), False, {})
+
+    def _action_roles(self) -> dict[ActionName, str]:
+        return {action: role for action, role in zip(self.action_names, self.roles)}
+
+    def _observation(self) -> GridObservation:
+        role_index = self.roles.index(self.target_role)
+        grid = np.zeros((1, len(self.roles)), dtype=np.int64)
+        grid[0, role_index] = role_index + 1
+        return GridObservation(
+            "action_name_remap_heldout",
+            str(self.seed),
+            self.step_index,
+            grid,
+            self.action_names,
+            extras={"action_roles": self._action_roles()},
+        )
+
+
 class RowMajorSweepPolicy:
     def __init__(self) -> None:
         self.index = 0

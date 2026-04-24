@@ -10,7 +10,10 @@ from arcagi.agents.learned_online_recurrent_agent import LearnedOnlineRecurrentA
 from arcagi.learned_online.curriculum import (
     DelayedUnlockTask,
     DenseCoordinateGroundingTask,
+    DenseFamilyMassArbitrationTask,
     MovementRequiredAfterModeTask,
+    ModeThenDenseClickTask,
+    ActionNameRemapHeldoutTask,
     RandomizedBindingTask,
     VisibleMovementTrapTask,
     VisibleUsefulTrapTask,
@@ -33,7 +36,7 @@ def train(
     task_counts: dict[str, int] = {}
     behavior_counts: dict[str, int] = {}
     for episode in range(int(episodes)):
-        task = _make_task(int(rng.integers(6)), seed=seed + episode)
+        task = _make_task(int(rng.integers(9)), seed=seed + episode)
         observation = task.reset(seed=seed + episode)
         agent.reset_episode()
         episode_return = 0.0
@@ -93,7 +96,13 @@ def _make_task(kind: int, *, seed: int):
         return VisibleMovementTrapTask(seed=seed)
     if kind == 4:
         return MovementRequiredAfterModeTask(seed=seed)
-    return DelayedUnlockTask(seed=seed)
+    if kind == 5:
+        return DelayedUnlockTask(seed=seed)
+    if kind == 6:
+        return DenseFamilyMassArbitrationTask(seed=seed)
+    if kind == 7:
+        return ModeThenDenseClickTask(seed=seed)
+    return ActionNameRemapHeldoutTask(seed=seed)
 
 
 def _exploration_action(actions: tuple[str, ...], rng: np.random.Generator) -> str:

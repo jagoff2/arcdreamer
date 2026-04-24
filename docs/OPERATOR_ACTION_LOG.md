@@ -760,3 +760,37 @@ GPT-Pro follow-up implementation batch:
    - the original level-1 prototype remains logged as a real prior result;
    - the new validity-fixed checkpoint does not reproduce it;
    - the current failure mode is dense-click fixation under all-negative tiny-margin scores, so the next work must address learned policy calibration/exploration without scripted action-pattern search or dense-click caps.
+
+## 2026-04-24 16:14 EDT
+
+Factorized policy and dense-arbitration curriculum:
+
+1. Asked GPT-Pro for a concrete next step after the validity-fixed checkpoint regressed into dense-click fixation.
+2. Implemented the agreed next patch:
+   - clean recurrent action features now disable exact full-action-string projection;
+   - recurrent policy now defaults to factorized full-support stochastic selection;
+   - family probability is count-normalized and action probability is conditional on family;
+   - greedy remains diagnostic only;
+   - added dense-family arbitration, mode-then-dense-click, and action-name-remap synthetic tasks;
+   - added tests for full support, order equivariance, family count normalization, non-sweep behavior, and exact-action projection hygiene.
+3. Validation:
+   - focused tests: `27 passed in 11.99s`;
+   - broad targeted regression: `130 passed in 237.90s`.
+4. GPT-Pro requested flat-score data:
+   - with `400` clicks plus reset/move/select/undo, factorized probabilities are `0.2` for each family;
+   - total click mass is `0.2`;
+   - individual click probability is `0.0005`.
+5. Expanded synthetic checkpoint:
+   - `artifacts\learned_online_recurrent_factorized_densemix_3000.pkl`
+   - train success rate `0.99`
+   - heldout seeds `80..119`: all nine tasks `40/40`
+6. AR25 80-step diagnostic:
+   - command: `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent learned_online_recurrent --checkpoint-path artifacts\learned_online_recurrent_factorized_densemix_3000.pkl --game-id ar25-0c556536 --mode offline --max-steps 80 --progress-every 20 --trace-path artifacts\traces\learned_online_recurrent_factorized_densemix_3000_ar25_80.jsonl`
+   - result: `success=false`, `won=false`, `return=0.0`, `levels_completed=0`
+   - family histogram: `click=26`, `select=36`, `undo=10`, `move=8`
+   - max same-action streak: `5`
+   - final diagnostics: `all_negative_scores=true`, `mean_pred_cost=0.4991`, `mean_q_progress=0.00171`, `score_entropy=6.0918`, `score_margin_top2=0.00592`
+7. Current conclusion:
+   - dense-click fixation is fixed;
+   - AR25 still fails with all-negative low-progress scoring;
+   - next target is value/progress calibration and harder sparse delayed mixed-family curriculum, not action coverage.

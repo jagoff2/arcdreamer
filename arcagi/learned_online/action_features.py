@@ -27,10 +27,32 @@ class ActionFeatureBatch:
     scored_action_count: int
 
 
-def encode_action_candidates(state: StructuredState, legal_actions: Sequence[ActionName]) -> ActionFeatureBatch:
+@dataclass(frozen=True)
+class ActionFeatureConfig:
+    include_exact_action_projection: bool = False
+    include_role_projection: bool = True
+    include_family_projection: bool = True
+
+    def to_dict(self) -> dict[str, bool]:
+        return {
+            "include_exact_action_projection": bool(self.include_exact_action_projection),
+            "include_role_projection": bool(self.include_role_projection),
+            "include_family_projection": bool(self.include_family_projection),
+        }
+
+
+DEFAULT_ACTION_FEATURE_CONFIG = ActionFeatureConfig()
+
+
+def encode_action_candidates(
+    state: StructuredState,
+    legal_actions: Sequence[ActionName],
+    *,
+    config: ActionFeatureConfig = DEFAULT_ACTION_FEATURE_CONFIG,
+) -> ActionFeatureBatch:
     actions = tuple(str(action) for action in legal_actions)
     context = build_action_schema_context(actions, dict(state.action_roles))
-    rows = [_encode_one_action(state, build_action_schema(action, context)) for action in actions]
+    rows = [_encode_one_action(state, build_action_schema(action, context), config=config) for action in actions]
     features = np.asarray(rows, dtype=np.float32)
     if features.size == 0:
         features = np.zeros((0, ACTION_FEATURE_DIM), dtype=np.float32)
@@ -55,7 +77,7 @@ def action_context_key(state: StructuredState, action: ActionName) -> str:
     return f"{schema.action_type}:{schema.direction or 'none'}:{click_bin}:{obj_key}"
 
 
-def _encode_one_action(state: StructuredState, schema: ActionSchema) -> list[float]:
+def _encode_one_action(state: StructuredState, schema: ActionSchema, *, config: ActionFeatureConfig) -> list[float]:
     height, width = state.grid_shape
     obj = _target_object(state, schema.action)
     grid_cell = click_action_to_grid_cell(
@@ -81,9 +103,9 @@ def _encode_one_action(state: StructuredState, schema: ActionSchema) -> list[flo
             float(click_y) / max(float(height), 1.0),
             float(click_x) / max(float(width), 1.0),
             float(schema.raw_action or 0) / 16.0,
-            _stable_projection(schema.action, salt=11),
-            _stable_projection(schema.role, salt=3),
-            _stable_projection(schema.family, salt=7),
+            _stable_projection(schema.action, salt=11) if config.include_exact_action_projection else 0.0,
+            _stable_projection(schema.role, salt=3) if config.include_role_projection else 0.0,
+            _stable_projection(schema.family, salt=7) if config.include_family_projection else 0.0,
         ]
     )
     row.extend(_object_features(state, obj))

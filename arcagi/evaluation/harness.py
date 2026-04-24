@@ -550,6 +550,15 @@ def _compact_diagnostics(diagnostics: Any) -> dict[str, Any]:
         "level_step",
         "online_adapt_updates",
         "pretrain_updates",
+        "selection_mode",
+        "selected_action_probability",
+        "selected_family_probability",
+        "family_probabilities",
+        "effective_action_support",
+        "effective_family_support",
+        "family_temperature",
+        "action_temperature",
+        "action_feature_config",
     }
     compact: dict[str, Any] = {}
     for key in keep_keys:

@@ -16,6 +16,9 @@
 - [x] Apply the first GPT-Pro validity-fix batch: pre-outcome update features, fresh online adaptation counters, hidden memory snapshots, value head, retrospective success credit, level-local/session-global belief split, trace diagnostics, and mixed learner-owned training rollouts.
 - [x] Re-establish revised synthetic gates after the validity fixes: `artifacts/learned_online_recurrent_mixed_localbelief_2000.pkl` reaches `40/40` heldout on all six current recurrent tasks.
 - [ ] Fix the new post-validity AR25 failure mode: dense-click fixation under all-negative tiny-margin scores, without adding scripted action-pattern search, click caps, or per-game tuning.
+- [x] Replace greedy recurrent selection with factorized full-support stochastic selection that scores the full dense surface, normalizes family mass, disables exact action-string projection, and passes non-sweep/order/full-support tests.
+- [x] Add dense arbitration/remap gates and train `artifacts/learned_online_recurrent_factorized_densemix_3000.pkl`, which clears all nine current heldout synthetic tasks at `40/40`.
+- [ ] Fix the remaining AR25 failure after factorized policy: action diversity is restored, but scores remain all-negative and low-progress with zero reward after 80 steps.
 - [ ] Add randomized online-adaptation synthetic gates: visible-vs-useful traps, randomized binding, dense coordinate grounding, and mode/carryover mechanics with frozen/table/sweep baselines.
 - [ ] Pass learned-online gates before any ARC success claim: online beats frozen, learned beats count baselines where required, no-sweep tests pass, dense action scoring is complete, and memory/question ablations matter.
 - [x] Record the new hard prohibition in repo docs: no hand-coded action search patterns, movement sweeps, counted probes, scripted reset/replay loops, graph-search controller fallback, shortest-path frontier expansion, or coverage search may be used as the ARC-facing learned-agent solver.

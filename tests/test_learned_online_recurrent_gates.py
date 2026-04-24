@@ -9,6 +9,8 @@ import numpy as np
 from arcagi.agents.learned_online_recurrent_agent import LearnedOnlineRecurrentAgent
 from arcagi.core.types import GridObservation
 from arcagi.evaluation.harness import build_agent, run_episode
+from arcagi.learned_online.action_features import ActionFeatureConfig, encode_action_candidates
+from arcagi.learned_online.curriculum import NullDenseClickTask, RowMajorSweepPolicy
 from arcagi.learned_online.memory import OnlineMemoryEntry
 from arcagi.learned_online.minimal_model import MinimalOnlineModel
 from arcagi.learned_online.questions import QuestionToken
@@ -189,7 +191,100 @@ def test_trace_compact_diagnostics_include_recurrent_scores(tmp_path) -> None:
     assert "online_adapt_updates" in step["diagnostics"]
 
 
+def test_clean_recurrent_action_features_disable_exact_action_identity() -> None:
+    agent = LearnedOnlineRecurrentAgent(seed=14)
+    observation = GridObservation("features", "0", 0, np.zeros((2, 2), dtype=np.int64), ("foo_a", "foo_b"))
+    state = agent.observe(observation)
+    clean = encode_action_candidates(state, ("foo_a", "foo_b"))
+    exact = encode_action_candidates(
+        state,
+        ("foo_a", "foo_b"),
+        config=ActionFeatureConfig(include_exact_action_projection=True),
+    )
+
+    assert np.allclose(clean.features[0], clean.features[1])
+    assert not np.allclose(exact.features[0], exact.features[1])
+    assert agent.policy.action_feature_config.include_exact_action_projection is False
+
+
+def test_factorized_softmax_scores_full_dense_surface_with_full_support() -> None:
+    agent = LearnedOnlineRecurrentAgent(seed=15)
+    actions = tuple(f"click:{x}:{y}" for y in range(10) for x in range(10)) + ("1", "5", "7")
+    observation = _obs(levels_completed=0, grid=np.zeros((10, 10), dtype=np.int64), actions=actions)
+    state = agent.observe(observation)
+    decisions = agent.policy.score_actions(state, actions, question=QuestionToken.TEST_PARAMETER_GROUNDING)
+    probabilities, family_probabilities = agent.policy.factorized_action_probabilities(
+        state,
+        actions,
+        {action: decision.score for action, decision in decisions.items()},
+    )
+
+    assert len(decisions) == len(actions)
+    assert set(probabilities) == set(actions)
+    assert all(value > 0.0 for value in probabilities.values())
+    assert abs(sum(probabilities.values()) - 1.0) < 1e-8
+    assert abs(sum(family_probabilities.values()) - 1.0) < 1e-8
+
+
+def test_factorized_softmax_action_order_equivariant() -> None:
+    agent = LearnedOnlineRecurrentAgent(seed=16)
+    actions = tuple(f"click:{x}:{y}" for y in range(5) for x in range(5)) + ("1", "5", "7")
+    observation = _obs(levels_completed=0, grid=np.zeros((5, 5), dtype=np.int64), actions=actions)
+    state = agent.observe(observation)
+    decisions = agent.policy.score_actions(state, actions, question=QuestionToken.TEST_PARAMETER_GROUNDING)
+    probs_a, _families_a = agent.policy.factorized_action_probabilities(
+        state,
+        actions,
+        {action: decision.score for action, decision in decisions.items()},
+    )
+    shuffled = list(actions)
+    np.random.default_rng(16).shuffle(shuffled)
+    decisions_b = agent.policy.score_actions(state, shuffled, question=QuestionToken.TEST_PARAMETER_GROUNDING)
+    probs_b, _families_b = agent.policy.factorized_action_probabilities(
+        state,
+        shuffled,
+        {action: decision.score for action, decision in decisions_b.items()},
+    )
+
+    assert set(probs_a) == set(probs_b)
+    for action in actions:
+        assert abs(probs_a[action] - probs_b[action]) < 1e-8
+
+
+def test_flat_scores_are_family_count_normalized() -> None:
+    agent = LearnedOnlineRecurrentAgent(seed=17)
+    clicks = tuple(f"click:{x}:{y}" for y in range(20) for x in range(20))
+    actions = clicks + ("0", "1", "5", "7")
+    observation = _obs(levels_completed=0, grid=np.zeros((20, 20), dtype=np.int64), actions=actions)
+    state = agent.observe(observation)
+    flat_scores = {action: 0.0 for action in actions}
+    probabilities, family_probabilities = agent.policy.factorized_action_probabilities(state, actions, flat_scores)
+
+    assert 0.18 <= family_probabilities["click:none"] <= 0.22
+    assert 0.18 <= family_probabilities["move:none"] <= 0.22
+    assert 0.18 <= family_probabilities["select:none"] <= 0.22
+    assert 0.18 <= family_probabilities["undo:none"] <= 0.22
+    assert 0.18 <= family_probabilities["reset:none"] <= 0.22
+    assert abs(sum(probabilities[action] for action in clicks) - family_probabilities["click:none"]) < 1e-8
+    assert max(probabilities[action] for action in clicks) < 0.001
+
+
+def test_factorized_softmax_not_row_major_or_untried_enumerator_on_null_dense_task() -> None:
+    agent_coords = _rollout_click_coords(
+        LearnedOnlineRecurrentAgent(seed=18),
+        NullDenseClickTask(width=10, height=10),
+        steps=30,
+    )
+    sweep_coords = _rollout_click_coords(RowMajorSweepPolicy(), NullDenseClickTask(width=10, height=10), steps=30)
+
+    assert _monotone_sweep_score(agent_coords) < _monotone_sweep_score(sweep_coords)
+    assert agent_coords != sweep_coords
+    assert len(set(agent_coords)) < len(agent_coords)
+
+
 def _obs(*, levels_completed: int, grid: np.ndarray, actions: tuple[str, ...]) -> GridObservation:
+    roles = {action: "raw" for action in actions}
+    roles.update({"0": "reset_level", "1": "move_up", "5": "select_cycle", "7": "undo"})
     return GridObservation(
         task_id="recurrent_test",
         episode_id="0",
@@ -201,6 +296,39 @@ def _obs(*, levels_completed: int, grid: np.ndarray, actions: tuple[str, ...]) -
                 "interface_levels_completed": str(levels_completed),
                 "interface_game_state": "GameState.NOT_FINISHED",
             },
-            "action_roles": {action: "raw" for action in actions},
+            "action_roles": roles,
         },
     )
+
+
+def _rollout_click_coords(agent, env: NullDenseClickTask, *, steps: int) -> list[tuple[int, int]]:
+    observation = env.reset(seed=0)
+    reset = getattr(agent, "reset_episode", None)
+    if callable(reset):
+        reset()
+    coords: list[tuple[int, int]] = []
+    for _ in range(steps):
+        action = str(agent.act(observation))
+        parts = action.split(":")
+        if len(parts) == 3 and parts[0] == "click":
+            coords.append((int(parts[1]), int(parts[2])))
+        result = env.step(action)
+        update = getattr(agent, "update_after_step", None)
+        if callable(update):
+            update(
+                next_observation=result.observation,
+                reward=result.reward,
+                terminated=result.terminated or result.truncated,
+                info=result.info,
+            )
+        observation = result.observation
+    return coords
+
+
+def _monotone_sweep_score(coords: list[tuple[int, int]]) -> float:
+    if len(coords) < 2:
+        return 0.0
+    ranks = [y * 1000 + x for x, y in coords]
+    adjacent_increments = sum(1 for left, right in zip(ranks, ranks[1:]) if right == left + 1)
+    monotone = sum(1 for left, right in zip(ranks, ranks[1:]) if right > left)
+    return max(adjacent_increments, monotone) / float(len(ranks) - 1)
