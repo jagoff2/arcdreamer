@@ -668,3 +668,30 @@ Current conclusion:
 - Recurrent synthetic gates are now strong enough to justify one diagnostic 80-step ARC smoke.
 - This is still not an ARC success claim.
 - The next ARC run must be judged by objective progress first, and by learned-decision diagnostics second.
+
+## 2026-04-24 14:46 EDT
+
+ARC task success prototype:
+
+1. Ran the first serious clean recurrent ARC attempt after recurrent synthetic gates passed:
+   - `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent learned_online_recurrent --checkpoint-path artifacts\learned_online_recurrent_synth_actionid_12000.pkl --game-id ar25-0c556536 --mode offline --max-steps 320 --progress-every 80 --trace-path artifacts\traces\learned_online_recurrent_synth12000_320.jsonl`
+2. Result:
+   - `success=true`
+   - `won=false`
+   - `return=1.0`
+   - `levels_completed=1`
+   - `steps=320`
+   - `interaction_steps=37`
+   - `reset_steps=2`
+   - `dense_action_surface=true`
+   - `scored_action_count=447`
+   - `legal_action_count=447`
+   - `controller_kind=learned_online_recurrent_v1`
+   - `learned_online_controller=true`
+   - `spotlight_feature_schema_version=0`
+3. Interpretation:
+   - This is a clean learned ARC task success prototype because the recurrent learned-online agent achieved real ARC level progress under the full dense action surface without Spotlight, RuntimeRuleController, HybridPlanner, TheoryManager, graph/frontier control, or scripted probe ownership.
+   - It is not a full ARC game win because `won=false` and only `1` level was completed.
+4. Follow-up already started:
+   - A 1000-step continuation run is active to test cross-level carryover and full game completion:
+     - `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent learned_online_recurrent --checkpoint-path artifacts\learned_online_recurrent_synth_actionid_12000.pkl --game-id ar25-0c556536 --mode offline --max-steps 1000 --progress-every 100 --trace-path artifacts\traces\learned_online_recurrent_synth12000_1000.jsonl`
