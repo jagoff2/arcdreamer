@@ -350,3 +350,38 @@ Current conclusion:
 
 - Checkpoints and train/eval holdout snapshots no longer drop the main online-learned scientist state.
 - This is still not an ARC success claim. It removes another blocker that made training/eval state discontinuous.
+
+Follow-up preservation action:
+
+- Committed the slice:
+  - `401f9fa Persist scientist online learning state`
+- Pushed to `origin/main`.
+
+## 2026-04-24 09:59 EDT
+
+Operator actions:
+
+1. Implemented a dense-action-surface guard for ARC train/eval paths:
+   - Added `require_dense_arc_action_surface()` in `arcagi.envs.arc_adapter`.
+   - Wired it into `arcagi.evaluation.harness.evaluate_arc`.
+   - Wired it into `arcagi.scientist.train_arc`.
+   - Wired it into `arcagi.training.arc_public`.
+   - Added explicit `--allow-sparse-click-smoke` flags for debug-only reduced-click runs.
+2. Added tests proving clean ARC eval/training rejects `ARCAGI_SPARSE_CLICKS_BASELINE=1` unless explicitly marked as smoke/debug.
+
+Validation:
+
+- Compile check:
+  - `.venv313\Scripts\python.exe -m py_compile arcagi\envs\arc_adapter.py arcagi\evaluation\harness.py arcagi\scientist\train_arc.py arcagi\training\arc_public.py tests\test_eval_path_constraints.py tests\test_arc_public_training.py`
+  - Result: passed.
+- Sparse-click guard tests:
+  - `python -m pytest tests/test_eval_path_constraints.py tests/test_arc_adapter_helpers.py tests/test_arc_public_training.py -q`
+  - Result: `27 passed in 1.42s`.
+- Combined targeted tests:
+  - `python -m pytest tests/test_action_spotlight.py tests/test_scientist_agent.py tests/test_scientist_training.py tests/test_arc_adapter_helpers.py tests/test_eval_path_constraints.py tests/test_arc_public_training.py -q`
+  - Result: `78 passed in 126.22s`.
+
+Current conclusion:
+
+- Clean ARC train/eval paths now fail fast if the sparse-click debug baseline would hide dense legal click parameters.
+- Explicit smoke/debug reduced-action runs remain possible but are labeled by metadata and cannot be confused with clean success.

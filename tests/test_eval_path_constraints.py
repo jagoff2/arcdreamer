@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import pytest
 import torch
 
+import arcagi.evaluation.harness as harness
 from arcagi.evaluation.harness import build_agent
+from arcagi.envs.arc_adapter import require_dense_arc_action_surface
 
 
 def test_clean_eval_agents_do_not_construct_runtime_controller() -> None:
@@ -31,3 +34,21 @@ def test_clean_eval_agents_do_not_construct_runtime_controller() -> None:
     assert hybrid.runtime_rule_controller is None
     assert hybrid.config.use_theory_manager is True
     assert hybrid.theory_manager is not None
+
+
+def test_arc_eval_rejects_sparse_click_surface_without_smoke_flag(monkeypatch) -> None:
+    monkeypatch.setenv("ARCAGI_SPARSE_CLICKS_BASELINE", "1")
+    monkeypatch.setattr(harness, "arc_toolkit_available", lambda: True)
+
+    with pytest.raises(RuntimeError, match="hides legal ARC click parameters"):
+        harness.evaluate_arc("random", game_id="game-0")
+
+
+def test_sparse_click_surface_is_explicitly_labeled_when_allowed(monkeypatch) -> None:
+    monkeypatch.setenv("ARCAGI_SPARSE_CLICKS_BASELINE", "1")
+
+    metadata = require_dense_arc_action_surface(context="test", allow_sparse_click_smoke=True)
+
+    assert metadata["dense_action_surface"] is False
+    assert metadata["sparse_click_baseline"] is True
+    assert metadata["allow_sparse_click_smoke"] is True

@@ -114,6 +114,19 @@ def _make_goal_scientist_config(**overrides: Any):
     return goal_scientist_public.GoalScientistPublicTrainingConfig(**{key: value for key, value in values.items() if key in fields})
 
 
+def test_arc_public_training_rejects_sparse_click_surface_without_smoke_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ARCAGI_SPARSE_CLICKS_BASELINE", "1")
+
+    with pytest.raises(RuntimeError, match="hides legal ARC click parameters"):
+        arc_public._validate_arc_public_training_config(_make_arc_public_config())
+
+
+def test_arc_public_training_can_explicitly_label_sparse_click_smoke_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ARCAGI_SPARSE_CLICKS_BASELINE", "1")
+
+    arc_public._validate_arc_public_training_config(_make_arc_public_config(allow_sparse_click_smoke=True))
+
+
 def _patch_public_arc_toolkit(monkeypatch: pytest.MonkeyPatch, module: Any, env_cls: type[Any]) -> None:
     monkeypatch.setattr(module, "arc_toolkit_available", lambda: True)
     monkeypatch.setattr(module, "arc_operation_mode", lambda mode: mode)

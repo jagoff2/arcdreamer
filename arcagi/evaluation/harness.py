@@ -10,7 +10,14 @@ from typing import Any
 from arcagi.agents.graph_agent import GraphExplorerAgent
 from arcagi.agents.random_agent import RandomHeuristicAgent
 from arcagi.core.progress_signals import action_family
-from arcagi.envs.arc_adapter import Arcade, ArcToolkitEnv, arc_operation_mode, arc_toolkit_available, list_arc_games
+from arcagi.envs.arc_adapter import (
+    Arcade,
+    ArcToolkitEnv,
+    arc_operation_mode,
+    arc_toolkit_available,
+    list_arc_games,
+    require_dense_arc_action_surface,
+)
 from arcagi.envs.synthetic import DEFAULT_SYNTHETIC_FAMILY_MODES, HiddenRuleEnv, family_variants_for_mode
 
 
@@ -397,9 +404,14 @@ def evaluate_arc(
     max_steps: int | None = 256,
     progress_every: int = 0,
     trace_path: str | None = None,
+    allow_sparse_click_smoke: bool = False,
 ) -> dict[str, object]:
     if not arc_toolkit_available():
         return {"agent": agent_name, "skipped": True, "reason": "ARC toolkit not installed"}
+    action_surface = require_dense_arc_action_surface(
+        context="ARC evaluation",
+        allow_sparse_click_smoke=allow_sparse_click_smoke,
+    )
     operation_mode = arc_operation_mode(mode)
     if game_id:
         games = [game_id]
@@ -431,7 +443,7 @@ def evaluate_arc(
                 close_scorecard()
             except Exception:
                 pass
-    return {"agent": agent_name, "mode": mode, "games": results}
+    return {"agent": agent_name, "mode": mode, **action_surface, "games": results}
 
 
 def _trace_path_for_game(base_path: str, game_id: str, index: int, game_count: int) -> Path:
@@ -573,6 +585,11 @@ def build_parser() -> argparse.ArgumentParser:
     arc_parser.add_argument("--progress-every", type=int, default=0)
     arc_parser.add_argument("--trace-path", type=str, default="")
     arc_parser.add_argument("--mode", type=str, default="offline")
+    arc_parser.add_argument(
+        "--allow-sparse-click-smoke",
+        action="store_true",
+        help="allow ARCAGI_SPARSE_CLICKS_BASELINE=1 for explicitly invalid smoke/debug runs",
+    )
     return parser
 
 
@@ -599,6 +616,7 @@ def main() -> int:
             progress_every=max(0, int(args.progress_every)),
             mode=args.mode,
             trace_path=args.trace_path or None,
+            allow_sparse_click_smoke=bool(args.allow_sparse_click_smoke),
         )
         print(json.dumps(result, indent=2))
         return 0

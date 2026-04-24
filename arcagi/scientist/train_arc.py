@@ -20,7 +20,13 @@ from arcagi.agents.scientist_agent import (
     load_spotlight_scientist_checkpoint,
     save_spotlight_scientist_checkpoint,
 )
-from arcagi.envs.arc_adapter import ArcToolkitEnv, arc_operation_mode, arc_toolkit_available, list_arc_games
+from arcagi.envs.arc_adapter import (
+    ArcToolkitEnv,
+    arc_operation_mode,
+    arc_toolkit_available,
+    list_arc_games,
+    require_dense_arc_action_surface,
+)
 
 from .runtime import run_episode
 
@@ -37,11 +43,16 @@ class ScientistArcTrainingConfig:
     checkpoint_path: str = "artifacts/scientist_arc_offline_best.pkl"
     latest_checkpoint_path: str = "artifacts/scientist_arc_offline_latest.pkl"
     init_checkpoint_path: str = ""
+    allow_sparse_click_smoke: bool = False
 
 
 def train_arc_offline(config: ScientistArcTrainingConfig) -> dict[str, object]:
     if not arc_toolkit_available():
         raise RuntimeError("ARC toolkit is not installed in this environment")
+    action_surface = require_dense_arc_action_surface(
+        context="scientist ARC training",
+        allow_sparse_click_smoke=config.allow_sparse_click_smoke,
+    )
     operation_mode = arc_operation_mode(config.mode)
     available_games = list_arc_games(operation_mode=operation_mode)
     if config.game_id not in available_games:
@@ -109,6 +120,7 @@ def train_arc_offline(config: ScientistArcTrainingConfig) -> dict[str, object]:
     save_spotlight_scientist_checkpoint(agent, config.latest_checkpoint_path)
     summary = {
         "config": asdict(config),
+        **action_surface,
         "spotlight_feature_schema_version": _spotlight_feature_schema_version(agent),
         "sessions": config.sessions,
         "train_session_win_rate": _mean_bool(item["won"] for item in train_rows),
@@ -139,6 +151,10 @@ def evaluate_arc_offline(
     config: ScientistArcTrainingConfig,
     operation_mode: Any | None = None,
 ) -> dict[str, object]:
+    action_surface = require_dense_arc_action_surface(
+        context="scientist ARC holdout evaluation",
+        allow_sparse_click_smoke=config.allow_sparse_click_smoke,
+    )
     snapshot = agent.state_dict()
     returns: list[float] = []
     session_wins: list[bool] = []
@@ -162,6 +178,7 @@ def evaluate_arc_offline(
         steps.append(int(result.steps))
         diagnostics = dict(result.diagnostics)
     return {
+        **action_surface,
         "session_win_rate": _mean_bool(session_wins),
         "success_rate": _mean_bool(session_wins),
         "avg_levels_completed": mean(float(value) for value in levels_completed) if levels_completed else 0.0,
@@ -185,6 +202,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--checkpoint-path", type=str, default="artifacts/scientist_arc_offline_best.pkl")
     parser.add_argument("--latest-checkpoint-path", type=str, default="artifacts/scientist_arc_offline_latest.pkl")
     parser.add_argument("--init-checkpoint-path", type=str, default="")
+    parser.add_argument(
+        "--allow-sparse-click-smoke",
+        action="store_true",
+        help="allow ARCAGI_SPARSE_CLICKS_BASELINE=1 for explicitly invalid smoke/debug runs",
+    )
     return parser
 
 
@@ -203,6 +225,7 @@ def main(argv: list[str] | None = None) -> None:
             checkpoint_path=args.checkpoint_path,
             latest_checkpoint_path=args.latest_checkpoint_path,
             init_checkpoint_path=args.init_checkpoint_path,
+            allow_sparse_click_smoke=bool(args.allow_sparse_click_smoke),
         )
     )
 

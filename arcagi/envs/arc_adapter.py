@@ -451,6 +451,33 @@ def _expand_actions(
     return tuple(dict.fromkeys(actions))
 
 
+def sparse_click_baseline_requested() -> bool:
+    return str(os.environ.get("ARCAGI_SPARSE_CLICKS_BASELINE", "")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def require_dense_arc_action_surface(*, context: str, allow_sparse_click_smoke: bool = False) -> dict[str, object]:
+    """Fail clean ARC train/eval paths if a debug action-surface reduction is enabled."""
+
+    sparse_clicks = sparse_click_baseline_requested()
+    dense_surface = not sparse_clicks
+    metadata = {
+        "dense_action_surface": dense_surface,
+        "sparse_click_baseline": sparse_clicks,
+        "allow_sparse_click_smoke": bool(allow_sparse_click_smoke),
+    }
+    if sparse_clicks and not allow_sparse_click_smoke:
+        raise RuntimeError(
+            f"{context} cannot run with ARCAGI_SPARSE_CLICKS_BASELINE=1 because it hides legal ARC click parameters. "
+            "Unset it for train/eval, or pass the explicit sparse-click smoke/debug flag and do not claim ARC success."
+        )
+    return metadata
+
+
 def _with_terminal_reset(actions: tuple[ActionName, ...], observation: Any) -> tuple[ActionName, ...]:
     if "0" in actions:
         return actions

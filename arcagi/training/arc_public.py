@@ -19,7 +19,13 @@ from arcagi.core.progress_signals import (
 )
 from arcagi.core.types import StructuredState
 from arcagi.core.utils import seed_everything
-from arcagi.envs.arc_adapter import ArcToolkitEnv, arc_operation_mode, arc_toolkit_available, list_arc_games
+from arcagi.envs.arc_adapter import (
+    ArcToolkitEnv,
+    arc_operation_mode,
+    arc_toolkit_available,
+    list_arc_games,
+    require_dense_arc_action_surface,
+)
 from arcagi.models.encoder import StructuredStateEncoder
 from arcagi.models.language import GroundedLanguageModel
 from arcagi.models.world_model import RecurrentWorldModel
@@ -46,12 +52,17 @@ class ArcPublicTrainingConfig:
     policy_positive_threshold: float = 0.15
     freeze_encoder: bool = True
     language_loss_weight: float = 0.2
+    allow_sparse_click_smoke: bool = False
 
 
 _ALLOWED_ARC_PUBLIC_BEHAVIOR_POLICIES: frozenset[str] = frozenset({"graph", "random", "learned", "hybrid"})
 
 
 def _validate_arc_public_training_config(config: ArcPublicTrainingConfig) -> None:
+    require_dense_arc_action_surface(
+        context="ARC public training",
+        allow_sparse_click_smoke=config.allow_sparse_click_smoke,
+    )
     if int(config.game_limit) <= 0:
         raise ValueError("game_limit must be positive")
     if int(config.sessions_per_game) <= 0:
@@ -312,6 +323,10 @@ def collect_arc_public_sessions(
     device: torch.device | None = None,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     _validate_arc_public_training_config(config)
+    action_surface = require_dense_arc_action_surface(
+        context="ARC public data collection",
+        allow_sparse_click_smoke=config.allow_sparse_click_smoke,
+    )
     if not arc_toolkit_available():
         raise RuntimeError("ARC toolkit is not installed in this environment.")
     operation_mode = arc_operation_mode(config.mode)
@@ -356,7 +371,7 @@ def collect_arc_public_sessions(
                 for sample in session_samples:
                     _apply_arc_objective_labels(sample)
                 dataset.extend(session_samples)
-                session_summaries.append(asdict(session_summary))
+                session_summaries.append({**action_surface, **asdict(session_summary)})
         finally:
             env.close()
     return dataset, session_summaries
@@ -576,6 +591,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="comma-separated collector policies from {random,learned}; graph/hybrid are baseline-only and not valid for clean success claims",
     )
     parser.add_argument("--unfreeze-encoder", action="store_true")
+    parser.add_argument(
+        "--allow-sparse-click-smoke",
+        action="store_true",
+        help="allow ARCAGI_SPARSE_CLICKS_BASELINE=1 for explicitly invalid smoke/debug runs",
+    )
     return parser
 
 
@@ -595,6 +615,7 @@ def main() -> int:
         seed=args.seed,
         behavior_policies=tuple(policy.strip() for policy in args.behavior_policies.split(",") if policy.strip()),
         freeze_encoder=not args.unfreeze_encoder,
+        allow_sparse_click_smoke=bool(args.allow_sparse_click_smoke),
     )
     metrics = train_arc_public(config)
     print(json.dumps(metrics, indent=2))
