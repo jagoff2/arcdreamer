@@ -33,6 +33,12 @@ def build_agent(agent_name: str, checkpoint_path: str | None = None, device: Any
         if checkpoint_path and Path(checkpoint_path).exists():
             return LearnedOnlineMinimalAgent.from_checkpoint(checkpoint_path)
         return LearnedOnlineMinimalAgent()
+    if normalized in {"learned_online_recurrent", "learned_online_recurrent_v1", "online_recurrent"}:
+        from arcagi.agents.learned_online_recurrent_agent import LearnedOnlineRecurrentAgent
+
+        if checkpoint_path and Path(checkpoint_path).exists():
+            return LearnedOnlineRecurrentAgent.from_checkpoint(checkpoint_path)
+        return LearnedOnlineRecurrentAgent()
     if normalized in {"scientist", "hyper_scientist", "hyper-generalizing-scientist", "spotlight", "spotlight_scientist"}:
         from arcagi.agents.scientist_agent import (
             HyperGeneralizingScientistAgent,

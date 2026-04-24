@@ -123,6 +123,96 @@ class NullDenseClickTask:
         return GridObservation("null_dense_click", str(self.seed), self.step_index, grid, actions)
 
 
+@dataclass
+class VisibleMovementTrapTask:
+    seed: int = 0
+    step_index: int = 0
+    position: int = 0
+
+    def reset(self, seed: int | None = None) -> GridObservation:
+        if seed is not None:
+            self.seed = int(seed)
+        self.step_index = 0
+        self.position = 0
+        return self._observation()
+
+    def step(self, action: ActionName) -> StepResult:
+        self.step_index += 1
+        if action == "move_left":
+            self.position = max(0, self.position - 1)
+        elif action == "move_right":
+            self.position = min(3, self.position + 1)
+        reward = 1.0 if action == "commit" else 0.0
+        return StepResult(self._observation(), reward, bool(reward > 0.0), False, {})
+
+    def _observation(self) -> GridObservation:
+        grid = np.zeros((1, 4), dtype=np.int64)
+        grid[0, self.position] = 1
+        return GridObservation("visible_movement_trap", str(self.seed), self.step_index, grid, ("move_left", "move_right", "commit"))
+
+
+@dataclass
+class MovementRequiredAfterModeTask:
+    seed: int = 0
+    step_index: int = 0
+    mode: bool = False
+    position: int = 0
+
+    def reset(self, seed: int | None = None) -> GridObservation:
+        if seed is not None:
+            self.seed = int(seed)
+        self.step_index = 0
+        self.mode = False
+        self.position = 0
+        return self._observation()
+
+    def step(self, action: ActionName) -> StepResult:
+        self.step_index += 1
+        reward = 0.0
+        if action == "mode":
+            self.mode = True
+        elif action == "move_right" and self.mode:
+            self.position += 1
+            if self.position >= 2:
+                reward = 1.0
+        elif action == "move_right":
+            self.position = 0
+        return StepResult(self._observation(), reward, bool(reward > 0.0), False, {})
+
+    def _observation(self) -> GridObservation:
+        grid = np.zeros((1, 3), dtype=np.int64)
+        grid[0, min(self.position, 2)] = 2 if self.mode else 1
+        return GridObservation("movement_required_after_mode", str(self.seed), self.step_index, grid, ("mode", "move_right", "noop"))
+
+
+@dataclass
+class DelayedUnlockTask:
+    seed: int = 0
+    step_index: int = 0
+    unlocked: bool = False
+
+    def reset(self, seed: int | None = None) -> GridObservation:
+        if seed is not None:
+            self.seed = int(seed)
+        self.step_index = 0
+        self.unlocked = False
+        return self._observation()
+
+    def step(self, action: ActionName) -> StepResult:
+        self.step_index += 1
+        reward = 0.0
+        if action == "unlock":
+            self.unlocked = True
+        elif action == "goal" and self.unlocked:
+            reward = 1.0
+        return StepResult(self._observation(), reward, bool(reward > 0.0), False, {})
+
+    def _observation(self) -> GridObservation:
+        grid = np.array([[1, 2 if self.unlocked else 0]], dtype=np.int64)
+        actions = ("goal", "noop", "unlock") if self.unlocked else ("unlock", "noop")
+        return GridObservation("delayed_unlock", str(self.seed), self.step_index, grid, actions)
+
+
 class RowMajorSweepPolicy:
     def __init__(self) -> None:
         self.index = 0

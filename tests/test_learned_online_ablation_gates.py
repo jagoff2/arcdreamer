@@ -25,7 +25,7 @@ def test_memory_features_change_controlled_scores_when_model_uses_memory_feature
     agent = LearnedOnlineMinimalAgent(seed=0)
     observation = GridObservation("memory", "0", 0, np.zeros((2, 2), dtype=np.int64), ("a", "b"))
     state = agent.observe(observation)
-    memory_start = 38 + 26
+    memory_start = 40 + 26
     agent.policy.model.weights["useful"][memory_start + 1] = 1.2
 
     before = agent.score_actions_for_state(state, ("a",), question=QuestionToken.TEST_ACTION_MEANING)

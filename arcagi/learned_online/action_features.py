@@ -16,7 +16,7 @@ from arcagi.core.types import ActionName, ObjectState, StructuredState
 
 ACTION_TYPES: tuple[str, ...] = ("click", "move", "interact", "select", "reset", "undo", "wait", "raw", "other")
 DIRECTIONS: tuple[str, ...] = ("none", "up", "down", "left", "right")
-ACTION_FEATURE_DIM = 38
+ACTION_FEATURE_DIM = 40
 
 
 @dataclass(frozen=True)
@@ -81,6 +81,7 @@ def _encode_one_action(state: StructuredState, schema: ActionSchema) -> list[flo
             float(click_y) / max(float(height), 1.0),
             float(click_x) / max(float(width), 1.0),
             float(schema.raw_action or 0) / 16.0,
+            _stable_projection(schema.action, salt=11),
             _stable_projection(schema.role, salt=3),
             _stable_projection(schema.family, salt=7),
         ]

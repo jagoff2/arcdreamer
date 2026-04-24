@@ -618,3 +618,53 @@ Current conclusion:
 - No ARC success yet.
 - The clean minimal path is preserved as scaffolding and gates, not as competence.
 - Further ARC runs before recurrent synthetic gates would be misleading and would invite forbidden family/cost tuning.
+
+## 2026-04-24 14:38 EDT
+
+Operator actions:
+
+1. Implemented `learned_online_recurrent_v1`:
+   - `arcagi.learned_online.sequence`
+   - `arcagi.learned_online.recurrent_model`
+   - `arcagi.learned_online.recurrent_policy`
+   - `arcagi.agents.learned_online_recurrent_agent`
+2. Kept the same clean dependency boundary:
+   - no Spotlight;
+   - no TheoryManager;
+   - no RuntimeRuleController;
+   - no HybridPlanner;
+   - no graph/frontier/search controller.
+3. Added harder synthetic sequence tasks:
+   - `VisibleMovementTrapTask`
+   - `MovementRequiredAfterModeTask`
+   - `DelayedUnlockTask`
+4. Added recurrent boundary and hidden-state tests.
+5. Added `scripts/train_learned_online_recurrent.py`.
+6. Found a generic feature bug: unknown symbolic actions such as `trap` and `useful` collapsed to the same action features. Added a stable action-identity projection to the generic action feature vector.
+7. Trained recurrent checkpoints:
+   - `artifacts\learned_online_recurrent_synth_3000.pkl`: expanded curriculum `success_rate=0.8217`.
+   - `artifacts\learned_online_recurrent_synth_10000.pkl`: expanded curriculum `success_rate=0.8381`.
+   - `artifacts\learned_online_recurrent_synth_avail_10000.pkl`: expanded curriculum `success_rate=0.8385`.
+   - `artifacts\learned_online_recurrent_synth_actionid_12000.pkl`: expanded curriculum `success_rate=0.8432`.
+8. Heldout check for `learned_online_recurrent_synth_actionid_12000.pkl`:
+   - `VisibleUsefulTrapTask`: `40/40`
+   - `RandomizedBindingTask`: `40/40`
+   - `DenseCoordinateGroundingTask`: `40/40`
+   - `VisibleMovementTrapTask`: `40/40`
+   - `MovementRequiredAfterModeTask`: `40/40`
+   - `DelayedUnlockTask`: `40/40`
+
+Validation:
+
+- Recurrent/sequence focused tests:
+  - `python -m pytest tests\test_learned_online_recurrent_gates.py tests\test_learned_online_sequence_curriculum.py tests\test_learned_online_claim_boundary.py tests\test_learned_online_dense_surface.py tests\test_learned_online_update_loop.py tests\test_learned_online_no_sweep.py tests\test_learned_online_synthetic_gates.py tests\test_learned_online_ablation_gates.py tests\test_eval_path_constraints.py -q`
+  - Result: `32 passed in 9.03s`.
+- Combined targeted regression:
+  - `python -m pytest tests\test_learned_online_recurrent_gates.py tests\test_learned_online_sequence_curriculum.py tests\test_learned_online_claim_boundary.py tests\test_learned_online_dense_surface.py tests\test_learned_online_update_loop.py tests\test_learned_online_no_sweep.py tests\test_learned_online_synthetic_gates.py tests\test_learned_online_ablation_gates.py tests\test_action_spotlight.py tests\test_scientist_agent.py tests\test_scientist_training.py tests\test_arc_adapter_helpers.py tests\test_eval_path_constraints.py tests\test_arc_public_training.py -q`
+  - Result: `117 passed in 127.87s`.
+
+Current conclusion:
+
+- Recurrent synthetic gates are now strong enough to justify one diagnostic 80-step ARC smoke.
+- This is still not an ARC success claim.
+- The next ARC run must be judged by objective progress first, and by learned-decision diagnostics second.
