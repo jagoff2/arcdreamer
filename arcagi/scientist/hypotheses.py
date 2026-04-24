@@ -175,6 +175,62 @@ class HypothesisEngine:
     def reset_level(self) -> None:
         self.recent_actions.clear()
 
+    def state_dict(self) -> dict[str, Any]:
+        return {
+            "max_hypotheses": int(self.max_hypotheses),
+            "transition_count": int(self.transition_count),
+            "positive_examples": int(self.positive_examples),
+            "recent_actions": list(self.recent_actions),
+            "hypotheses": [
+                {
+                    "hypothesis_id": hyp.hypothesis_id,
+                    "kind": hyp.kind,
+                    "action_family": hyp.action_family,
+                    "params": dict(hyp.params),
+                    "description": hyp.description,
+                    "created_step": int(hyp.created_step),
+                    "mdl_penalty": float(hyp.mdl_penalty),
+                    "last_updated_step": int(hyp.last_updated_step),
+                    "evidence": {
+                        "support": float(hyp.evidence.support),
+                        "contradiction": float(hyp.evidence.contradiction),
+                        "trials": int(hyp.evidence.trials),
+                    },
+                }
+                for hyp in self.hypotheses.values()
+            ],
+        }
+
+    def load_state_dict(self, state: Mapping[str, Any]) -> None:
+        self.max_hypotheses = int(state.get("max_hypotheses", self.max_hypotheses))
+        self.transition_count = int(state.get("transition_count", 0))
+        self.positive_examples = int(state.get("positive_examples", 0))
+        self.recent_actions = [str(action) for action in state.get("recent_actions", [])][-16:]
+        self.hypotheses.clear()
+        for raw in state.get("hypotheses", []):
+            if not isinstance(raw, Mapping):
+                continue
+            evidence_state = raw.get("evidence", {})
+            evidence = Evidence()
+            if isinstance(evidence_state, Mapping):
+                evidence.support = float(evidence_state.get("support", 0.0))
+                evidence.contradiction = float(evidence_state.get("contradiction", 0.0))
+                evidence.trials = int(evidence_state.get("trials", 0))
+            hyp = Hypothesis(
+                hypothesis_id=str(raw.get("hypothesis_id", "")),
+                kind=str(raw.get("kind", "")),
+                action_family=str(raw.get("action_family", "")),
+                params=dict(raw.get("params", {})) if isinstance(raw.get("params", {}), Mapping) else {},
+                description=str(raw.get("description", "")),
+                created_step=int(raw.get("created_step", 0)),
+                evidence=evidence,
+                mdl_penalty=float(raw.get("mdl_penalty", 0.0)),
+                last_updated_step=int(raw.get("last_updated_step", 0)),
+            )
+            if hyp.hypothesis_id:
+                self.hypotheses[hyp.hypothesis_id] = hyp
+        self._prune_if_needed()
+
     def _id(self, kind: str, action_fam: str, params: Mapping[str, Any]) -> str:
         payload = ";".join(f"{k}={params[k]}" for k in sorted(params))
         return f"{kind}|{action_fam}|{payload}"

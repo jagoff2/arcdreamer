@@ -299,7 +299,14 @@ class ScientistAgent:
     def state_dict(self) -> dict[str, Any]:
         return {
             "config": asdict(self.config),
+            "engine": self.engine.state_dict(),
+            "memory": self.memory.state_dict(),
+            "planner": self.planner.state_dict(),
             "world_model": self.world_model.state_dict(),
+            "runtime": {
+                "transitions_observed": int(self.transitions_observed),
+                "total_reward": float(self.total_reward),
+            },
             "checkpoint_metadata": dict(self.checkpoint_metadata),
         }
 
@@ -307,7 +314,20 @@ class ScientistAgent:
         world_model_state = state.get("world_model")
         if not isinstance(world_model_state, Mapping):
             raise ValueError("scientist checkpoint missing world_model state")
+        engine_state = state.get("engine")
+        if isinstance(engine_state, Mapping):
+            self.engine.load_state_dict(engine_state)
+        memory_state = state.get("memory")
+        if isinstance(memory_state, Mapping):
+            self.memory.load_state_dict(memory_state)
+        planner_state = state.get("planner")
+        if isinstance(planner_state, Mapping):
+            self.planner.load_state_dict(planner_state)
         self.world_model.load_state_dict(dict(world_model_state))
+        runtime_state = state.get("runtime")
+        if isinstance(runtime_state, Mapping):
+            self.transitions_observed = int(runtime_state.get("transitions_observed", self.transitions_observed))
+            self.total_reward = float(runtime_state.get("total_reward", self.total_reward))
         metadata = state.get("checkpoint_metadata", {})
         self.checkpoint_metadata = dict(metadata) if isinstance(metadata, Mapping) else {}
 

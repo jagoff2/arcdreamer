@@ -8,7 +8,14 @@ from arcagi.evaluation.harness import build_agent
 from arcagi.agents.spotlight_scientist_agent import SpotlightScientistAgent, SpotlightScientistConfig
 from arcagi.scientist.planner import PlannerConfig
 from arcagi.scientist.perception import compare_states, extract_state
-from arcagi.scientist.spotlight import ActionSpotlight, CURRENT_FEATURE_SCHEMA_VERSION, LEGACY_FEATURE_SCHEMA_VERSION, SpotlightConfig
+from arcagi.scientist.spotlight import (
+    ActionSpotlight,
+    AttemptActionRecord,
+    AttemptOutcome,
+    CURRENT_FEATURE_SCHEMA_VERSION,
+    LEGACY_FEATURE_SCHEMA_VERSION,
+    SpotlightConfig,
+)
 from arcagi.scientist.types import GridFrame, action_delta, action_family, is_interact_action, is_move_action, is_reset_action, is_selector_action
 
 
@@ -193,6 +200,40 @@ def test_spotlight_agent_from_checkpoint_restores_saved_config(tmp_path) -> None
         spotlight=SpotlightConfig(max_candidates=13, override_margin=0.77),
     )
     agent = SpotlightScientistAgent(config=config)
+    agent.engine.transition_count = 5
+    agent.memory.recent_actions = ["5", "4"]
+    agent.planner.family_effect_count["right"] = 3
+    agent.spotlight.global_action_visits["4"] = 7
+    agent.spotlight.state_action_visits[("exact-a", "4")] = 6
+    agent.spotlight.abstract_action_visits[("abstract-a", "right")] = 5
+    agent.spotlight.binding_success[("5", "4")] = 2
+    agent.spotlight.probe_baseline_trials["right"] = 9
+    agent.spotlight.probe_baseline_effect_sum["right"] = 1.25
+    agent.spotlight.steps_since_progress = 8
+    agent.spotlight.session_reset_count = 2
+    agent.spotlight.steps_since_reset = 3
+    agent.spotlight.last_attempt_improvement = 0.25
+    agent.spotlight.attempt_improvements.append(0.25)
+    agent.spotlight._previous_attempt_outcome["task/level_0"] = AttemptOutcome(
+        level_key="task/level_0",
+        score=0.4,
+        reward=0.5,
+        steps=10,
+        success=False,
+        terminal_failure=False,
+    )
+    agent.spotlight._current_attempt_actions.append(
+        AttemptActionRecord(
+            action="4",
+            feature_vector=np.ones(agent.spotlight.adaptation.feature_dim, dtype=np.float32),
+            step=4,
+            progress=0.1,
+            visible_effect=True,
+        )
+    )
+    agent.spotlight._current_attempt_level_key = "task/level_0"
+    agent.spotlight._current_attempt_reward = 0.1
+    agent.spotlight._current_attempt_steps = 1
     path = tmp_path / "spotlight_roundtrip.pkl"
     agent.save_checkpoint(path)
 
@@ -203,6 +244,24 @@ def test_spotlight_agent_from_checkpoint_restores_saved_config(tmp_path) -> None
     assert restored.config.spotlight.max_candidates == 13
     assert restored.config.spotlight.override_margin == 0.77
     assert restored.diagnostics()["spotlight"]["feature_schema_version"] == CURRENT_FEATURE_SCHEMA_VERSION
+    assert restored.engine.transition_count == 5
+    assert restored.memory.recent_actions == ["5", "4"]
+    assert restored.planner.family_effect_count["right"] == 3
+    assert restored.spotlight.global_action_visits["4"] == 7
+    assert restored.spotlight.state_action_visits[("exact-a", "4")] == 6
+    assert restored.spotlight.abstract_action_visits[("abstract-a", "right")] == 5
+    assert restored.spotlight.binding_success[("5", "4")] == 2
+    assert restored.spotlight.probe_baseline_trials["right"] == 9
+    assert restored.spotlight.probe_baseline_effect_sum["right"] == 1.25
+    assert restored.spotlight.steps_since_progress == 8
+    assert restored.spotlight.session_reset_count == 2
+    assert restored.spotlight.steps_since_reset == 3
+    assert restored.spotlight.last_attempt_improvement == 0.25
+    assert list(restored.spotlight.attempt_improvements) == [0.25]
+    assert restored.spotlight._previous_attempt_outcome["task/level_0"].score == 0.4
+    assert restored.spotlight._current_attempt_level_key == "task/level_0"
+    assert restored.spotlight._current_attempt_steps == 1
+    assert len(restored.spotlight._current_attempt_actions) == 1
 
 
 def test_spotlight_agent_normalizes_mapping_configs_before_runtime_use() -> None:

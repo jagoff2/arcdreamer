@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable, Mapping
+from typing import Any, Iterable, Mapping
 
 import numpy as np
 
@@ -152,6 +152,143 @@ class EpisodicMemory:
     def reset_level(self) -> None:
         self.recent_actions.clear()
         self.recent_salient_flags.clear()
+
+    def state_dict(self) -> dict[str, object]:
+        return {
+            "capacity": int(self.capacity),
+            "feature_dim": int(self.feature_dim),
+            "recent_actions": list(self.recent_actions),
+            "recent_salient_flags": [bool(item) for item in self.recent_salient_flags],
+            "items": [
+                {
+                    "step": int(item.step),
+                    "before_fingerprint": item.before_fingerprint,
+                    "after_fingerprint": item.after_fingerprint,
+                    "action": item.action,
+                    "reward": float(item.reward),
+                    "surprise": float(item.surprise),
+                    "state_vector": item.state_vector.copy(),
+                    "language_tokens": tuple(sorted(item.language_tokens)),
+                    "note": item.note,
+                }
+                for item in self.items
+            ],
+            "options": [
+                {
+                    "action_sequence": tuple(option.action_sequence),
+                    "first_action": option.first_action,
+                    "family_sequence": tuple(option.family_sequence),
+                    "state_vector": option.state_vector.copy(),
+                    "language_tokens": tuple(sorted(option.language_tokens)),
+                    "effect_tags": tuple(sorted(option.effect_tags)),
+                    "precondition_tokens": tuple(sorted(option.precondition_tokens)),
+                    "relative_cost": float(option.relative_cost),
+                    "effect_value": float(option.effect_value),
+                    "reward": float(option.reward),
+                    "uses": int(option.uses),
+                    "successes": int(option.successes),
+                    "support": float(option.support),
+                    "contradiction": float(option.contradiction),
+                }
+                for option in self.options
+            ],
+            "schemas": [
+                {
+                    "schema_key": schema.schema_key,
+                    "family_sequence": tuple(schema.family_sequence),
+                    "effect_tags": tuple(sorted(schema.effect_tags)),
+                    "avg_relative_cost": float(schema.avg_relative_cost),
+                    "avg_effect_value": float(schema.avg_effect_value),
+                    "avg_reward": float(schema.avg_reward),
+                    "uses": int(schema.uses),
+                    "successes": int(schema.successes),
+                    "support": float(schema.support),
+                    "contradiction": float(schema.contradiction),
+                    "precondition_weights": dict(schema.precondition_weights),
+                }
+                for schema in self.schemas.values()
+            ],
+        }
+
+    def load_state_dict(self, state: Mapping[str, object]) -> None:
+        self.capacity = int(state.get("capacity", self.capacity))
+        self.feature_dim = int(state.get("feature_dim", self.feature_dim))
+        self.items.clear()
+        self.options.clear()
+        self.schemas.clear()
+        self.recent_actions = [str(action) for action in state.get("recent_actions", [])][-12:]
+        self.recent_salient_flags = [bool(item) for item in state.get("recent_salient_flags", [])][-12:]
+        if not self.recent_actions:
+            self.recent_salient_flags.clear()
+        elif len(self.recent_salient_flags) > len(self.recent_actions):
+            self.recent_salient_flags = self.recent_salient_flags[-len(self.recent_actions) :]
+        while len(self.recent_salient_flags) < len(self.recent_actions):
+            self.recent_salient_flags.insert(0, False)
+
+        for raw in state.get("items", []):
+            if not isinstance(raw, Mapping):
+                continue
+            self.items.append(
+                MemoryItem(
+                    step=int(raw.get("step", 0)),
+                    before_fingerprint=str(raw.get("before_fingerprint", "")),
+                    after_fingerprint=str(raw.get("after_fingerprint", "")),
+                    action=str(raw.get("action", "")),
+                    reward=float(raw.get("reward", 0.0)),
+                    surprise=float(raw.get("surprise", 0.0)),
+                    state_vector=_coerce_memory_vector(raw.get("state_vector"), self.feature_dim),
+                    language_tokens=frozenset(str(token) for token in raw.get("language_tokens", ())),
+                    note=str(raw.get("note", "")),
+                )
+            )
+        if len(self.items) > self.capacity:
+            self.items = self.items[-self.capacity :]
+
+        for raw in state.get("options", []):
+            if not isinstance(raw, Mapping):
+                continue
+            self.options.append(
+                OptionItem(
+                    action_sequence=tuple(str(action) for action in raw.get("action_sequence", ())),
+                    first_action=str(raw.get("first_action", "")),
+                    family_sequence=tuple(str(family) for family in raw.get("family_sequence", ())),
+                    state_vector=_coerce_memory_vector(raw.get("state_vector"), self.feature_dim),
+                    language_tokens=frozenset(str(token) for token in raw.get("language_tokens", ())),
+                    effect_tags=frozenset(str(token) for token in raw.get("effect_tags", ())),
+                    precondition_tokens=frozenset(str(token) for token in raw.get("precondition_tokens", ())),
+                    relative_cost=float(raw.get("relative_cost", 1.0)),
+                    effect_value=float(raw.get("effect_value", 0.0)),
+                    reward=float(raw.get("reward", 0.0)),
+                    uses=int(raw.get("uses", 0)),
+                    successes=int(raw.get("successes", 0)),
+                    support=float(raw.get("support", 0.0)),
+                    contradiction=float(raw.get("contradiction", 0.0)),
+                )
+            )
+        if len(self.options) > self.capacity // 4:
+            self.options = sorted(self.options, key=lambda o: o.value, reverse=True)[: self.capacity // 4]
+
+        for raw in state.get("schemas", []):
+            if not isinstance(raw, Mapping):
+                continue
+            weights = raw.get("precondition_weights", {})
+            self.schemas[str(raw.get("schema_key", ""))] = EffectSchema(
+                schema_key=str(raw.get("schema_key", "")),
+                family_sequence=tuple(str(family) for family in raw.get("family_sequence", ())),
+                effect_tags=frozenset(str(token) for token in raw.get("effect_tags", ())),
+                avg_relative_cost=float(raw.get("avg_relative_cost", 1.0)),
+                avg_effect_value=float(raw.get("avg_effect_value", 0.0)),
+                avg_reward=float(raw.get("avg_reward", 0.0)),
+                uses=int(raw.get("uses", 0)),
+                successes=int(raw.get("successes", 0)),
+                support=float(raw.get("support", 0.0)),
+                contradiction=float(raw.get("contradiction", 0.0)),
+                precondition_weights={
+                    str(key): float(value)
+                    for key, value in (weights.items() if isinstance(weights, Mapping) else ())
+                },
+            )
+        self.schemas = {key: schema for key, schema in self.schemas.items() if key}
 
     def write_transition(
         self,
@@ -501,6 +638,20 @@ def _relative_option_cost(action_sequence: tuple[ActionName, ...], record: Trans
     numeric_spend = sum(max(-delta, 0.0) for delta in transition_numeric_deltas(record).values())
     cost += 0.15 * min(numeric_spend, 2.0)
     return float(min(cost, 8.0))
+
+
+def _coerce_memory_vector(value: Any, dim: int) -> np.ndarray:
+    try:
+        array = np.asarray(value, dtype=np.float32).reshape(-1)
+    except Exception:
+        array = np.zeros(0, dtype=np.float32)
+    if array.shape[0] == dim:
+        return array.copy()
+    output = np.zeros(dim, dtype=np.float32)
+    count = min(dim, int(array.shape[0]))
+    if count > 0:
+        output[:count] = array[:count]
+    return output
 
 
 def _schema_key(family_sequence: tuple[str, ...], effect_tags: frozenset[str]) -> str:

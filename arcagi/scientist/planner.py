@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Any, Iterable, Mapping
 
 import numpy as np
 
@@ -108,6 +108,81 @@ class ScientistPlanner:
         self.blocked_cells.clear()
         self.visited_actor_positions.clear()
         self.pending_interactions = 0
+
+    def state_dict(self) -> dict[str, Any]:
+        return {
+            "rng_state": self.rng.bit_generator.state,
+            "state_action_visits": [(list(key), int(value)) for key, value in self.state_action_visits.items()],
+            "action_visits": [(str(key), int(value)) for key, value in self.action_visits.items()],
+            "last_action": self.last_action,
+            "last_state_fp": self.last_state_fp,
+            "stall_count": int(self.stall_count),
+            "ineffective_actions": [(list(key), int(value)) for key, value in self.ineffective_actions.items()],
+            "blocked_cells": [list(cell) for cell in sorted(self.blocked_cells)],
+            "visited_actor_positions": [list(cell) for cell in sorted(self.visited_actor_positions)],
+            "nonproductive_colors": [(int(key), int(value)) for key, value in self.nonproductive_colors.items()],
+            "productive_colors": [(int(key), int(value)) for key, value in self.productive_colors.items()],
+            "pending_interactions": int(self.pending_interactions),
+            "family_cost_sum": [(str(key), float(value)) for key, value in self.family_cost_sum.items()],
+            "family_cost_count": [(str(key), int(value)) for key, value in self.family_cost_count.items()],
+            "family_effect_sum": [(str(key), float(value)) for key, value in self.family_effect_sum.items()],
+            "family_effect_count": [(str(key), int(value)) for key, value in self.family_effect_count.items()],
+            "channel_min": dict(self.channel_min),
+            "channel_max": dict(self.channel_max),
+            "channel_spend_sum": [(str(key), float(value)) for key, value in self.channel_spend_sum.items()],
+            "channel_spend_count": [(str(key), int(value)) for key, value in self.channel_spend_count.items()],
+        }
+
+    def load_state_dict(self, state: Mapping[str, Any]) -> None:
+        self.reset_episode()
+        rng_state = state.get("rng_state")
+        if isinstance(rng_state, Mapping):
+            try:
+                self.rng.bit_generator.state = dict(rng_state)
+            except Exception:
+                pass
+        for key, value in state.get("state_action_visits", []):
+            self.state_action_visits[(str(key[0]), str(key[1]))] = int(value)
+        for key, value in state.get("action_visits", []):
+            self.action_visits[str(key)] = int(value)
+        last_action = state.get("last_action")
+        self.last_action = None if last_action is None else str(last_action)
+        last_state_fp = state.get("last_state_fp")
+        self.last_state_fp = None if last_state_fp is None else str(last_state_fp)
+        self.stall_count = int(state.get("stall_count", 0))
+        for key, value in state.get("ineffective_actions", []):
+            self.ineffective_actions[(str(key[0]), str(key[1]))] = int(value)
+        self.blocked_cells = {
+            (int(cell[0]), int(cell[1]))
+            for cell in state.get("blocked_cells", [])
+            if isinstance(cell, (list, tuple)) and len(cell) == 2
+        }
+        self.visited_actor_positions = {
+            (int(cell[0]), int(cell[1]))
+            for cell in state.get("visited_actor_positions", [])
+            if isinstance(cell, (list, tuple)) and len(cell) == 2
+        }
+        for key, value in state.get("nonproductive_colors", []):
+            self.nonproductive_colors[int(key)] = int(value)
+        for key, value in state.get("productive_colors", []):
+            self.productive_colors[int(key)] = int(value)
+        self.pending_interactions = int(state.get("pending_interactions", 0))
+        for key, value in state.get("family_cost_sum", []):
+            self.family_cost_sum[str(key)] = float(value)
+        for key, value in state.get("family_cost_count", []):
+            self.family_cost_count[str(key)] = int(value)
+        for key, value in state.get("family_effect_sum", []):
+            self.family_effect_sum[str(key)] = float(value)
+        for key, value in state.get("family_effect_count", []):
+            self.family_effect_count[str(key)] = int(value)
+        channel_min = state.get("channel_min", {})
+        self.channel_min = {str(key): float(value) for key, value in channel_min.items()} if isinstance(channel_min, Mapping) else {}
+        channel_max = state.get("channel_max", {})
+        self.channel_max = {str(key): float(value) for key, value in channel_max.items()} if isinstance(channel_max, Mapping) else {}
+        for key, value in state.get("channel_spend_sum", []):
+            self.channel_spend_sum[str(key)] = float(value)
+        for key, value in state.get("channel_spend_count", []):
+            self.channel_spend_count[str(key)] = int(value)
 
     def notify_transition(
         self,

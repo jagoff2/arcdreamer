@@ -309,3 +309,44 @@ Current conclusion:
 - The known double-reset state wipe at ARC level boundaries is fixed and guarded.
 - The known legal-action candidate truncation path is fixed and guarded.
 - This is not an ARC success claim. It removes two blockers that could invalidate online learning and dense action training.
+
+Follow-up preservation action:
+
+- Committed the slice:
+  - `cf9c069 Preserve online state across ARC level boundaries`
+- Pushed to `origin/main`.
+
+## 2026-04-24 09:48 EDT
+
+Operator actions:
+
+1. Spawned a read-only explorer subagent to inspect checkpoint/state persistence and dense-action-surface blockers.
+2. Implemented full online-state checkpoint persistence for the scientist path:
+   - `HypothesisEngine.state_dict/load_state_dict`
+   - `EpisodicMemory.state_dict/load_state_dict`
+   - `ScientistPlanner.state_dict/load_state_dict`
+   - `ScientistAgent.state_dict/load_state_dict` now includes engine, memory, planner, world model, and runtime counters.
+   - `SpotlightScientistAgent.state_dict` now builds on the base full-state payload.
+3. Implemented spotlight online-credit persistence:
+   - exact/abstract/global action visit maps
+   - no-effect, contradiction, binding, and probe-baseline maps
+   - reset/stall/attempt counters
+   - previous attempt outcomes and current attempt action records
+4. Added checkpoint round-trip assertions for these fields.
+
+Validation:
+
+- Compile check:
+  - `.venv313\Scripts\python.exe -m py_compile arcagi\scientist\spotlight.py tests\test_action_spotlight.py arcagi\scientist\memory.py arcagi\scientist\planner.py arcagi\scientist\hypotheses.py arcagi\scientist\agent.py arcagi\agents\spotlight_scientist_agent.py`
+  - Result: passed.
+- Focused checkpoint tests:
+  - `python -m pytest tests/test_action_spotlight.py::test_spotlight_agent_from_checkpoint_restores_saved_config tests/test_scientist_agent.py::test_scientist_checkpoint_round_trip_and_harness_load -q`
+  - Result: `2 passed in 2.57s`.
+- Broader targeted tests:
+  - `python -m pytest tests/test_action_spotlight.py tests/test_scientist_agent.py tests/test_scientist_training.py tests/test_arc_adapter_helpers.py tests/test_eval_path_constraints.py -q`
+  - Result: `65 passed in 126.28s`.
+
+Current conclusion:
+
+- Checkpoints and train/eval holdout snapshots no longer drop the main online-learned scientist state.
+- This is still not an ARC success claim. It removes another blocker that made training/eval state discontinuous.

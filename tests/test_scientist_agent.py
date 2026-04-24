@@ -399,10 +399,20 @@ def test_scientist_checkpoint_round_trip_and_harness_load(tmp_path) -> None:
     np.testing.assert_allclose(agent.world_model.change_recurrent_w, restored.world_model.change_recurrent_w)
     np.testing.assert_allclose(agent.world_model.hidden, restored.world_model.hidden)
     assert agent.world_model.updates == restored.world_model.updates
+    assert agent.engine.transition_count == restored.engine.transition_count
+    assert len(agent.engine.hypotheses) == len(restored.engine.hypotheses)
+    assert len(agent.memory.items) == len(restored.memory.items)
+    assert len(agent.memory.options) == len(restored.memory.options)
+    assert set(agent.memory.schemas) == set(restored.memory.schemas)
+    assert dict(agent.planner.family_effect_count) == dict(restored.planner.family_effect_count)
+    assert dict(agent.planner.family_cost_count) == dict(restored.planner.family_cost_count)
+    assert agent.transitions_observed == restored.transitions_observed
 
     harness_agent = build_agent("scientist", checkpoint_path=str(path))
     np.testing.assert_allclose(agent.world_model.reward_w, harness_agent.world_model.reward_w)
     assert harness_agent.diagnostics()["world_model"]["model"] == "online_recurrent_bootstrap"
+    assert harness_agent.diagnostics()["hypothesis_count"] == len(agent.engine.hypotheses)
+    assert harness_agent.diagnostics()["memory_items"] == len(agent.memory.items)
 
 
 def test_scientist_world_model_uses_recurrent_context() -> None:

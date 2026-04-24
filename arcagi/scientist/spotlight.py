@@ -104,6 +104,20 @@ def _normalise(values: Mapping[ActionName, float]) -> dict[ActionName, float]:
     return {action: (value - lo) / (hi - lo) for action, value in finite.items()}
 
 
+def _coerce_feature_vector(value: Any, dim: int) -> np.ndarray:
+    try:
+        array = np.asarray(value, dtype=np.float32).reshape(-1)
+    except Exception:
+        array = np.zeros(0, dtype=np.float32)
+    if array.shape[0] == dim:
+        return array.copy()
+    output = np.zeros(dim, dtype=np.float32)
+    count = min(dim, int(array.shape[0]))
+    if count > 0:
+        output[:count] = array[:count]
+    return output
+
+
 @dataclass(frozen=True)
 class SpotlightConfig:
     """Weights and limits for the bounded action workspace."""
@@ -795,15 +809,57 @@ class ActionSpotlight:
             "executive": self.executive.state_dict(),
             "habit": self.habit.state_dict(),
             "adaptation": self.adaptation.state_dict(),
+            "state_action_visits": [(list(key), int(value)) for key, value in self.state_action_visits.items()],
+            "abstract_action_visits": [(list(key), int(value)) for key, value in self.abstract_action_visits.items()],
+            "global_action_visits": [(str(key), int(value)) for key, value in self.global_action_visits.items()],
             "no_effect_counts": [(list(key), int(value)) for key, value in self.no_effect_counts.items()],
             "no_effect_family_counts": [(list(key), int(value)) for key, value in self.no_effect_family_counts.items()],
             "contradiction_counts": [(list(key), float(value)) for key, value in self.contradiction_counts.items()],
             "binding_success": [(list(key), int(value)) for key, value in self.binding_success.items()],
             "binding_failure": [(list(key), int(value)) for key, value in self.binding_failure.items()],
+            "probe_baseline_trials": [(str(key), int(value)) for key, value in self.probe_baseline_trials.items()],
+            "probe_baseline_effect_sum": [(str(key), float(value)) for key, value in self.probe_baseline_effect_sum.items()],
             "prior_binding_success": [(list(key), int(value)) for key, value in self.prior_binding_success.items()],
             "prior_binding_failure": [(list(key), int(value)) for key, value in self.prior_binding_failure.items()],
+            "steps_since_progress": int(self.steps_since_progress),
+            "max_levels_completed": int(self.max_levels_completed),
+            "last_surprise": float(self.last_surprise),
+            "last_executive_target": float(self.last_executive_target),
+            "last_executive_loss": float(self.last_executive_loss),
+            "last_habit_loss": float(self.last_habit_loss),
+            "last_adaptation_loss": float(self.last_adaptation_loss),
+            "last_attempt_improvement": float(self.last_attempt_improvement),
+            "last_teacher_action": str(self.last_teacher_action),
             "move37_candidates": int(self.move37_candidates),
             "move37_validated": int(self.move37_validated),
+            "last_move37_event": None if self.last_move37_event is None else dict(self.last_move37_event),
+            "current_attempt_actions": [
+                {
+                    "action": record.action,
+                    "feature_vector": record.feature_vector.copy(),
+                    "step": int(record.step),
+                    "progress": float(record.progress),
+                    "visible_effect": bool(record.visible_effect),
+                }
+                for record in self._current_attempt_actions
+            ],
+            "current_attempt_level_key": self._current_attempt_level_key,
+            "current_attempt_reward": float(self._current_attempt_reward),
+            "current_attempt_steps": int(self._current_attempt_steps),
+            "previous_attempt_outcome": [
+                {
+                    "level_key": key,
+                    "score": float(outcome.score),
+                    "reward": float(outcome.reward),
+                    "steps": int(outcome.steps),
+                    "success": bool(outcome.success),
+                    "terminal_failure": bool(outcome.terminal_failure),
+                }
+                for key, outcome in self._previous_attempt_outcome.items()
+            ],
+            "attempt_improvements": [float(value) for value in self.attempt_improvements],
+            "session_reset_count": int(self.session_reset_count),
+            "steps_since_reset": int(self.steps_since_reset),
         }
 
     def load_state_dict(self, state: Mapping[str, Any]) -> None:
@@ -828,6 +884,17 @@ class ActionSpotlight:
         adaptation_state = state.get("adaptation")
         if isinstance(adaptation_state, Mapping):
             self.adaptation.load_state_dict(adaptation_state)
+        self.state_action_visits.clear()
+        self.abstract_action_visits.clear()
+        self.global_action_visits.clear()
+        self.probe_baseline_trials.clear()
+        self.probe_baseline_effect_sum.clear()
+        for key, value in state.get("state_action_visits", []):
+            self.state_action_visits[(str(key[0]), str(key[1]))] = int(value)
+        for key, value in state.get("abstract_action_visits", []):
+            self.abstract_action_visits[(str(key[0]), str(key[1]))] = int(value)
+        for key, value in state.get("global_action_visits", []):
+            self.global_action_visits[str(key)] = int(value)
         for key, value in state.get("no_effect_counts", []):
             self.no_effect_counts[(str(key[0]), str(key[1]))] = int(value)
         for key, value in state.get("no_effect_family_counts", []):
@@ -838,12 +905,63 @@ class ActionSpotlight:
             self.binding_success[(str(key[0]), str(key[1]))] = int(value)
         for key, value in state.get("binding_failure", []):
             self.binding_failure[(str(key[0]), str(key[1]))] = int(value)
+        for key, value in state.get("probe_baseline_trials", []):
+            self.probe_baseline_trials[str(key)] = int(value)
+        for key, value in state.get("probe_baseline_effect_sum", []):
+            self.probe_baseline_effect_sum[str(key)] = float(value)
         for key, value in state.get("prior_binding_success", []):
             self.prior_binding_success[(str(key[0]), str(key[1]))] = int(value)
         for key, value in state.get("prior_binding_failure", []):
             self.prior_binding_failure[(str(key[0]), str(key[1]))] = int(value)
+        self.steps_since_progress = int(state.get("steps_since_progress", 0))
+        self.max_levels_completed = int(state.get("max_levels_completed", 0))
+        self.last_surprise = float(state.get("last_surprise", 0.0))
+        self.last_executive_target = float(state.get("last_executive_target", 0.0))
+        self.last_executive_loss = float(state.get("last_executive_loss", 0.0))
+        self.last_habit_loss = float(state.get("last_habit_loss", 0.0))
+        self.last_adaptation_loss = float(state.get("last_adaptation_loss", 0.0))
+        self.last_attempt_improvement = float(state.get("last_attempt_improvement", 0.0))
+        self.last_teacher_action = str(state.get("last_teacher_action", ""))
         self.move37_candidates = int(state.get("move37_candidates", 0))
         self.move37_validated = int(state.get("move37_validated", 0))
+        last_move37_event = state.get("last_move37_event")
+        self.last_move37_event = dict(last_move37_event) if isinstance(last_move37_event, Mapping) else None
+        self._current_attempt_actions.clear()
+        for raw in state.get("current_attempt_actions", []):
+            if not isinstance(raw, Mapping):
+                continue
+            self._current_attempt_actions.append(
+                AttemptActionRecord(
+                    action=str(raw.get("action", "")),
+                    feature_vector=_coerce_feature_vector(raw.get("feature_vector"), self.adaptation.feature_dim),
+                    step=int(raw.get("step", 0)),
+                    progress=float(raw.get("progress", 0.0)),
+                    visible_effect=bool(raw.get("visible_effect", False)),
+                )
+            )
+        current_attempt_level_key = state.get("current_attempt_level_key")
+        self._current_attempt_level_key = None if current_attempt_level_key is None else str(current_attempt_level_key)
+        self._current_attempt_reward = float(state.get("current_attempt_reward", 0.0))
+        self._current_attempt_steps = int(state.get("current_attempt_steps", 0))
+        self._previous_attempt_outcome.clear()
+        for raw in state.get("previous_attempt_outcome", []):
+            if not isinstance(raw, Mapping):
+                continue
+            level_key = str(raw.get("level_key", ""))
+            if not level_key:
+                continue
+            self._previous_attempt_outcome[level_key] = AttemptOutcome(
+                level_key=level_key,
+                score=float(raw.get("score", 0.0)),
+                reward=float(raw.get("reward", 0.0)),
+                steps=int(raw.get("steps", 0)),
+                success=bool(raw.get("success", False)),
+                terminal_failure=bool(raw.get("terminal_failure", False)),
+            )
+        self.attempt_improvements.clear()
+        self.attempt_improvements.extend(float(value) for value in state.get("attempt_improvements", [])[-64:])
+        self.session_reset_count = int(state.get("session_reset_count", 0))
+        self.steps_since_reset = int(state.get("steps_since_reset", self.config.reset_cooldown_steps))
 
     def _candidate_actions(
         self,

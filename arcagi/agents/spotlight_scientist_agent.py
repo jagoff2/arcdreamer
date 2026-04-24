@@ -221,12 +221,10 @@ class SpotlightScientistAgent(ScientistAgent):
         return base
 
     def state_dict(self) -> dict[str, Any]:
-        return {
-            "config": asdict(self.config),
-            "world_model": self.world_model.state_dict(),
-            "spotlight": self.spotlight.state_dict(),
-            "checkpoint_metadata": dict(self.checkpoint_metadata),
-        }
+        state = super().state_dict()
+        state["config"] = asdict(self.config)
+        state["spotlight"] = self.spotlight.state_dict()
+        return state
 
     def load_state_dict(self, state: Mapping[str, Any]) -> None:
         super().load_state_dict(state)
