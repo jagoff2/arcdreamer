@@ -31,6 +31,12 @@ For every meaningful iteration, add an explicit entry containing:
 
 This rule is active because preserving continuity across context compaction is now an explicit project requirement.
 
+Operator-action ledger:
+
+- Use `docs/OPERATOR_ACTION_LOG.md` for Codex's own commands, patches, tests, evals, subprocesses, and known lost outputs.
+- This is separate from agent runtime traces. Agent traces do not satisfy the operator ledger requirement.
+- Update the operator ledger before moving to a new execution slice.
+
 ## Non-Negotiable Submission Rule
 
 Work on this repo must remain ARC Prize eligible in the final ARC-facing path.
@@ -52,9 +58,30 @@ The user has now made these constraints explicit and they are active:
 - no external world knowledge, internet knowledge, or human-written task instructions at runtime
 - no priors that encode specific ARC task semantics beyond generic action-interface facts and generic object/transition inductive bias
 - no "fine-tune it to AR25 and call it generalization" behavior
+- no hand-coded action search patterns as the ARC-facing learned-agent solver
+- no fixed movement sweeps, counted movement probes, canned action sequences, scripted reset/replay loops, or action-pattern enumerators as the solver
+- no graph-search, shortest-path frontier expansion, BFS/DFS replay, or coverage search as the full hybrid learned-agent controller
+- no disguised "generic" scripted controller whose behavior is still a manual policy over action patterns, resets, replay paths, or frontier enumeration
 - the ARC environment must be treated as a black-box interactive process
 - the runtime agent must infer its rules online from current observations, action schemas, memory, and transitions during the same episode
 - explicit rule-object formats may be engineered, but rule contents, confidence, and action consequences must be learned live from interaction
+- graphs are allowed only as memory, diagnostics, retrieval substrate, and explicitly labeled baselines/ablations
+- any ARC success from scripted sweeps, graph-search control, replay-frontier control, per-game branches, or action-pattern code is invalid for the core minimally conscious online-agent goal
+
+## Minimum Online-Agent Prerequisites
+
+The operational threshold is documented in `docs/MINIMALLY_CONSCIOUS_ONLINE_AGENT.md`.
+
+Short form:
+
+- maintain an inspectable live belief state over objects, relations, latent variables, goals, action meanings, uncertainty, and self/action history
+- maintain a self/agency model that separates self-caused effects from passive world changes
+- use a compact global workspace shared by planner, memory, language, and world model
+- close the same-session loop: predict -> act -> observe -> compute surprise/error -> update belief/model/memory/action preferences -> choose differently later
+- generate grounded internal questions from uncertainty and compile them into diagnostic actions through learned or evidence-updated mechanisms
+- use counterfactual imagination rooted in learned dynamics or learned rule hypotheses, not scripted search trees
+- write surprising/useful transitions into episodic memory and consolidate them into reusable grounded rules
+- prove the mechanisms through ablations against graph-only, scripted-policy, frozen-policy, no-memory, no-language, no-workspace, and no-imagination variants
 
 ## Snapshot: 2026-04-14
 
@@ -4389,3 +4416,624 @@ Implication for training/eval:
 - the next training target should emphasize:
   - shorter time to first completion
   - and faster second-level completion after first-level success
+
+## Entry 067: 2026-04-23 / Online ARC Run Matches Offline AR25 Trace
+
+Observed harness command:
+
+- `.venv313\\Scripts\\python.exe -m arcagi.evaluation.harness arc --agent scientist --checkpoint-path artifacts\\spotlight_exec_curriculum_best.pkl --game-limit 25 --mode online --max-steps 0 --progress-every 50`
+
+Observed result:
+
+- the online `AR25` trace matched the earlier offline `AR25` trace step-for-step through at least step `850`
+- key matching milestones:
+  - step `300`:
+    - `levels_completed = 1`
+    - `return = 1.0`
+    - `reset_steps = 4`
+    - `last_action = click:8:17`
+  - step `750`:
+    - `levels_completed = 1`
+    - `return = 1.0`
+    - `reset_steps = 11`
+  - step `850`:
+    - `levels_completed = 1`
+    - `return = 1.0`
+    - `reset_steps = 13`
+
+What this proves:
+
+- the `AR25` first-level solve is not just an offline-cache artifact
+- the current `spotlight_exec_curriculum_best.pkl` checkpoint reproduces the same first-level solve behavior under both:
+  - offline local environment files
+  - online fetched environments / scorecard-backed execution
+- for this game and checkpoint, the current runtime path appears operationally parity-aligned across online and offline modes
+
+Interpretation:
+
+- this materially strengthens the evidence that the current scientist path has real ARC first-level competence, not just a local adapter quirk
+- the remaining bottleneck is still the same one seen offline:
+  - post-level transfer is weak
+  - resets continue to accumulate after first success
+  - no second-level completion appears through at least step `850`
+
+Immediate implication:
+
+- `AR25` should now be treated as a confirmed real positive on both offline and online harness modes
+- next evaluation work should shift toward:
+  - faster time-to-first-level-completion
+  - second-level completion latency
+  - broader game coverage beyond `AR25`
+
+## Entry 068: 2026-04-23 / AR25 Is A Stacked Mechanic Curriculum, Not Just A Multi-Level Replay
+
+User-level task analysis:
+
+- `AR25` level 1 is relatively easy and mainly teaches:
+  - player-sprite identity
+  - switch semantics
+  - exit semantics
+- level 2 immediately adds:
+  - health-pack semantics
+  - door orientation as a manipulable latent state
+  - the need for efficient repeated switch use
+  - the need for efficient pathing under a consumable movement/health budget
+- level 3 then adds:
+  - pushers
+  - color-conditioned object semantics
+  - continued dependence on everything learned in levels 1 and 2
+  - a final resource-optimization trick where the agent must use a pusher as a transport primitive to preserve enough health to reach the exit
+
+Architectural implication:
+
+- `AR25` is not just testing whether the agent can rediscover each level from scratch
+- it is testing whether the agent can:
+  - accumulate mechanic knowledge across levels
+  - keep that knowledge revisable rather than frozen
+  - compose old mechanics with newly introduced constraints
+  - reason about resource efficiency, not merely reachability
+- in other words, the needed carryover is not just:
+  - `I saw a switch before`
+- it is:
+  - `switches can rewrite door state`
+  - `door state has orientation / topology consequences`
+  - `health packs define a path budget`
+  - `pushers can serve as low-cost transport under that budget`
+  - `these mechanics can interact compositionally`
+
+What the current failure probably means:
+
+- after solving level 1, the agent is likely carrying only shallow controller facts such as:
+  - object identity
+  - some switch/click usefulness
+  - some binder/probe priors
+- it is probably not yet carrying the right reusable structured mechanic hypotheses:
+  - resource-restoration hypotheses
+  - map-topology rewrite hypotheses
+  - conditional transport-effect hypotheses
+  - efficiency-sensitive plan fragments / options
+- so the current post-level stall is not just weak memory
+- it is weak compositional mechanic abstraction
+
+Design implication for the next stage:
+
+- the scientist path needs persistent but revisable mechanic objects with at least:
+  - scope
+  - support / contradiction
+  - object-role bindings
+  - latent-state effects
+  - resource effects
+  - planner-usable option fragments
+- the planner then has to optimize not only:
+  - can I reach the exit
+- but also:
+  - can I reach the exit within the inferred health budget
+  - can a pusher or switch change that budget-efficient path
+
+## Entry 069: 2026-04-23 / AR25 Analysis Is Diagnostic Only, Not An Implementation Template
+
+Non-negotiable constraint:
+
+- nothing in the ARC-facing path may become hand-coded, hardwired, or task-specific to ARC games
+- the `AR25` level analysis is allowed only as a diagnosis of what kinds of generic capabilities are missing
+- it is not a license to add:
+  - `AR25` branches
+  - door-specific or pusher-specific hand logic
+  - hardcoded level-order expectations
+  - benchmark-shaped reward hacks
+  - mechanic detectors tuned against known ARC game structure
+
+Allowed use of the analysis:
+
+- use it to infer missing generic machinery such as:
+  - persistent mechanic abstraction
+  - revisable latent-state tracking
+  - resource-aware planning
+  - compositional option reuse
+
+Disallowed use of the analysis:
+
+- encoding game-specific semantics into:
+  - runtime action scoring
+  - planner branches
+  - memory retrieval rules
+  - labels derived from ARC game knowledge
+  - synthetic curricula that directly mimic known ARC level structure too closely
+
+Architecture filter:
+
+- every fix motivated by `AR25` should survive this test:
+  - would this still make sense for a different non-text game with hidden mechanics, resource constraints, and cross-level carryover?
+- if the answer is no, it should not land in the ARC-facing path
+
+## Entry 070: 2026-04-23 / Generic Effect-Signature Layer Landed, Semantic Mechanic Labels Rejected
+
+Correction applied after user feedback:
+
+- adding named mechanic categories such as `transport` or `consumable` inside the scientist runtime path was too semantically committed
+- that kind of naming is already too close to hand-authored human interpretation
+- the ARC-facing path should learn from raw in-game effects, not from our semantic labels for those effects
+
+What changed:
+
+- the new persistent cross-level abstraction layer now uses generic effect signatures derived from observed transition deltas
+- concrete examples of allowed effect signatures:
+  - touched object disappears
+  - touched object undergoes large displacement
+  - selector-like action rewrites the local action regime
+  - targeted action changes object state
+  - contact correlates with later progress
+- these are treated as generic in-game effect facts, not named ARC mechanics
+
+Where it landed:
+
+- `arcagi/scientist/hypotheses.py`
+  - added persistent effect-signature hypotheses from observed delta patterns
+  - added planner-facing aggregated priors over colors implicated in salient learned effects
+- `arcagi/scientist/memory.py`
+  - option fragments can now be retained for salient effect-bearing transitions even without immediate reward
+- `arcagi/scientist/planner.py`
+  - candidate expansion and scoring now consume those learned effect priors generically
+
+What stayed explicitly forbidden:
+
+- no `door`, `healthpack`, `pusher`, `switch`, or similar game nouns in the runtime path
+- no `AR25` branches
+- no handcrafted transport or resource semantics
+
+Verification:
+
+- `python -m pytest tests/test_scientist_agent.py tests/test_action_spotlight.py tests/test_scientist_training.py -q`
+  - `27 passed`
+- `python -m pytest tests/test_scientist_training.py tests/test_action_spotlight.py tests/test_scientist_agent.py tests/test_arc_public_training.py tests/test_goal_scientist_targets.py tests/test_synthetic_oracle.py tests/test_arc_adapter_helpers.py tests/test_action_encoder.py -q`
+  - `55 passed`
+
+## Entry 071: 2026-04-23 / Next Slice: Generic Cost-Budget Planning And Effect-Schema Composition
+
+Immediate next objective:
+
+- extend the new generic effect-signature layer into:
+  - real cost / budget planning
+  - richer option / schema composition
+- keep the entire extension semantic-neutral
+- no task-specific ARC labels or hardcoded mechanic interpretations are allowed
+
+Allowed abstractions for this slice:
+
+- action cost estimates derived from generic transition history
+- progress-per-cost or effect-per-cost estimates
+- remaining slack / budget heuristics derived from observed progress and retry dynamics
+- effect schemas built from:
+  - disappearance
+  - large displacement
+  - action-set rewrite
+  - targeted rewrite
+  - progress correlation
+- option fragments that summarize:
+  - preconditions
+  - first action
+  - expected effect tags
+  - expected relative cost
+  - support / contradiction
+
+Disallowed abstractions for this slice:
+
+- any runtime category named after ARC-specific game entities
+- any branch that treats `AR25` or any other known game as special
+- any hardcoded health / door / pusher / switch semantics
+
+## Entry 072: 2026-04-23 / Generic Cost-Budget Planning And Sequence-Aware Effect Schemas Landed
+
+What changed:
+
+- the effect-signature layer now extends beyond flat salient fragments into generic reusable schemas
+- runtime still uses no ARC-game nouns and no game-specific branches
+- the new machinery landed in:
+  - `arcagi/scientist/effects.py`
+  - `arcagi/scientist/memory.py`
+  - `arcagi/scientist/planner.py`
+  - `arcagi/scientist/spotlight.py`
+
+New generic mechanisms:
+
+- generic numeric-channel extraction from agent-facing state metadata
+  - pulls numeric channels from generic extras / inventory / flags while filtering adapter/session bookkeeping keys
+- numeric transition-delta tags
+  - examples:
+    - `effect:numeric_increase`
+    - `effect:numeric_decrease`
+    - `effect:numeric_rewrite`
+- sequence-aware option reuse
+  - option profiles now match not only entry actions but also continuation actions using recent action history and family-sequence alignment
+- reusable effect schemas
+  - schemas are aggregated by generic family-sequence plus effect-tag signature
+  - schemas retain:
+    - precondition tokens
+    - average relative cost
+    - average effect value
+    - average reward
+    - support / contradiction
+    - confidence
+- boundary-aware option segmentation
+  - option fragments are now cut from the last salient effect boundary rather than always using an arbitrary trailing fixed window
+- generic budget pressure
+  - planner budget pressure now combines:
+    - elapsed step / retry / stall pressure
+    - learned scarcity from numeric channels that empirically decrease during interaction
+
+Important corrections:
+
+- option memory no longer stores heuristic effect salience as if it were actual reward
+- concrete options are no longer append-only one-shot traces
+  - repeated matching sequences now update existing option statistics instead of only creating new frozen exemplars
+
+Planner / chooser effect:
+
+- planner now sees:
+  - option continuation depth
+  - remaining relative cost after the matched prefix
+  - family efficiency
+  - numeric-channel-driven budget pressure
+- spotlight now receives those signals through the live feature map as:
+  - `raw::option_continuation`
+  - `raw::action_cost`
+  - `raw::budget_pressure`
+  - `raw::family_efficiency`
+
+Residual limitation:
+
+- the live ARC chooser still runs through spotlight habit/executive/adaptation arbitration
+- so cost/budget/schema signals are now real live features, but not yet a direct planner-side override term in spotlight itself
+- in other words:
+  - the generic planning substrate is stronger
+  - but the final behavioral impact still depends on learned arbitration using those features
+
+Verification:
+
+- `python -m py_compile arcagi/scientist/effects.py arcagi/scientist/memory.py arcagi/scientist/planner.py arcagi/scientist/spotlight.py tests/test_scientist_agent.py`
+  - passed
+- `python -m pytest tests/test_scientist_agent.py tests/test_action_spotlight.py tests/test_scientist_training.py -q`
+  - `32 passed`
+- `python -m pytest tests/test_scientist_training.py tests/test_action_spotlight.py tests/test_scientist_agent.py tests/test_arc_public_training.py tests/test_goal_scientist_targets.py tests/test_synthetic_oracle.py tests/test_arc_adapter_helpers.py tests/test_action_encoder.py -q`
+  - `60 passed`
+
+## Entry 073: 2026-04-23 / Schema-Version Compatibility Fix For Legacy Scientist Checkpoints
+
+Observed regression:
+
+- after adding the extended generic schema/cost signals to the live spotlight chooser input surface, the old checkpoint `artifacts/spotlight_exec_curriculum_best.pkl` regressed badly on online `AR25`
+- the failure pattern changed from:
+  - eventual level-1 completion around step `300`
+- to:
+  - near-immediate repeated `"4"` behavior and reset churn with no progress
+
+Diagnosis:
+
+- this was not just a training-shortfall issue
+- the old checkpoint had been trained against an older spotlight feature surface
+- the new runtime injected new hashed feature keys into the live `habit` / `executive` / `adaptation` input map
+- because the spotlight checkpoint did not previously store a feature-schema version, the old weights were being evaluated on a changed hashed input basis
+
+Fix applied:
+
+- `arcagi/scientist/spotlight.py` now stores and loads:
+  - `feature_schema_version`
+- missing version defaults to:
+  - legacy `v1`
+- current runtime saves:
+  - `v2`
+- legacy `v1` mode now:
+  - omits the extended generic schema/cost feature keys from the live spotlight hashed feature map
+  - avoids the new option-aware candidate-expansion path
+- current `v2` mode keeps the extended feature path
+- checkpoints with no `spotlight` subtree now also force legacy `v1` mode instead of silently staying on the current runtime surface
+- spotlight checkpoint restore now clears volatile runtime-only state before loading durable state
+- `SpotlightScientistAgent.from_checkpoint(...)` now reconstructs saved non-default config when possible instead of silently falling back to defaults
+
+Tagging changes:
+
+- harness progress and episode results now include:
+  - `spotlight_feature_schema_version`
+- `arcagi.scientist.train` and `arcagi.scientist.train_arc` eval JSON now include:
+  - `spotlight_feature_schema_version`
+- preserved legacy baseline copies were created:
+  - `artifacts/spotlight_exec_curriculum_best_legacy_v1.pkl`
+  - `artifacts/spotlight_exec_curriculum_latest_legacy_v1.pkl`
+- a stable lineage note now exists in:
+  - `docs/CHECKPOINT_LINEAGE.md`
+
+Verification:
+
+- direct checkpoint load check:
+  - `artifacts/spotlight_exec_curriculum_best.pkl` now loads as `feature_schema_version = 1`
+- widened regression slice:
+  - `64 passed`
+- short real online `AR25` probe with the patched loader:
+  - progress now reported `spotlight_feature_schema_version = 1`
+  - by step `100`, the agent had `interaction_steps = 11` and `reset_steps = 1`
+  - this is materially different from the immediate repeated-`4` collapse
+- direct legacy-base load check:
+  - a checkpoint payload with only `world_model` and no `spotlight` subtree now loads as `feature_schema_version = 1`
+
+Current caveat:
+
+- the compatibility fix is verified
+- full restoration of the earlier long-horizon `AR25` level-1 solve under the patched legacy path has not yet been re-established with a longer run in this turn
+
+## Entry 074: 2026-04-23 / Fresh V2 Scientist Training Line Started
+
+Decision:
+
+- the next checkpoint line should be a fresh `v2` runtime line, not an overwrite of the preserved `v1` baseline
+- the old artifacts are now baseline references only
+
+Artifact split:
+
+- preserved legacy baseline:
+  - `artifacts/spotlight_exec_curriculum_best_legacy_v1.pkl`
+  - `artifacts/spotlight_exec_curriculum_latest_legacy_v1.pkl`
+- fresh current-runtime line:
+  - `artifacts/spotlight_exec_curriculum_best_v2.pkl`
+  - `artifacts/spotlight_exec_curriculum_latest_v2.pkl`
+
+Rule:
+
+- all fresh training/eval work for the extended generic schema/cost runtime should use the `*_v2.pkl` paths
+- the old `v1` line must not be overwritten
+- comparisons between lines are only valid when the emitted `spotlight_feature_schema_version` field is shown alongside the metrics
+
+## Entry 075: 2026-04-23 / Fresh V2 Scratch Validation and Main Bootstrap Launch
+
+Fresh `v2` scratch validation:
+
+- ran a minimal from-scratch scientist training smoke on separate quick artifacts:
+  - `artifacts/scientist_v2_quick_best.pkl`
+  - `artifacts/scientist_v2_quick_latest.pkl`
+- command:
+  - `python -u -m arcagi.scientist.train --stage1-sessions 1 --stage2-sessions 1 --eval-every 1 --simple-max-steps 12 --rich-level-max-steps 10 --rich-session-max-steps 24 --holdout-simple-sessions 1 --holdout-rich-sessions 1 --checkpoint-path artifacts/scientist_v2_quick_best.pkl --latest-checkpoint-path artifacts/scientist_v2_quick_latest.pkl`
+- result:
+  - emitted `spotlight_feature_schema_version = 2`
+  - emitted the new 7-term ranking key with attempt-improvement metrics
+  - wrote fresh `v2` checkpoints cleanly from scratch
+
+Scratch metrics:
+
+- session 1 / stage `simple`:
+  - `simple_avg_attempt_improvement = 0.18`
+  - `rich_avg_attempt_improvement = 0.1325`
+  - `rich_avg_return = -0.57`
+- session 2 / stage `rich_session`:
+  - `simple_avg_attempt_improvement = 0.18`
+  - `rich_avg_attempt_improvement = 0.1275`
+  - `rich_avg_return = -0.64`
+- final:
+  - `train_avg_attempt_improvement = 0.14875`
+  - `spotlight_feature_schema_version = 2`
+
+Main bootstrap:
+
+- after the scratch validation, launched the main fresh `v2` curriculum bootstrap on:
+  - `artifacts/spotlight_exec_curriculum_best_v2.pkl`
+  - `artifacts/spotlight_exec_curriculum_latest_v2.pkl`
+- command:
+  - `python -u -m arcagi.scientist.train --seed 8462852 --stage1-sessions 12 --stage2-sessions 32 --eval-every 4 --simple-max-steps 80 --rich-level-max-steps 40 --rich-session-max-steps 192 --rich-levels-per-session 2 --holdout-simple-sessions 4 --holdout-rich-sessions 6 --checkpoint-path artifacts/spotlight_exec_curriculum_best_v2.pkl --latest-checkpoint-path artifacts/spotlight_exec_curriculum_latest_v2.pkl`
+
+Current status:
+
+- first substantive eval snapshot has now landed at session `4` / stage `simple`:
+  - `spotlight_feature_schema_version = 2`
+  - `recent_session_win_rate = 1.0`
+  - `recent_avg_levels_completed = 1.0`
+  - `recent_avg_return = 1.075`
+  - holdout:
+    - `simple_success_rate = 0.0`
+    - `simple_avg_attempt_improvement = 0.42`
+    - `rich_session_win_rate = 0.0`
+    - `rich_avg_levels_completed = 0.0`
+    - `rich_avg_attempt_improvement = 0.19875`
+    - `rich_avg_return = -4.241666666666652`
+- `artifacts/spotlight_exec_curriculum_best_v2.pkl` and `artifacts/spotlight_exec_curriculum_latest_v2.pkl` were both written at this boundary
+- second substantive eval snapshot landed at session `8` / stage `simple`:
+  - `spotlight_feature_schema_version = 2`
+  - `recent_session_win_rate = 1.0`
+  - `recent_avg_levels_completed = 1.0`
+  - `recent_avg_return = 1.075`
+  - holdout:
+    - `simple_success_rate = 0.25`
+    - `simple_avg_attempt_improvement = 0.6233333333333334`
+    - `simple_avg_return = 0.35000000000000003`
+    - `rich_session_win_rate = 0.0`
+    - `rich_avg_levels_completed = 0.0`
+    - `rich_avg_attempt_improvement = 0.21000000000000008`
+    - `rich_avg_return = -4.433333333333316`
+- after session `8`, the bootstrap run was stopped intentionally so the fresh `v2` line would be preserved in a known state instead of left as a console-bound background process
+
+## Entry 076: 2026-04-23 / V2 Checkpoint Nested Planner Config Fix
+
+Failure:
+
+- evaluating `artifacts/spotlight_exec_curriculum_best_v2.pkl` through the ARC harness crashed immediately with:
+  - `AttributeError: 'dict' object has no attribute 'max_candidates'`
+- root cause:
+  - scientist checkpoints serialize nested config dataclasses with `asdict(...)`
+  - `SpotlightScientistAgent.from_checkpoint(...)` reconstructed nested `spotlight` config but did not reconstruct nested `planner`
+  - the saved `planner` subtree therefore came back as a raw `dict`
+  - `ScientistPlanner` then received that raw dict as `self.config`
+
+Fix:
+
+- added explicit planner-config normalization in `arcagi.scientist.agent`
+- added spotlight-config normalization in `arcagi.agents.spotlight_scientist_agent`
+- both agent construction and checkpoint restore now coerce nested config mappings back into:
+  - `PlannerConfig`
+  - `SpotlightConfig`
+- added regression coverage for:
+  - planner + spotlight round-trip through checkpoint save/load
+  - direct mapping-based spotlight agent construction
+
+Verification:
+
+- `python -m py_compile arcagi/scientist/agent.py arcagi/agents/spotlight_scientist_agent.py tests/test_action_spotlight.py`
+  - passed
+- `python -m pytest tests/test_action_spotlight.py tests/test_scientist_agent.py -q`
+  - `34 passed`
+- reran the user-facing offline ARC harness command against `artifacts/spotlight_exec_curriculum_best_v2.pkl`
+  - the run now passes the old crash point and emits progress normally
+  - first observed progress line:
+    - `spotlight_feature_schema_version = 2`
+    - `steps = 50`
+    - `interaction_steps = 0`
+    - `last_action = 1`
+
+## Entry 077: 2026-04-23 / Binder Credit, Option Memory, Teacher Credit, And Best-Key Fix
+
+Problem confirmed:
+
+- the current `v2` line was learning a bad generic loop:
+  - repeated binder clicks
+  - lateral probe actions
+  - those loops were being counted as successful often enough to entrench habit and option memory
+- training selection was also still drifting on better-failure proxies when all actual solve metrics were zero
+
+Edits landed:
+
+- `arcagi/scientist/spotlight.py`
+  - binder probe support is now stricter:
+    - still accepts true progress and structural rewrites
+    - now requires stronger evidence for pure visible-effect support
+  - first failed post-binder probe now clears the pending binder and writes binding failure immediately once grace is exhausted
+  - teacher labels for binding actions are now deferred until probe resolution
+  - validated binders get positive habit credit
+  - failed binders get reduced negative habit credit
+- `arcagi/scientist/memory.py`
+  - option/schema writes now support modes:
+    - `write`
+    - `skip`
+    - `contradict`
+  - binding steps and unresolved binder probes can now be prevented from immediately becoming reusable options
+  - failed binder-probe sequences can now increment contradiction on matching options/schemas instead of becoming positive reusable fragments
+- `arcagi/agents/spotlight_scientist_agent.py`
+  - spotlight transition feedback now gates option-memory writes:
+    - binding action step -> `skip`
+    - validated probe -> `write`
+    - failed probe -> `contradict`
+    - unresolved pending-probe step -> `skip`
+- `arcagi/scientist/train.py`
+  - best-checkpoint updates now require a strictly better key, not `>=`
+  - `_result_key(...)` now returns the zero tuple when all actual solve metrics are zero, so the trainer no longer keeps promoting better-failure traces
+
+Verification:
+
+- `python -m pytest tests/test_action_spotlight.py tests/test_scientist_agent.py tests/test_scientist_training.py -q`
+  - `40 passed`
+- tiny fresh `v2` train smoke:
+  - command:
+    - `python -u -m arcagi.scientist.train --seed 17 --stage1-sessions 2 --stage2-sessions 2 --eval-every 2 --simple-max-steps 24 --rich-level-max-steps 16 --rich-session-max-steps 48 --rich-levels-per-session 2 --holdout-simple-sessions 2 --holdout-rich-sessions 2 --checkpoint-path artifacts/tmp_binder_fix_best_v2.pkl --latest-checkpoint-path artifacts/tmp_binder_fix_latest_v2.pkl`
+  - result:
+    - `spotlight_feature_schema_version = 2`
+    - holdout `ranking_key = [0, 0, 0, 0, 0, 0, 0]` at both eval boundaries
+    - `best_updated` was `true` on the first eval only and `false` on the second, even though proxy attempt-improvement values changed
+
+Interpretation:
+
+- the key training pathology is now addressed mechanically:
+  - false binder loops are harder to reinforce
+  - binder-first sequences are harder to memorialize as reusable options
+  - teacher shaping no longer gives immediate free positive credit to latent binders
+  - checkpoint selection no longer drifts on all-zero solve runs
+- none of this magically rehabilitates already contaminated `v2` checkpoints; the next serious empirical test should be a fresh `v2` line from scratch
+
+Doc cleanup note:
+
+- remaining stale user-facing artifact references were found in `README.md` and `docs/ARC_COMPETITION_RUNTIME.md`; those should be rewritten to explicit `*_legacy_v1.pkl` or `*_v2.pkl` names before more operator-facing runs
+
+## Entry 078: 2026-04-23 / Reset-Guard Schema V3 And Reset-Aware Model Selection
+
+Problem confirmed:
+
+- the first fresh `v3` line briefly showed real simple holdout competence at session `16`, then collapsed by session `32`
+- the strongest visible symptom was reset domination:
+  - `rich_avg_reset_steps = 31.777...`
+  - all actual holdout solve metrics fell back to `0.0`
+- this meant stage-2 rich-session training was both:
+  - destroying earlier simple competence
+  - reinforcing reset-heavy garbage traces
+
+Edits landed:
+
+- `arcagi/scientist/spotlight.py`
+  - bumped the current spotlight runtime schema to `feature_schema_version = 3`
+  - preserved `v2` compatibility by keeping generic cost/schema features on `schema >= 2`
+  - added reset-guard state/features:
+    - `session_reset_count`
+    - `steps_since_reset`
+    - `reset_over_budget`
+    - `reset_under_cooldown`
+  - added conservative reset logic on the `v3` surface:
+    - nonterminal resets now require stall, cooldown expiry, no pending binder probe, and no positive recent attempt improvement
+    - repeated resets over budget get less bonus and more penalty
+    - the chooser now refuses a nonterminal reset choice when that reset context is not allowed and another non-reset action exists
+  - reset-ended attempts now score worse than ordinary failures
+  - repeated nonterminal resets now receive explicit negative executive targets during `learn_from_transition(...)`
+- `arcagi/agents/spotlight_scientist_agent.py`
+  - `finalize_attempt(...)` now receives `ended_by_reset=True` for reset boundaries
+- `arcagi/scientist/train.py`
+  - trainer output now logs:
+    - `recent_avg_reset_steps`
+    - `train_avg_reset_steps`
+  - `_result_key(...)` now includes `-rich_avg_reset_steps` ahead of proxy attempt-improvement terms
+  - all-zero solve runs still collapse to the all-zero ranking tuple
+
+Schema boundary:
+
+- old preserved baseline:
+  - `feature_schema_version = 1`
+- previous extended runtime:
+  - `feature_schema_version = 2`
+- current reset-guard runtime:
+  - `feature_schema_version = 3`
+- direct compatibility check:
+  - loading `artifacts/spotlight_exec_curriculum_best_v2.pkl` still reports `feature_schema_version = 2`
+
+Verification:
+
+- `python -m py_compile arcagi/scientist/spotlight.py arcagi/scientist/train.py arcagi/agents/spotlight_scientist_agent.py tests/test_action_spotlight.py tests/test_scientist_training.py`
+  - passed
+- `python -m pytest tests/test_action_spotlight.py tests/test_scientist_training.py -q`
+  - `24 passed`
+- `python -m pytest tests/test_scientist_agent.py tests/test_arc_public_training.py tests/test_synthetic_oracle.py -q`
+  - `32 passed`
+- tiny fresh `v3` train smoke:
+  - command:
+    - `python -u -m arcagi.scientist.train --seed 5 --stage1-sessions 1 --stage2-sessions 1 --eval-every 1 --simple-max-steps 16 --rich-level-max-steps 12 --rich-session-max-steps 32 --rich-levels-per-session 2 --holdout-simple-sessions 1 --holdout-rich-sessions 1 --checkpoint-path artifacts/tmp_reset_guard_best_v3.pkl --latest-checkpoint-path artifacts/tmp_reset_guard_latest_v3.pkl`
+  - result:
+    - emitted `spotlight_feature_schema_version = 3`
+    - emitted `recent_avg_reset_steps`
+    - emitted an 8-term reset-aware `ranking_key`
+    - all-zero solve evals still stayed pinned to the zero tuple
+
+Operator-facing doc cleanup landed:
+
+- `README.md` now documents schema `v3` and uses `*_v3.pkl` artifact names in the main scientist commands
+- `docs/ARC_COMPETITION_RUNTIME.md` now points the uncapped operator command at `artifacts/spotlight_exec_curriculum_best_v3.pkl`
+- `docs/CHECKPOINT_LINEAGE.md` now documents schema `v3`

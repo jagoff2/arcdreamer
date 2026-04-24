@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import json
 from pathlib import Path
 from statistics import mean
@@ -8,6 +9,7 @@ from typing import Any
 
 from arcagi.agents.graph_agent import GraphExplorerAgent
 from arcagi.agents.random_agent import RandomHeuristicAgent
+from arcagi.core.progress_signals import action_family
 from arcagi.envs.arc_adapter import Arcade, ArcToolkitEnv, arc_operation_mode, arc_toolkit_available, list_arc_games
 from arcagi.envs.synthetic import DEFAULT_SYNTHETIC_FAMILY_MODES, HiddenRuleEnv, family_variants_for_mode
 
@@ -30,7 +32,7 @@ def build_agent(agent_name: str, checkpoint_path: str | None = None, device: Any
 
     import torch
 
-    from arcagi.agents.learned_agent import HybridAgent, LanguageNoMemoryAgent, RecurrentAblationAgent
+    from arcagi.agents.learned_agent import HybridAgent, LanguageNoMemoryAgent, OnlineLanguageMemoryAgent, RecurrentAblationAgent
     from arcagi.memory.episodic import EpisodicMemory
     from arcagi.planning.planner import HybridPlanner, PlannerConfig
     from arcagi.training.synthetic import build_default_modules, load_checkpoint
@@ -42,9 +44,16 @@ def build_agent(agent_name: str, checkpoint_path: str | None = None, device: Any
         encoder, world_model, language_model, _planner = build_default_modules(device=device)
 
     planner = HybridPlanner(
-        PlannerConfig(search_depth=2, search_root_width=2, search_branch_width=1, max_world_model_calls=48)
+        PlannerConfig(
+            search_depth=2,
+            search_root_width=2,
+            search_branch_width=1,
+            max_world_model_calls=48,
+            graph_signal_weight=0.0,
+            policy_prior_weight=3.0,
+        )
         if device.type == "cpu"
-        else PlannerConfig()
+        else PlannerConfig(graph_signal_weight=0.0, policy_prior_weight=3.0)
     )
     if normalized == "recurrent":
         return RecurrentAblationAgent(encoder=encoder, world_model=world_model, planner=planner, device=device)
@@ -54,6 +63,15 @@ def build_agent(agent_name: str, checkpoint_path: str | None = None, device: Any
             world_model=world_model,
             planner=planner,
             language_model=language_model,
+            device=device,
+        )
+    if normalized in {"online_language_memory", "language_memory", "memory_language"}:
+        return OnlineLanguageMemoryAgent(
+            encoder=encoder,
+            world_model=world_model,
+            planner=planner,
+            language_model=language_model,
+            episodic_memory=EpisodicMemory(),
             device=device,
         )
     if normalized == "hybrid":
@@ -72,6 +90,14 @@ def _reset_agent_for_episode(agent: Any) -> None:
     reset_episode = getattr(agent, "reset_episode", None)
     if callable(reset_episode):
         reset_episode()
+
+
+def _reset_agent_for_level(agent: Any) -> None:
+    reset_level = getattr(agent, "reset_level", None)
+    if callable(reset_level):
+        reset_level()
+        return
+    _reset_agent_for_episode(agent)
 
 
 def _reset_agent_for_family(agent: Any) -> None:
@@ -104,6 +130,25 @@ def _observe_step(agent: Any, *, action: str, before: Any, result: Any) -> None:
         )
 
 
+def _spotlight_feature_schema_version(agent: Any) -> int:
+    diagnostics_fn = getattr(agent, "diagnostics", None)
+    if not callable(diagnostics_fn):
+        return 0
+    try:
+        diagnostics = diagnostics_fn()
+    except Exception:
+        return 0
+    if not isinstance(diagnostics, dict):
+        return 0
+    spotlight = diagnostics.get("spotlight")
+    if not isinstance(spotlight, dict):
+        return 0
+    try:
+        return int(spotlight.get("feature_schema_version", 0) or 0)
+    except Exception:
+        return 0
+
+
 def run_episode(
     agent: Any,
     env: Any,
@@ -111,6 +156,7 @@ def run_episode(
     max_steps: int | None = None,
     stop_on_positive_reward: bool = False,
     progress_every: int = 0,
+    trace_path: str | Path | None = None,
 ) -> dict[str, object]:
     observation = env.reset(seed=seed)
     _reset_agent_for_episode(agent)
@@ -123,49 +169,156 @@ def run_episode(
     levels_completed = _levels_completed(observation)
     language_traces: list[str] = []
     done = False
-    while not done and (max_steps is None or steps < max_steps):
-        before = observation
-        action = agent.act(observation)
-        action_text = str(action)
-        if action_text.startswith("interact") or action_text.startswith("click:"):
-            interaction_steps += 1
-        if action_text == "0":
-            reset_steps += 1
-        result = env.step(action)
-        _observe_step(agent, action=action_text, before=before, result=result)
-        observation = result.observation
-        steps += 1
-        rewards.append(float(result.reward))
-        levels_completed = max(levels_completed, _levels_completed(observation))
-        won = won or _is_win_state(observation)
-        if result.reward > 0.9:
-            success = True
-            if stop_on_positive_reward:
-                done = True
-        if won:
-            success = True
-            done = True
-        if not done:
-            done = bool(result.terminated or result.truncated) and not _should_continue_after_terminal(observation)
-        if getattr(agent, "latest_language", ()):
-            language_traces.append(" ".join(str(x) for x in agent.latest_language))
-        if progress_every > 0 and steps % progress_every == 0:
-            print(
-                json.dumps(
-                    {
-                        "event": "arc_runtime_progress",
-                        "family_id": getattr(env, "family_id", getattr(env, "task_id", "unknown")),
-                        "steps": steps,
-                        "return": float(sum(rewards)),
-                        "interaction_steps": interaction_steps,
-                        "reset_steps": reset_steps,
-                        "levels_completed": levels_completed,
-                        "game_state": _game_state(observation),
-                        "last_action": action_text,
-                    },
-                    sort_keys=True,
-                )
+    spotlight_feature_schema_version = _spotlight_feature_schema_version(agent)
+    action_counts: Counter[str] = Counter()
+    family_counts: Counter[str] = Counter()
+    max_same_action_streak = 0
+    same_action_streak = 0
+    previous_action = ""
+    trace_handle = None
+    try:
+        if trace_path is not None:
+            trace_file = Path(trace_path)
+            trace_file.parent.mkdir(parents=True, exist_ok=True)
+            trace_handle = trace_file.open("w", encoding="utf-8")
+            _write_trace_row(
+                trace_handle,
+                {
+                    "event": "episode_start",
+                    "family_id": getattr(env, "family_id", getattr(env, "task_id", "unknown")),
+                    "seed": int(seed),
+                    "max_steps": max_steps,
+                    "agent": getattr(agent, "name", type(agent).__name__),
+                    "initial_game_state": _game_state(observation),
+                    "initial_levels_completed": levels_completed,
+                    "initial_available_action_count": len(tuple(getattr(observation, "available_actions", ()) or ())),
+                    "spotlight_feature_schema_version": spotlight_feature_schema_version,
+                },
             )
+        while not done and (max_steps is None or steps < max_steps):
+            before = observation
+            before_levels = _levels_completed(before)
+            before_game_state = _game_state(before)
+            before_actions = tuple(str(item) for item in getattr(before, "available_actions", ()) or ())
+            action = agent.act(observation)
+            action_text = str(action)
+            action_kind = action_family(action_text)
+            action_counts[action_text] += 1
+            family_counts[action_kind] += 1
+            if action_text == previous_action:
+                same_action_streak += 1
+            else:
+                same_action_streak = 1
+                previous_action = action_text
+            max_same_action_streak = max(max_same_action_streak, same_action_streak)
+            if _is_interaction_action(action_text, before):
+                interaction_steps += 1
+            reset_action = _is_reset_action(action_text, before)
+            if reset_action:
+                reset_steps += 1
+            result = env.step(action)
+            _observe_step(agent, action=action_text, before=before, result=result)
+            observation = result.observation
+            after_levels = _levels_completed(observation)
+            after_game_state = _game_state(observation)
+            after_actions = tuple(str(item) for item in getattr(observation, "available_actions", ()) or ())
+            steps += 1
+            rewards.append(float(result.reward))
+            levels_completed = max(levels_completed, after_levels)
+            won = won or _is_win_state(observation)
+            level_boundary = bool(reset_action or after_levels > before_levels)
+            if level_boundary and not won:
+                _reset_agent_for_level(agent)
+            if result.reward > 0.9:
+                success = True
+                if stop_on_positive_reward:
+                    done = True
+            if won:
+                success = True
+                done = True
+            if not done:
+                done = bool(result.terminated or result.truncated) and not _should_continue_after_terminal(observation)
+            latest_language = tuple(str(x) for x in getattr(agent, "latest_language", ()) or ())
+            if latest_language:
+                language_traces.append(" ".join(latest_language))
+            if trace_handle is not None:
+                _write_trace_row(
+                    trace_handle,
+                    {
+                        "event": "step",
+                        "step": steps,
+                        "family_id": getattr(env, "family_id", getattr(env, "task_id", "unknown")),
+                        "action": action_text,
+                        "action_family": action_kind,
+                        "action_repeat_count": action_counts[action_text],
+                        "same_action_streak": same_action_streak,
+                        "family_count": family_counts[action_kind],
+                        "before_available_action_count": len(before_actions),
+                        "after_available_action_count": len(after_actions),
+                        "before_levels_completed": before_levels,
+                        "after_levels_completed": after_levels,
+                        "level_delta": max(after_levels - before_levels, 0),
+                        "level_boundary": level_boundary,
+                        "reset_action": reset_action,
+                        "interaction_action": _is_interaction_action(action_text, before),
+                        "reward": float(result.reward),
+                        "return": float(sum(rewards)),
+                        "terminated": bool(result.terminated),
+                        "truncated": bool(result.truncated),
+                        "continued_after_terminal": bool(
+                            (result.terminated or result.truncated) and _should_continue_after_terminal(observation)
+                        ),
+                        "done": bool(done),
+                        "won": bool(won),
+                        "before_game_state": before_game_state,
+                        "after_game_state": after_game_state,
+                        "latest_language": latest_language,
+                        "last_plan_scores": _json_safe(getattr(agent, "last_plan_scores", {})),
+                        "diagnostics": _compact_diagnostics(getattr(agent, "diagnostics", lambda: {})()),
+                    },
+                )
+            if progress_every > 0 and steps % progress_every == 0:
+                print(
+                    json.dumps(
+                        {
+                            "event": "arc_runtime_progress",
+                            "family_id": getattr(env, "family_id", getattr(env, "task_id", "unknown")),
+                            "steps": steps,
+                            "return": float(sum(rewards)),
+                            "interaction_steps": interaction_steps,
+                            "reset_steps": reset_steps,
+                            "levels_completed": levels_completed,
+                            "game_state": _game_state(observation),
+                            "last_action": action_text,
+                            "same_action_streak": same_action_streak,
+                            "action_repeat_count": action_counts[action_text],
+                            "family_counts": dict(family_counts),
+                            "spotlight_feature_schema_version": spotlight_feature_schema_version,
+                        },
+                        sort_keys=True,
+                    )
+                )
+    finally:
+        if trace_handle is not None:
+            _write_trace_row(
+                trace_handle,
+                {
+                    "event": "episode_end",
+                    "steps": steps,
+                    "success": success,
+                    "won": won,
+                    "return": float(sum(rewards)),
+                    "interaction_steps": interaction_steps,
+                    "reset_steps": reset_steps,
+                    "levels_completed": levels_completed,
+                    "game_state": _game_state(observation),
+                    "action_histogram": dict(action_counts),
+                    "family_histogram": dict(family_counts),
+                    "max_same_action_streak": max_same_action_streak,
+                    "diagnostics": _compact_diagnostics(getattr(agent, "diagnostics", lambda: {})()),
+                },
+            )
+            trace_handle.close()
     return {
         "success": success,
         "won": won,
@@ -177,6 +330,11 @@ def run_episode(
         "game_state": _game_state(observation),
         "language": language_traces[-1] if language_traces else "",
         "family_id": getattr(env, "family_id", getattr(env, "task_id", "unknown")),
+        "spotlight_feature_schema_version": spotlight_feature_schema_version,
+        "action_histogram": dict(action_counts),
+        "family_histogram": dict(family_counts),
+        "max_same_action_streak": max_same_action_streak,
+        "trace_path": str(trace_path) if trace_path is not None else "",
         "diagnostics": getattr(agent, "diagnostics", lambda: {})(),
     }
 
@@ -186,6 +344,7 @@ def evaluate_synthetic(
     checkpoint_path: str | None = None,
     episodes_per_family: int = 3,
     seed: int = 17,
+    max_steps: int | None = None,
 ) -> dict[str, object]:
     agent = build_agent(agent_name, checkpoint_path=checkpoint_path)
     families: list[dict[str, object]] = []
@@ -199,8 +358,9 @@ def evaluate_synthetic(
                     family_mode=family_mode,
                     family_variant=variant,
                     seed=seed_cursor + episode_idx,
+                    max_steps=max_steps,
                 )
-                episode_metrics.append(run_episode(agent, env, seed=seed_cursor + episode_idx))
+                episode_metrics.append(run_episode(agent, env, seed=seed_cursor + episode_idx, max_steps=max_steps))
             seed_cursor += episodes_per_family
             families.append(
                 {
@@ -232,6 +392,7 @@ def evaluate_arc(
     game_id: str | None = None,
     max_steps: int | None = 256,
     progress_every: int = 0,
+    trace_path: str | None = None,
 ) -> dict[str, object]:
     if not arc_toolkit_available():
         return {"agent": agent_name, "skipped": True, "reason": "ARC toolkit not installed"}
@@ -254,6 +415,7 @@ def evaluate_arc(
                 max_steps=max_steps,
                 stop_on_positive_reward=False,
                 progress_every=progress_every,
+                trace_path=_trace_path_for_game(trace_path, game_id, index, len(games)) if trace_path else None,
             )
         finally:
             env.close()
@@ -266,6 +428,75 @@ def evaluate_arc(
             except Exception:
                 pass
     return {"agent": agent_name, "mode": mode, "games": results}
+
+
+def _trace_path_for_game(base_path: str, game_id: str, index: int, game_count: int) -> Path:
+    base = Path(base_path)
+    if game_count == 1:
+        return base
+    safe_game = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in str(game_id))
+    if base.suffix:
+        return base.with_name(f"{base.stem}.{index:02d}.{safe_game}{base.suffix}")
+    return base / f"{index:02d}_{safe_game}.jsonl"
+
+
+def _write_trace_row(handle: Any, row: dict[str, Any]) -> None:
+    handle.write(json.dumps(_json_safe(row), sort_keys=True) + "\n")
+    handle.flush()
+
+
+def _compact_diagnostics(diagnostics: Any) -> dict[str, Any]:
+    if not isinstance(diagnostics, dict):
+        return {}
+    keep_keys = {
+        "runtime_controller_active",
+        "objective_stall_steps",
+        "level_stall_steps",
+        "max_levels_completed_observed",
+        "last_plan_scores",
+        "latest_language",
+        "latest_self_model_scores",
+        "self_belief",
+        "self_model",
+        "spotlight",
+        "world_model",
+        "hypothesis_count",
+        "memory_items",
+        "transitions_observed",
+    }
+    compact: dict[str, Any] = {}
+    for key in keep_keys:
+        if key in diagnostics:
+            compact[key] = diagnostics[key]
+    return _json_safe(compact)
+
+
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_json_safe(item) for item in value]
+    try:
+        import numpy as np
+
+        if isinstance(value, np.generic):
+            return value.item()
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+    except Exception:
+        pass
+    try:
+        import torch
+
+        if isinstance(value, torch.Tensor):
+            return value.detach().cpu().tolist()
+    except Exception:
+        pass
+    return repr(value)
 
 
 def _observation_extras(observation: Any) -> dict[str, Any]:
@@ -290,6 +521,28 @@ def _is_win_state(observation: Any) -> bool:
     return _game_state(observation).strip().upper().endswith("WIN")
 
 
+def _is_reset_action(action: str, observation: Any) -> bool:
+    extras = _observation_extras(observation)
+    roles = extras.get("action_roles", {})
+    role = ""
+    if isinstance(roles, dict):
+        role = str(roles.get(action, ""))
+    return str(action) == "0" or "reset" in role
+
+
+def _is_interaction_action(action: str, observation: Any) -> bool:
+    extras = _observation_extras(observation)
+    roles = extras.get("action_roles", {})
+    role = ""
+    if isinstance(roles, dict):
+        role = str(roles.get(action, ""))
+    action_text = str(action)
+    if action_text.startswith("interact") or action_text.startswith("click:"):
+        return True
+    role_lower = role.lower()
+    return any(token in role_lower for token in ("interact", "click", "select", "use", "confirm"))
+
+
 def _should_continue_after_terminal(observation: Any) -> bool:
     available_actions = tuple(str(item) for item in getattr(observation, "available_actions", ()) or ())
     game_state = _game_state(observation).strip().upper()
@@ -302,17 +555,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m arcagi.evaluation.harness")
     subparsers = parser.add_subparsers(dest="command", required=True)
     synthetic_parser = subparsers.add_parser("synthetic")
-    synthetic_parser.add_argument("--agent", type=str, default="graph")
+    synthetic_parser.add_argument("--agent", type=str, default="language")
     synthetic_parser.add_argument("--checkpoint-path", type=str, default="")
     synthetic_parser.add_argument("--episodes-per-family", type=int, default=3)
     synthetic_parser.add_argument("--seed", type=int, default=17)
+    synthetic_parser.add_argument("--max-steps", type=int, default=0)
     arc_parser = subparsers.add_parser("arc")
-    arc_parser.add_argument("--agent", type=str, default="graph")
+    arc_parser.add_argument("--agent", type=str, default="language")
     arc_parser.add_argument("--checkpoint-path", type=str, default="")
     arc_parser.add_argument("--game-limit", type=int, default=3)
     arc_parser.add_argument("--game-id", type=str, default="")
     arc_parser.add_argument("--max-steps", type=int, default=256)
     arc_parser.add_argument("--progress-every", type=int, default=0)
+    arc_parser.add_argument("--trace-path", type=str, default="")
     arc_parser.add_argument("--mode", type=str, default="offline")
     return parser
 
@@ -326,6 +581,7 @@ def main() -> int:
             checkpoint_path=args.checkpoint_path or None,
             episodes_per_family=args.episodes_per_family,
             seed=args.seed,
+            max_steps=None if int(args.max_steps) <= 0 else int(args.max_steps),
         )
         print(json.dumps(result, indent=2))
         return 0
@@ -338,6 +594,7 @@ def main() -> int:
             max_steps=None if int(args.max_steps) <= 0 else int(args.max_steps),
             progress_every=max(0, int(args.progress_every)),
             mode=args.mode,
+            trace_path=args.trace_path or None,
         )
         print(json.dumps(result, indent=2))
         return 0

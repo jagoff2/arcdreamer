@@ -101,6 +101,12 @@ def action_family(action: str) -> str:
         return "click"
     if action.startswith("interact"):
         return "interact"
+    if action in {"5", "select", "cycle"} or action.startswith("select"):
+        return "select"
+    if action in {"0", "reset"}:
+        return "reset"
+    if action in {"7", "undo"}:
+        return "undo"
     if action == "wait":
         return "wait"
     return "move"
@@ -203,6 +209,68 @@ def transition_policy_supervision(
             sibling_move_weight=0.3 if family == "move" else 0.0,
         )
     return PolicySupervision(target=0.0, weight=1.6 if family in {"interact", "click"} else 1.1)
+
+
+def visible_online_usefulness_target(
+    action: str,
+    reward: float,
+    delta_norm: float,
+    *,
+    prediction_error: float = 0.0,
+    predicted_uncertainty: float = 0.0,
+) -> float:
+    family = action_family(action)
+    delta_norm = max(0.0, float(delta_norm))
+    surprise_gap = max(0.0, float(prediction_error) - float(predicted_uncertainty))
+
+    if family in {"reset", "undo", "wait"}:
+        return -0.18
+    if reward > 0.0:
+        return _clamp(float(reward) + (0.15 * min(delta_norm, 1.0)), lower=0.3, upper=1.1)
+    if family in {"click", "select"} and (delta_norm >= 0.03 or surprise_gap >= 0.08):
+        return 0.25
+    if family == "interact" and (delta_norm >= 0.03 or surprise_gap >= 0.12):
+        return 0.18
+    if family == "move" and delta_norm >= 0.015:
+        return 0.04 if surprise_gap >= 0.18 else -0.02
+    if delta_norm >= 0.12 or surprise_gap >= 0.18:
+        return 0.10
+    if family in {"click", "select", "interact"}:
+        return -0.30
+    return -0.04
+
+
+def visible_online_policy_supervision(
+    action: str,
+    reward: float,
+    delta_norm: float,
+    *,
+    prediction_error: float = 0.0,
+    predicted_uncertainty: float = 0.0,
+) -> PolicySupervision:
+    family = action_family(action)
+    delta_norm = max(0.0, float(delta_norm))
+    surprise_gap = max(0.0, float(prediction_error) - float(predicted_uncertainty))
+
+    if family in {"reset", "undo", "wait"}:
+        return PolicySupervision(target=0.0, weight=1.1)
+    if reward > 0.0:
+        if family in {"click", "select"}:
+            return PolicySupervision(target=0.95, weight=1.35, same_type_target=0.12, same_type_weight=0.25)
+        return PolicySupervision(target=1.0, weight=1.4)
+    if family in {"click", "select"} and (delta_norm >= 0.03 or surprise_gap >= 0.08):
+        return PolicySupervision(target=0.35, weight=0.9, same_type_target=0.08, same_type_weight=0.2)
+    if family == "interact" and (delta_norm >= 0.03 or surprise_gap >= 0.12):
+        return PolicySupervision(target=0.30, weight=0.9)
+    if family == "move" and delta_norm >= 0.015:
+        if surprise_gap >= 0.18:
+            return PolicySupervision(target=0.08, weight=0.35, sibling_move_target=0.02, sibling_move_weight=0.05)
+        return PolicySupervision(target=0.0, weight=0.7)
+    if delta_norm >= 0.12 or surprise_gap >= 0.18:
+        return PolicySupervision(target=0.25, weight=0.6)
+    if family in {"click", "select", "interact"}:
+        return PolicySupervision(target=0.0, weight=1.2)
+    return PolicySupervision(target=0.0, weight=0.8)
 
 
 def hindsight_supervision(

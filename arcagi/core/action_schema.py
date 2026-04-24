@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from arcagi.core.types import ActionName
 
@@ -73,6 +73,50 @@ def parse_click_action(action: ActionName) -> tuple[int, int] | None:
     if not x_str.isdigit() or not y_str.isdigit():
         return None
     return int(x_str), int(y_str)
+
+
+def click_to_grid_cell(
+    click: tuple[int, int],
+    *,
+    grid_shape: tuple[int, int],
+    inventory: Mapping[str, Any] | None = None,
+) -> tuple[int, int] | None:
+    click_x, click_y = int(click[0]), int(click[1])
+    inventory = inventory or {}
+    scale = _inventory_int(inventory, "interface_display_scale", 0)
+    pad_x = _inventory_int(inventory, "interface_display_pad_x", 0)
+    pad_y = _inventory_int(inventory, "interface_display_pad_y", 0)
+    if scale > 0:
+        grid_x = int((click_x - pad_x) // scale)
+        grid_y = int((click_y - pad_y) // scale)
+        if _in_bounds(grid_y, grid_x, grid_shape):
+            return (grid_y, grid_x)
+    if _in_bounds(click_y, click_x, grid_shape):
+        return (click_y, click_x)
+    return None
+
+
+def click_action_to_grid_cell(
+    action: ActionName,
+    *,
+    grid_shape: tuple[int, int],
+    inventory: Mapping[str, Any] | None = None,
+) -> tuple[int, int] | None:
+    click = parse_click_action(action)
+    if click is None:
+        return None
+    return click_to_grid_cell(click, grid_shape=grid_shape, inventory=inventory)
+
+
+def _inventory_int(inventory: Mapping[str, Any], key: str, default: int) -> int:
+    try:
+        return int(inventory.get(key, default) or default)
+    except Exception:
+        return int(default)
+
+
+def _in_bounds(row: int, col: int, grid_shape: tuple[int, int]) -> bool:
+    return row >= 0 and col >= 0 and row < int(grid_shape[0]) and col < int(grid_shape[1])
 
 
 def extract_direction(parts: tuple[str, ...]) -> str | None:
@@ -150,3 +194,10 @@ def build_action_schema(action: ActionName, context: ActionSchemaContext) -> Act
         coarse_bin=coarse_bin,
         family=family,
     )
+
+
+def no_effect_family_key(schema: ActionSchema) -> str:
+    if schema.coarse_bin is None:
+        return schema.family
+    bin_x, bin_y = schema.coarse_bin
+    return f"{schema.family}:bin:{bin_x}:{bin_y}"

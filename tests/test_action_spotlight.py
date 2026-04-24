@@ -5,9 +5,10 @@ from types import SimpleNamespace
 import numpy as np
 
 from arcagi.evaluation.harness import build_agent
-from arcagi.agents.spotlight_scientist_agent import SpotlightScientistAgent
+from arcagi.agents.spotlight_scientist_agent import SpotlightScientistAgent, SpotlightScientistConfig
+from arcagi.scientist.planner import PlannerConfig
 from arcagi.scientist.perception import compare_states, extract_state
-from arcagi.scientist.spotlight import ActionSpotlight
+from arcagi.scientist.spotlight import ActionSpotlight, CURRENT_FEATURE_SCHEMA_VERSION, LEGACY_FEATURE_SCHEMA_VERSION, SpotlightConfig
 from arcagi.scientist.types import GridFrame, action_delta, action_family, is_interact_action, is_move_action, is_reset_action, is_selector_action
 
 
@@ -15,6 +16,7 @@ def test_spotlight_scientist_agent_exposes_spotlight_diagnostics() -> None:
     agent = SpotlightScientistAgent()
     diagnostics = agent.diagnostics()
     assert "spotlight" in diagnostics
+    assert diagnostics["spotlight"]["feature_schema_version"] == CURRENT_FEATURE_SCHEMA_VERSION
 
 
 def test_harness_supports_scientist_and_spotlight_aliases() -> None:
@@ -22,6 +24,204 @@ def test_harness_supports_scientist_and_spotlight_aliases() -> None:
         agent = build_agent(name)
         diagnostics = agent.diagnostics()
         assert "spotlight" in diagnostics
+        assert diagnostics["spotlight"]["feature_schema_version"] == CURRENT_FEATURE_SCHEMA_VERSION
+
+
+def test_spotlight_loads_missing_feature_schema_version_as_legacy() -> None:
+    spotlight = ActionSpotlight()
+    state = spotlight.state_dict()
+    assert state["feature_schema_version"] == CURRENT_FEATURE_SCHEMA_VERSION
+    del state["feature_schema_version"]
+
+    restored = ActionSpotlight()
+    restored.load_state_dict(state)
+
+    diagnostics = restored.diagnostics()
+    assert diagnostics["feature_schema_version"] == LEGACY_FEATURE_SCHEMA_VERSION
+
+
+def test_legacy_spotlight_schema_omits_extended_cost_schema_components() -> None:
+    spotlight = ActionSpotlight()
+    state = spotlight.state_dict()
+    del state["feature_schema_version"]
+    spotlight.load_state_dict(state)
+    grid_state = extract_state(GridFrame("task", "episode", 0, np.array([[0, 1], [0, 0]], dtype=np.int64), ("3", "4")))
+
+    class Planner:
+        @staticmethod
+        def candidate_actions(_state, *, engine):
+            return ("3", "4")
+
+    class Engine:
+        @staticmethod
+        def score_action(_state, _action, **_kwargs):
+            return SimpleNamespace(
+                expected_reward=0.0,
+                expected_change=0.0,
+                information_gain=0.0,
+                risk=0.0,
+                rationale=(),
+            )
+
+    class WorldModel:
+        @staticmethod
+        def predict(_state, _action):
+            return SimpleNamespace(reward_mean=0.0, change_mean=0.0, total_uncertainty=0.0)
+
+    class Memory:
+        @staticmethod
+        def action_memory_bonus(_state, _action, _lang_tokens):
+            return 0.0
+
+        @staticmethod
+        def action_option_profile(_state, _action, _lang_tokens):
+            return {
+                "schema_bonus": 9.0,
+                "relative_cost": 5.0,
+                "efficiency": 4.0,
+                "support": 3.0,
+                "contradiction": 0.0,
+                "continuation_depth": 1.0,
+            }
+
+    class Language:
+        @staticmethod
+        def memory_tokens(_state, _engine):
+            return ()
+
+        @staticmethod
+        def belief_sentences(_engine, *, limit=3):
+            return ()
+
+        @staticmethod
+        def questions(_engine, *, limit=2):
+            return ()
+
+    decision = spotlight.choose_action(
+        grid_state,
+        planner=Planner(),
+        engine=Engine(),
+        world_model=WorldModel(),
+        memory=Memory(),
+        language=Language(),
+    )
+
+    assert "option_schema_bonus" not in decision.components
+    assert "action_cost" not in decision.components
+
+
+def test_stalled_spotlight_promotes_untried_binding_probe() -> None:
+    spotlight = ActionSpotlight(SpotlightConfig(diagnostic_binding_stall_threshold=2))
+    spotlight.steps_since_progress = 3
+    grid_state = extract_state(
+        GridFrame("task", "episode", 3, np.array([[0, 1], [0, 0]], dtype=np.int64), ("1", "click:0:1"))
+    )
+
+    class Planner:
+        @staticmethod
+        def candidate_actions(_state, *, engine):
+            return ("1", "click:0:1")
+
+    class Engine:
+        @staticmethod
+        def score_action(_state, _action, **_kwargs):
+            return SimpleNamespace(
+                expected_reward=0.0,
+                expected_change=0.0,
+                information_gain=0.0,
+                risk=0.0,
+                rationale=(),
+            )
+
+    class WorldModel:
+        @staticmethod
+        def predict(_state, _action):
+            return SimpleNamespace(reward_mean=0.0, change_mean=0.0, total_uncertainty=0.0)
+
+    class Memory:
+        @staticmethod
+        def action_memory_bonus(_state, _action, _lang_tokens):
+            return 0.0
+
+        @staticmethod
+        def action_option_profile(_state, _action, _lang_tokens):
+            return {}
+
+    class Language:
+        @staticmethod
+        def memory_tokens(_state, _engine):
+            return ()
+
+        @staticmethod
+        def belief_sentences(_engine, *, limit=3):
+            return ()
+
+        @staticmethod
+        def questions(_engine, *, limit=2):
+            return ()
+
+    decision = spotlight.choose_action(
+        grid_state,
+        planner=Planner(),
+        engine=Engine(),
+        world_model=WorldModel(),
+        memory=Memory(),
+        language=Language(),
+    )
+
+    assert decision.action == "click:0:1"
+    assert decision.components["diagnostic_binding_probe"] == 1.0
+    assert "stalled without progress" in decision.chosen_reason
+
+
+def test_spotlight_agent_loads_missing_spotlight_state_as_legacy_schema() -> None:
+    agent = SpotlightScientistAgent()
+    state = {
+        "config": {},
+        "world_model": agent.world_model.state_dict(),
+    }
+
+    agent.load_state_dict(state)
+
+    diagnostics = agent.diagnostics()
+    assert diagnostics["spotlight"]["feature_schema_version"] == LEGACY_FEATURE_SCHEMA_VERSION
+
+
+def test_spotlight_agent_from_checkpoint_restores_saved_config(tmp_path) -> None:
+    config = SpotlightScientistConfig(
+        planner=PlannerConfig(max_candidates=17, reward_weight=3.1),
+        spotlight=SpotlightConfig(max_candidates=13, override_margin=0.77),
+    )
+    agent = SpotlightScientistAgent(config=config)
+    path = tmp_path / "spotlight_roundtrip.pkl"
+    agent.save_checkpoint(path)
+
+    restored = SpotlightScientistAgent.from_checkpoint(path)
+
+    assert restored.config.planner.max_candidates == 17
+    assert restored.config.planner.reward_weight == 3.1
+    assert restored.config.spotlight.max_candidates == 13
+    assert restored.config.spotlight.override_margin == 0.77
+    assert restored.diagnostics()["spotlight"]["feature_schema_version"] == CURRENT_FEATURE_SCHEMA_VERSION
+
+
+def test_spotlight_agent_normalizes_mapping_configs_before_runtime_use() -> None:
+    config = {
+        "memory_capacity": 2048,
+        "max_hypotheses": 512,
+        "planner": {"max_candidates": 11, "reward_weight": 2.9},
+        "spotlight": {"max_candidates": 19, "override_margin": 0.33},
+        "world_learning_rate": 0.08,
+        "seed": 0,
+        "keep_world_weights_between_episodes": True,
+    }
+
+    agent = SpotlightScientistAgent(config=config)  # type: ignore[arg-type]
+
+    assert agent.config.planner.max_candidates == 11
+    assert agent.planner.config.max_candidates == 11
+    assert agent.config.spotlight.max_candidates == 19
+    assert agent.spotlight.config.max_candidates == 19
 
 
 def test_binding_action_creates_pending_probe_and_probe_clears_on_support() -> None:
@@ -120,6 +320,32 @@ def test_baseline_movement_after_binder_does_not_count_as_binding_success() -> N
     assert diagnostics["binding_failure_total"] >= 1
 
 
+def test_reset_guard_schema_makes_nonterminal_reset_more_conservative() -> None:
+    spotlight = ActionSpotlight()
+    spotlight.feature_schema_version = CURRENT_FEATURE_SCHEMA_VERSION
+    spotlight.steps_since_progress = spotlight.config.reset_stall_threshold + 24
+    spotlight.steps_since_reset = 0
+    spotlight.session_reset_count = spotlight.config.reset_session_budget + 1
+    spotlight.last_attempt_improvement = 0.2
+    state = extract_state(
+        GridFrame("task", "episode", 0, np.array([[0, 1], [0, 0]], dtype=np.int64), ("0", "1"))
+    )
+
+    assert spotlight._reset_bonus(state, "0") == 0.0
+    assert spotlight._penalty(state, "0") > 6.0
+
+
+def test_reset_ended_attempt_scores_worse_under_reset_guard_schema() -> None:
+    spotlight = ActionSpotlight()
+    spotlight.feature_schema_version = CURRENT_FEATURE_SCHEMA_VERSION
+    spotlight.session_reset_count = spotlight.config.reset_session_budget + 2
+
+    ordinary = spotlight._attempt_score(reward=0.0, steps=8, success=False, terminal_failure=False, ended_by_reset=False)
+    reset_ended = spotlight._attempt_score(reward=0.0, steps=8, success=False, terminal_failure=False, ended_by_reset=True)
+
+    assert reset_ended < ordinary
+
+
 def test_spotlight_habit_policy_prefers_teacher_labeled_action_after_update() -> None:
     spotlight = ActionSpotlight()
     spotlight.executive.weights[:] = 0.0
@@ -191,6 +417,83 @@ def test_spotlight_habit_policy_prefers_teacher_labeled_action_after_update() ->
     assert second.action == "4"
     diagnostics = spotlight.diagnostics()
     assert diagnostics["habit_updates"] > 0
+
+
+def test_binding_teacher_label_is_deferred_until_probe_resolution() -> None:
+    spotlight = ActionSpotlight()
+    spotlight.executive.weights[:] = 0.0
+    spotlight.executive.exploration_bonus = 0.0
+    state = extract_state(GridFrame("task", "episode", 0, np.array([[0, 1], [0, 0]], dtype=np.int64), ("3", "5")))
+
+    class Planner:
+        @staticmethod
+        def candidate_actions(_state, *, engine):
+            return ("3", "5")
+
+    class Engine:
+        @staticmethod
+        def score_action(_state, _action, **_kwargs):
+            return SimpleNamespace(
+                expected_reward=0.0,
+                expected_change=0.0,
+                information_gain=0.0,
+                risk=0.0,
+                rationale=(),
+            )
+
+    class WorldModel:
+        @staticmethod
+        def predict(_state, _action):
+            return SimpleNamespace(reward_mean=0.0, change_mean=0.0, total_uncertainty=0.0)
+
+    class Memory:
+        @staticmethod
+        def action_memory_bonus(_state, _action, _lang_tokens):
+            return 0.0
+
+    class Language:
+        @staticmethod
+        def memory_tokens(_state, _engine):
+            return ()
+
+        @staticmethod
+        def belief_sentences(_engine, *, limit=3):
+            return ()
+
+        @staticmethod
+        def questions(_engine, *, limit=2):
+            return ()
+
+    spotlight.choose_action(
+        state,
+        planner=Planner(),
+        engine=Engine(),
+        world_model=WorldModel(),
+        memory=Memory(),
+        language=Language(),
+    )
+    spotlight.observe_teacher_action("5")
+    diagnostics = spotlight.diagnostics()
+    assert diagnostics["habit_updates"] == 0
+    assert diagnostics["last_teacher_action"] == "5 [deferred]"
+
+    bind_before = extract_state(GridFrame("task", "episode", 0, np.array([[1, 0], [0, 0]], dtype=np.int64), ("3", "5")))
+    bind_after = extract_state(GridFrame("task", "episode", 1, np.array([[1, 0], [0, 0]], dtype=np.int64), ("3", "5")))
+    spotlight.notify_transition(record=compare_states(bind_before, bind_after, action="5"))
+
+    baseline_before = extract_state(GridFrame("task", "episode", 2, np.array([[1, 0], [0, 0]], dtype=np.int64), ("3", "5")))
+    baseline_after = extract_state(GridFrame("task", "episode", 3, np.array([[0, 1], [0, 0]], dtype=np.int64), ("3", "5")))
+    spotlight.notify_transition(record=compare_states(baseline_before, baseline_after, action="3"))
+    bind_before = extract_state(GridFrame("task", "episode", 4, np.array([[1, 0], [0, 0]], dtype=np.int64), ("3", "5")))
+    bind_after = extract_state(GridFrame("task", "episode", 5, np.array([[1, 0], [0, 0]], dtype=np.int64), ("3", "5")))
+    spotlight.notify_transition(record=compare_states(bind_before, bind_after, action="5"))
+    probe_after = extract_state(GridFrame("task", "episode", 6, np.array([[0, 1], [0, 0]], dtype=np.int64), ("3", "5")))
+    spotlight.notify_transition(record=compare_states(bind_after, probe_after, action="3"))
+
+    diagnostics = spotlight.diagnostics()
+    assert diagnostics["habit_updates"] > 0
+    assert diagnostics["last_teacher_action"] == "5 [failed]"
+    assert diagnostics["binding_failure_total"] >= 1
 
 
 def test_spotlight_logs_validated_move37_style_override() -> None:

@@ -140,7 +140,7 @@ def test_collect_dataset_balances_two_way_family_variants_within_epoch() -> None
     }
 
 
-def test_collect_dataset_uses_hybrid_collector_for_mixed_policy_when_modules_are_available() -> None:
+def test_collect_dataset_uses_clean_language_collector_for_mixed_policy_when_modules_are_available() -> None:
     config = SyntheticTrainingConfig(
         episodes_per_epoch=4,
         log_every_episodes=0,
@@ -157,7 +157,7 @@ def test_collect_dataset_uses_hybrid_collector_for_mixed_policy_when_modules_are
         device=torch.device("cpu"),
     )
 
-    assert metrics["collector_agent"] == "hybrid"
+    assert metrics["collector_agent"] == "language"
 
 
 def test_bootstrap_schedule_tracks_current_readiness_instead_of_latching_release() -> None:

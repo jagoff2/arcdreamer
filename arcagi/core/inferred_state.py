@@ -33,6 +33,11 @@ class InferredStateTracker:
         self.last_effect_family = "none"
         self.mode = "explore"
 
+    def reset_level(self) -> None:
+        self.recent_progress = False
+        self.last_effect_family = "none"
+        self.mode = "explore"
+
     def augment(self, state: StructuredState) -> StructuredState:
         inventory = dict(state.inventory)
         flags = dict(state.flags)

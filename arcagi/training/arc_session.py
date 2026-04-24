@@ -189,8 +189,6 @@ def session_progress_signal(sample: Mapping[str, Any]) -> float:
         progress += 1.0
     if failure_terminal:
         progress -= 0.35 if continued_session else 0.65
-    if reset_action and "GAME_OVER" in str(sample.get("game_state_before", "")).upper():
-        progress += 0.2
     return float(progress)
 
 

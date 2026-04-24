@@ -88,6 +88,7 @@ def train_arc_offline(config: ScientistArcTrainingConfig) -> dict[str, object]:
             "event": "scientist_arc_train_eval",
             "session": session_idx + 1,
             "seed": seed,
+            "spotlight_feature_schema_version": _spotlight_feature_schema_version(agent),
             "recent_session_win_rate": _mean_bool(item["won"] for item in train_rows[-config.eval_every :]),
             "recent_avg_levels_completed": mean(float(item["levels_completed"]) for item in train_rows[-config.eval_every :]),
             "recent_avg_return": mean(float(item["return"]) for item in train_rows[-config.eval_every :]),
@@ -108,6 +109,7 @@ def train_arc_offline(config: ScientistArcTrainingConfig) -> dict[str, object]:
     save_spotlight_scientist_checkpoint(agent, config.latest_checkpoint_path)
     summary = {
         "config": asdict(config),
+        "spotlight_feature_schema_version": _spotlight_feature_schema_version(agent),
         "sessions": config.sessions,
         "train_session_win_rate": _mean_bool(item["won"] for item in train_rows),
         "train_avg_levels_completed": mean(float(item["levels_completed"]) for item in train_rows) if train_rows else 0.0,
@@ -118,6 +120,17 @@ def train_arc_offline(config: ScientistArcTrainingConfig) -> dict[str, object]:
     }
     print(json.dumps(summary, indent=2, sort_keys=True))
     return summary
+
+
+def _spotlight_feature_schema_version(agent: HyperGeneralizingScientistAgent) -> int:
+    diagnostics = agent.diagnostics()
+    spotlight = diagnostics.get("spotlight", {}) if isinstance(diagnostics, dict) else {}
+    if not isinstance(spotlight, dict):
+        return 0
+    try:
+        return int(spotlight.get("feature_schema_version", 0) or 0)
+    except Exception:
+        return 0
 
 
 def evaluate_arc_offline(

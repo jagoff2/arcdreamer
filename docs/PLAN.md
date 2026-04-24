@@ -62,6 +62,8 @@ Real ARC status after the latest interface-aware runtime pass:
 
 ## Experimental Scientist Loop
 
+Guardrail: temporary options and action programs must be learned or evidence-updated from live interaction. Scripted action-pattern enumerators, movement sweeps, counted probes, reset/replay loops, graph-search controller fallback, and shortest-path frontier expansion are forbidden as the ARC-facing learned-agent solver. Graph structures may support memory, retrieval, diagnostics, or explicit baselines, but not success claims for the full learned agent.
+
 The runtime loop now needs to be judged against this concrete standard:
 
 1. Maintain multiple grounded hypotheses about control, objective, mode, and representation, and weight them as normalized rival theories.
@@ -111,3 +113,4 @@ The intended loop is:
 - Use optional integration points for the ARC toolkit rather than hard-failing package imports.
 - Keep architecture small enough for single- and dual-consumer-GPU setups.
 - Do not accept runtime-learning mechanisms that would fail to transfer to non-text games outside ARC with similar observation/action structure.
+- Do not accept "success" produced by scripted search/control shortcuts as evidence for the minimally conscious online-agent goal.

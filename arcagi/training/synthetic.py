@@ -28,15 +28,15 @@ from arcagi.envs.synthetic import DEFAULT_SYNTHETIC_FAMILY_MODES, HiddenRuleEnv,
 from arcagi.models.encoder import StructuredStateEncoder
 from arcagi.models.language import GroundedLanguageModel
 from arcagi.models.world_model import RecurrentWorldModel
-from arcagi.memory.episodic import EpisodicMemory
 from arcagi.perception.object_encoder import extract_structured_state
 from arcagi.planning.planner import HybridPlanner, PlannerConfig
+from arcagi.planning.rule_induction import action_target_signatures
 from arcagi.training.synthetic_oracle import oracle_action
 
 logger = logging.getLogger(__name__)
 
 _GRAPH_COLLECTION_POLICIES: frozenset[str] = frozenset({"explore", "graph"})
-_LEARNED_COLLECTION_POLICIES: frozenset[str] = frozenset({"mixed", "bootstrap", "oracle", "learned", "hybrid"})
+_LEARNED_COLLECTION_POLICIES: frozenset[str] = frozenset({"mixed", "bootstrap", "oracle", "learned", "language", "hybrid"})
 _ALLOWED_SYNTHETIC_BEHAVIOR_POLICIES: frozenset[str] = _GRAPH_COLLECTION_POLICIES | _LEARNED_COLLECTION_POLICIES
 _ALLOWED_CURRICULA: frozenset[str] = frozenset({"staged", "gated", "fixed_staged", "flat"})
 
@@ -147,7 +147,7 @@ def build_default_modules(device: torch.device | None = None) -> tuple[
     encoder = StructuredStateEncoder().to(device)
     world_model = RecurrentWorldModel().to(device)
     language_model = GroundedLanguageModel().to(device)
-    planner = HybridPlanner()
+    planner = HybridPlanner(PlannerConfig(graph_signal_weight=0.0, policy_prior_weight=3.0))
     return encoder, world_model, language_model, planner
 
 
@@ -299,32 +299,48 @@ def _build_collection_agent(
     device: torch.device | None = None,
 ) -> tuple[object, str, bool]:
     policy = str(config.behavior_policy)
-    if policy in _GRAPH_COLLECTION_POLICIES or encoder is None or world_model is None or language_model is None:
+    if policy in _GRAPH_COLLECTION_POLICIES:
         return GraphExplorerAgent(), "graph", False
-    from arcagi.agents.learned_agent import HybridAgent
+    from arcagi.agents.learned_agent import LanguageNoMemoryAgent
 
     collector_device = device or torch.device("cpu")
-    collection_encoder, collection_world_model, collection_language_model = _clone_collection_modules(
-        encoder,
-        world_model,
-        language_model,
-        device=collector_device,
-    )
+    if encoder is None or world_model is None or language_model is None:
+        collection_encoder, collection_world_model, collection_language_model, _ = build_default_modules(device=collector_device)
+    else:
+        collection_encoder, collection_world_model, collection_language_model = _clone_collection_modules(
+            encoder,
+            world_model,
+            language_model,
+            device=collector_device,
+        )
     planner = HybridPlanner(
-        PlannerConfig(search_depth=2, search_root_width=2, search_branch_width=1, max_world_model_calls=48)
+        PlannerConfig(
+            search_depth=2,
+            search_root_width=2,
+            search_branch_width=1,
+            max_world_model_calls=48,
+            graph_signal_weight=0.0,
+            policy_prior_weight=3.0,
+        )
         if collector_device.type == "cpu"
-        else PlannerConfig(search_depth=2, search_root_width=2, search_branch_width=1, max_world_model_calls=32)
+        else PlannerConfig(
+            search_depth=2,
+            search_root_width=2,
+            search_branch_width=1,
+            max_world_model_calls=32,
+            graph_signal_weight=0.0,
+            policy_prior_weight=3.0,
+        )
     )
     return (
-        HybridAgent(
+        LanguageNoMemoryAgent(
             encoder=collection_encoder,
             world_model=collection_world_model,
             planner=planner,
             language_model=collection_language_model,
-            episodic_memory=EpisodicMemory(),
             device=collector_device,
         ),
-        "hybrid",
+        "language",
         True,
     )
 
@@ -511,12 +527,14 @@ def _theory_tokens_for_sample(
     action_roles = () if state is None else getattr(state, "action_roles", ())
     context = build_action_schema_context(tuple(sample.get("available_actions", (action,))), dict(action_roles))
     schema = build_action_schema(action, context)
+    target_clause = _action_target_clause(state, action) if isinstance(state, StructuredState) else ()
     return (
         "rule",
         schema.action_type,
         _effect_token(effect_kind),
         *_family_tokens_for_sample(action, str(sample.get("event", ""))),
-    )[:6]
+        *target_clause,
+    )[:10]
 
 
 def _causal_value_target_for_sample(sample: dict[str, object]) -> float:
@@ -782,7 +800,7 @@ def _dataset_episode_sequences(dataset: list[dict[str, object]]) -> list[list[di
 
 def _append_replay_metrics(metric_lists: dict[str, list[float]], metrics: dict[str, float]) -> None:
     for key, value in metrics.items():
-        metric_lists[key].append(float(value))
+        metric_lists.setdefault(key, []).append(float(value))
 
 
 def _checkpoint_variant_path(checkpoint_path: Path, variant: str) -> Path:
@@ -1160,6 +1178,11 @@ def _action_family(action: str) -> str:
     return _shared_action_family(action)
 
 
+def _is_control_action(action: str, state: StructuredState) -> bool:
+    context = build_action_schema_context(state.affordances, dict(state.action_roles))
+    return build_action_schema(action, context).action_type in {"click", "select", "interact"}
+
+
 def _synthetic_color_name(color: int) -> str | None:
     return {
         3: "red",
@@ -1270,6 +1293,23 @@ def _color_clause(state: StructuredState) -> tuple[str, ...]:
     return ()
 
 
+def _action_target_clause(state: StructuredState, action: str) -> tuple[str, ...]:
+    signatures = action_target_signatures(state, action)
+    if not signatures:
+        return ()
+    color_token = _synthetic_color_name(signatures[0][0])
+    tags = set(signatures[0][4])
+    focus = "selector" if "selector" in tags else "interactable" if "interactable" in tags else "target" if "target" in tags else ""
+    tokens: list[str] = ["target"]
+    if color_token is not None:
+        tokens.extend(("color", color_token))
+    if focus:
+        tokens.extend(("focus", focus))
+    if "active" in tags:
+        tokens.append("active")
+    return tuple(tokens[:7])
+
+
 def _grounded_belief_tokens(
     state: StructuredState,
 ) -> tuple[str, ...]:
@@ -1365,6 +1405,7 @@ def _grounded_plan_tokens(
         recent_progress=recent_progress,
     )
     direction = schema.direction or "none"
+    target_clause = _action_target_clause(state, action)
     return (
         "plan",
         "action",
@@ -1373,7 +1414,7 @@ def _grounded_plan_tokens(
         direction,
         "focus",
         focus,
-        *_color_clause(state),
+        *(target_clause or _color_clause(state)),
         "state",
         status if status != "positive" else mode,
         _progress_bucket(progress_level),
@@ -1846,18 +1887,33 @@ def collect_dataset(
                     action = learner_action
             teacher_label_action = ""
             teacher_label_weight = 0.0
+            if teacher_episode and teacher_action:
+                teacher_label_action = teacher_action
+                teacher_label_weight = max(teacher_label_weight, 2.0 if config.behavior_policy == "oracle" else 1.2)
             if teacher_action and config.behavior_policy in {"mixed", "bootstrap"}:
+                teacher_matches_action = action == teacher_action
+                matching_control_action = (
+                    not teacher_episode
+                    and teacher_matches_action
+                    and _is_control_action(teacher_action, state)
+                )
                 should_attach_teacher_label = (
                     dense_teacher_supervision
                     and not teacher_episode
-                    and action != teacher_action
+                    and (action != teacher_action or matching_control_action)
                 ) or (
                     not dense_teacher_supervision
-                    and action != teacher_action
+                    and (action != teacher_action or matching_control_action)
                 )
                 if should_attach_teacher_label:
                     teacher_label_action = teacher_action
-                    teacher_label_weight = float(max(config.teacher_relabel_weight, 1.0 if dense_teacher_supervision else 0.0))
+                    teacher_label_weight = float(
+                        max(
+                            config.teacher_relabel_weight,
+                            1.0 if dense_teacher_supervision else 0.0,
+                            0.8 if matching_control_action else 0.0,
+                        )
+                    )
                     teacher_labeled_steps += 1
             result = env.step(action)
             next_state = collector.update_after_step(
@@ -2016,6 +2072,18 @@ def _prepare_replay_training_step(
     sibling_move_weight = float(sample["sibling_move_weight"])
     same_type_target = float(sample["same_type_target"])
     same_type_weight = float(sample["same_type_weight"])
+    schema_context = build_action_schema_context(tuple(available_actions), dict(state.action_roles))
+    action_schema = build_action_schema(action, schema_context)
+    control_emphasis = 1.0
+    if action_schema.action_type in {"click", "select"}:
+        control_emphasis = 4.0
+    elif action_schema.action_type == "interact":
+        control_emphasis = 1.6
+    if control_emphasis > 1.0:
+        policy_weight *= control_emphasis
+        same_type_weight *= control_emphasis
+        teacher_weight *= control_emphasis
+        replay_weight *= 1.0 + (0.35 * (control_emphasis - 1.0))
     belief_tokens = sample["belief_tokens"]
     question_tokens = sample["question_tokens"]
     plan_tokens = sample["plan_tokens"]
@@ -2086,7 +2154,6 @@ def _prepare_replay_training_step(
     )
     policy_targets = torch.zeros(len(available_actions), dtype=torch.float32, device=device)
     policy_weights = torch.ones(len(available_actions), dtype=torch.float32, device=device)
-    schema_context = build_action_schema_context(available_actions, dict(state.action_roles))
     candidate_schemas = [build_action_schema(candidate, schema_context) for candidate in available_actions]
 
     def apply_policy_supervision(reference_action: str, supervision: PolicySupervision) -> None:
@@ -2162,6 +2229,51 @@ def _prepare_replay_training_step(
         negative_policy_loss = (policy_raw[negative_mask] * policy_weights[negative_mask]).mean()
     else:
         negative_policy_loss = torch.tensor(0.0, device=device)
+    imitation_loss = torch.tensor(0.0, device=device)
+    margin_loss = torch.tensor(0.0, device=device)
+    strong_action_target = (
+        policy_target >= 0.85
+        or (
+            policy_target >= 0.6
+            and build_action_schema(action, schema_context).action_type in {"click", "select", "interact"}
+        )
+    )
+    imitation_reference = teacher_action or (action if strong_action_target else "")
+    imitation_weight = max(
+        0.0,
+        teacher_weight,
+        0.9 if imitation_reference and strong_action_target else 0.0,
+    )
+    if imitation_reference and imitation_reference in available_actions and imitation_weight > 0.0:
+        reference_index = tuple(available_actions).index(imitation_reference)
+        imitation_target = torch.tensor(
+            [reference_index],
+            dtype=torch.long,
+            device=device,
+        )
+        imitation_loss = (
+            torch.nn.functional.cross_entropy(all_prediction.policy.view(1, -1), imitation_target)
+            * float(imitation_weight)
+        )
+        reference_schema = build_action_schema(imitation_reference, schema_context)
+        if reference_schema.action_type in {"click", "select"}:
+            competitor_indices = [index for index in range(len(candidate_schemas)) if index != reference_index]
+        else:
+            competitor_indices = [
+                index
+                for index, schema in enumerate(candidate_schemas)
+                if index != reference_index and schema.action_type == reference_schema.action_type
+            ]
+        if competitor_indices:
+            reference_logit = all_prediction.policy[reference_index]
+            competitor_logits = all_prediction.policy[
+                torch.tensor(competitor_indices, dtype=torch.long, device=device)
+            ]
+            margin = 1.25 if reference_schema.action_type in {"click", "select"} else 0.75
+            margin_loss = (
+                torch.relu(margin - (reference_logit - competitor_logits)).mean()
+                * float(imitation_weight)
+            )
     gate_target = torch.tensor(config.enhancement_gate_target, dtype=torch.float32, device=device)
     gate_value = torch.tanh(encoder.enhancement_gate)
     gate_loss = config.enhancement_gate_weight * torch.square(gate_value - gate_target)
@@ -2174,6 +2286,8 @@ def _prepare_replay_training_step(
         + (float(config.theory_loss_weight) * theory_loss)
         + (float(config.diagnostic_language_loss_weight) * diagnostic_language_loss)
         + 0.5 * policy_loss
+        + 3.0 * imitation_loss
+        + 1.5 * margin_loss
     )
     loss = weighted_core_loss + gate_loss
     replay_metrics = {
@@ -2195,6 +2309,8 @@ def _prepare_replay_training_step(
         "epoch_policy_losses": float(policy_loss.detach().cpu()),
         "epoch_positive_policy_losses": float(positive_policy_loss.detach().cpu()),
         "epoch_negative_policy_losses": float(negative_policy_loss.detach().cpu()),
+        "epoch_imitation_losses": float(imitation_loss.detach().cpu()),
+        "epoch_margin_losses": float(margin_loss.detach().cpu()),
         "epoch_gate_losses": float(gate_loss.detach().cpu()),
     }
     return loss, replay_metrics, encoded.latent.detach(), state, action
@@ -2783,8 +2899,7 @@ def _build_eval_agent(
     *,
     device: torch.device,
 ):
-    from arcagi.agents.learned_agent import HybridAgent
-    from arcagi.memory.episodic import EpisodicMemory
+    from arcagi.agents.learned_agent import LanguageNoMemoryAgent
 
     eval_encoder, eval_world_model, eval_language_model, _ = build_default_modules(device=device)
     eval_encoder.load_state_dict(encoder.state_dict())
@@ -2794,16 +2909,22 @@ def _build_eval_agent(
     eval_world_model.eval()
     eval_language_model.eval()
     planner = HybridPlanner(
-        PlannerConfig(search_depth=2, search_root_width=2, search_branch_width=1, max_world_model_calls=48)
+        PlannerConfig(
+            search_depth=2,
+            search_root_width=2,
+            search_branch_width=1,
+            max_world_model_calls=48,
+            graph_signal_weight=0.0,
+            policy_prior_weight=3.0,
+        )
         if device.type == "cpu"
-        else PlannerConfig()
+        else PlannerConfig(graph_signal_weight=0.0, policy_prior_weight=3.0)
     )
-    return HybridAgent(
+    return LanguageNoMemoryAgent(
         encoder=eval_encoder,
         world_model=eval_world_model,
         planner=planner,
         language_model=eval_language_model,
-        episodic_memory=EpisodicMemory(),
         device=device,
     )
 
@@ -3389,6 +3510,8 @@ def train_synthetic(
     epoch_policy_losses: list[float] = []
     epoch_positive_policy_losses: list[float] = []
     epoch_negative_policy_losses: list[float] = []
+    epoch_imitation_losses: list[float] = []
+    epoch_margin_losses: list[float] = []
     epoch_gate_losses: list[float] = []
     dream_metrics: dict[str, float] = {}
     secondary_train_device = ""
@@ -3609,6 +3732,8 @@ def train_synthetic(
                 "epoch_policy_losses": [],
                 "epoch_positive_policy_losses": [],
                 "epoch_negative_policy_losses": [],
+                "epoch_imitation_losses": [],
+                "epoch_margin_losses": [],
                 "epoch_gate_losses": [],
             }
             epoch_losses = metric_lists["epoch_losses"]
@@ -3629,6 +3754,8 @@ def train_synthetic(
             epoch_policy_losses = metric_lists["epoch_policy_losses"]
             epoch_positive_policy_losses = metric_lists["epoch_positive_policy_losses"]
             epoch_negative_policy_losses = metric_lists["epoch_negative_policy_losses"]
+            epoch_imitation_losses = metric_lists["epoch_imitation_losses"]
+            epoch_margin_losses = metric_lists["epoch_margin_losses"]
             epoch_gate_losses = metric_lists["epoch_gate_losses"]
             dream_metrics = {}
             encoder.train()
@@ -3844,6 +3971,8 @@ def train_synthetic(
                     "policy_loss": mean(epoch_policy_losses) if epoch_policy_losses else 0.0,
                     "positive_policy_loss": mean(epoch_positive_policy_losses) if epoch_positive_policy_losses else 0.0,
                     "negative_policy_loss": mean(epoch_negative_policy_losses) if epoch_negative_policy_losses else 0.0,
+                    "imitation_loss": mean(epoch_imitation_losses) if epoch_imitation_losses else 0.0,
+                    "margin_loss": mean(epoch_margin_losses) if epoch_margin_losses else 0.0,
                     "gate_loss": mean(epoch_gate_losses) if epoch_gate_losses else 0.0,
                     "encoder_enhancement_gate_raw": float(encoder.enhancement_gate.detach().cpu()),
                     "encoder_enhancement_gate_tanh": float(torch.tanh(encoder.enhancement_gate.detach()).cpu()),
@@ -4018,6 +4147,8 @@ def train_synthetic(
                         "policy_loss": history[-1]["policy_loss"],
                         "positive_policy_loss": history[-1]["positive_policy_loss"],
                         "negative_policy_loss": history[-1]["negative_policy_loss"],
+                        "imitation_loss": history[-1].get("imitation_loss", 0.0),
+                        "margin_loss": history[-1].get("margin_loss", 0.0),
                         "gate_loss": history[-1]["gate_loss"],
                         "encoder_enhancement_gate_raw": history[-1]["encoder_enhancement_gate_raw"],
                         "encoder_enhancement_gate_tanh": history[-1]["encoder_enhancement_gate_tanh"],
@@ -4058,6 +4189,8 @@ def train_synthetic(
             "partial_causal_loss": mean(epoch_causal_losses) if epoch_causal_losses else 0.0,
             "partial_effect_loss": mean(epoch_effect_losses) if epoch_effect_losses else 0.0,
             "partial_policy_loss": mean(epoch_policy_losses) if epoch_policy_losses else 0.0,
+            "partial_imitation_loss": mean(epoch_imitation_losses) if epoch_imitation_losses else 0.0,
+            "partial_margin_loss": mean(epoch_margin_losses) if epoch_margin_losses else 0.0,
             "stage_index": current_stage_index,
             "stage_name": str(current_collection_metrics.get("stage_name", "flat" if config.curriculum == "flat" else stages[current_stage_index].name if stages else "")),
             "stage_epoch_count": stage_epoch_count,

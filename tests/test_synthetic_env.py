@@ -227,6 +227,7 @@ def test_selector_sequence_observation_surfaces_public_control_and_progress_stat
 
     clicked = env.step(selector_click)
 
+    assert clicked.info["event"] == "selector_candidate"
     assert clicked.observation.extras["inventory"]["interface_selected_color"] == "red"
     assert clicked.observation.extras["flags"]["interface_selection_active"] == "1"
     selector_position = env._selector_positions[SWITCH_RED]

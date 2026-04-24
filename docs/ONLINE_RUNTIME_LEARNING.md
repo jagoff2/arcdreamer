@@ -4,6 +4,8 @@
 
 This document defines what "live self-learning" should mean in this repo.
 
+The operational threshold for a minimally conscious-enough online agent is specified in [MINIMALLY_CONSCIOUS_ONLINE_AGENT.md](MINIMALLY_CONSCIOUS_ONLINE_AGENT.md). This document is the shorter runtime-learning contract; the threshold document is the acceptance standard.
+
 The requirement is not just:
 
 - run a pretrained checkpoint
@@ -18,6 +20,59 @@ The requirement is:
 - let the revised beliefs change action choice during the same episode
 
 This is the central mechanism for any serious ARC-facing or broader non-text-game-facing agent.
+
+## Hard Boundary: Not Search Pattern Control
+
+The core ARC-facing learned agent must not solve by hand-authored search control.
+
+Forbidden as the solver:
+
+- fixed movement sweeps
+- counted movement probes
+- canned action sequences
+- scripted reset/replay loops
+- action-pattern enumerators
+- graph-search frontier expansion
+- shortest-path/BFS/DFS replay controllers
+- coverage search used as the action policy
+- per-game branches or environment-source-derived semantics
+- default action-candidate caps that hide legal ARC actions before the learner has trained or accumulated online evidence
+
+Allowed only as substrate or ablation:
+
+- state graphs for memory, diagnostics, retrieval, and transition accounting
+- explicit graph-exploration baselines clearly labeled as baselines
+- bounded learned-model lookahead where the rollouts, values, and action preferences come from learned or online-updated models
+- explicitly labeled smoke/debug action subsets, never as evidence for the core ARC-facing learned agent
+
+Any ARC success produced by a forbidden mechanism is not evidence for the core thesis. It must be reported as invalid for the learned-agent goal.
+
+## Minimum Online-Learning Prerequisites
+
+A runtime agent is not acceptable just because it has a graph, a planner, or a checkpoint. The minimum acceptable learned online agent must have:
+
+1. Live belief state:
+   - soft, revisable beliefs over objects, relations, latent variables, action meanings, goal hypotheses, uncertainty, and recent self-action history
+2. Agent-owned prediction loop:
+   - before acting, the agent predicts likely effects, reward/progress, uncertainty, and diagnostic value
+   - after acting, it computes prediction error or surprise from its own observation
+   - the error updates beliefs, model state, memory, and action preferences inside the same session
+3. Learned action arbitration:
+   - action choice must depend on learned or online-updated value, uncertainty, diagnostic utility, and world-model predictions
+   - fixed action schedules and scripted frontier expansion do not count
+4. Internal question formation:
+   - uncertainty or rival hypotheses must generate compact internal questions
+   - those questions must change action selection through learned/evidence-updated mechanisms, not human-authored action tables
+5. Counterfactual imagination:
+   - imagined rollouts must be rooted in learned dynamics or learned rule hypotheses
+   - scripted search trees over hand-designed action patterns do not count
+6. Memory and consolidation:
+   - surprising or useful transitions must be written quickly
+   - retrieval must influence current-session beliefs/plans without becoming a lookup-table solver
+7. Same-session adaptation proof:
+   - one or a few transitions must measurably change predictions and later action probabilities/preferences in the same episode/session
+8. Full action-surface exposure:
+   - training and ARC-facing evaluation must expose the full currently legal action surface, including dense click parameters, before learned pruning or abstraction is trusted
 
 ## Core Thesis
 
@@ -458,7 +513,7 @@ Current implementation note:
   - grounded tokens
   - per-action latent value/uncertainty
   - selector-conditioned hidden-state follow-up move gains
-- that thought object is now consumed by both the planner and the explicit runtime hypothesis controller
+- that thought object is consumed by the clean planner; hand-authored runtime-controller interception is not part of the learned eval path
 - the remaining issue is not absence of coupling anymore
 - the remaining issue is that selector-conditioned latent gains still need stronger proof/disproof against realized post-selector improvement
 

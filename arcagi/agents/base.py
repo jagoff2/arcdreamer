@@ -21,6 +21,58 @@ def _agent_visible_info(info: dict[str, object]) -> dict[str, object]:
     return visible
 
 
+def _state_inventory_value(state: StructuredState, key: str, default: str = "") -> str:
+    inventory = state.inventory_dict()
+    flags = state.flags_dict()
+    value = inventory.get(key, flags.get(key, default))
+    return str(value)
+
+
+def _state_levels_completed(state: StructuredState) -> int:
+    raw_value = _state_inventory_value(state, "interface_levels_completed", "0")
+    try:
+        return int(raw_value)
+    except Exception:
+        return 0
+
+
+def _state_game_state(state: StructuredState) -> str:
+    return _state_inventory_value(state, "interface_game_state", "")
+
+
+def _is_reset_action(state: StructuredState, action: ActionName | None) -> bool:
+    if action is None:
+        return False
+    role = dict(state.action_roles).get(action, "")
+    return str(action) == "0" or "reset" in str(role)
+
+
+def _visible_transition_info(
+    raw_info: dict[str, object],
+    *,
+    before: StructuredState,
+    after: StructuredState,
+    action: ActionName,
+) -> dict[str, object]:
+    visible = _agent_visible_info(raw_info)
+    before_levels = _state_levels_completed(before)
+    after_levels = _state_levels_completed(after)
+    level_delta = max(after_levels - before_levels, 0)
+    reset_action = _is_reset_action(before, action)
+    visible.update(
+        {
+            "levels_completed_before": before_levels,
+            "levels_completed_after": after_levels,
+            "level_delta": level_delta,
+            "level_boundary": bool(reset_action or level_delta > 0),
+            "reset_action": bool(reset_action),
+            "game_state_before": _state_game_state(before),
+            "game_state_after": _state_game_state(after),
+        }
+    )
+    return visible
+
+
 def _merge_visible_info_into_observation(
     observation: GridObservation,
     info: dict[str, object],
@@ -99,13 +151,21 @@ class BaseAgent(ABC):
         self.latest_claims = ()
 
     def reset_level(self) -> None:
-        self.inferred_state.reset()
+        reset_level = getattr(self.inferred_state, "reset_level", None)
+        if callable(reset_level):
+            reset_level()
+        else:
+            self.inferred_state.reset()
         reset_level = getattr(self.representation_repair, "reset_level", None)
         if callable(reset_level):
             reset_level()
         else:
             self.representation_repair.reset()
-        self.spatial_workspace.reset()
+        reset_level = getattr(self.spatial_workspace, "reset_level", None)
+        if callable(reset_level):
+            reset_level()
+        else:
+            self.spatial_workspace.reset()
         self.last_state = None
         self.last_raw_state = None
         self.last_action = None
@@ -167,13 +227,19 @@ class BaseAgent(ABC):
         next_state = self.inferred_state.augment(next_raw_state)
         next_state = self.spatial_workspace.augment(next_state)
         if self.last_state is not None and self.last_action is not None:
+            transition_info = _visible_transition_info(
+                info,
+                before=self.last_state,
+                after=next_state,
+                action=self.last_action,
+            )
             transition = Transition(
                 state=self.last_state,
                 action=self.last_action,
                 reward=reward,
                 next_state=next_state,
                 terminated=terminated,
-                info={},
+                info=transition_info,
             )
             self.graph.update(transition)
             self.on_transition(transition)

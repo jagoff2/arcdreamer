@@ -2,6 +2,22 @@
 
 ## Active
 
+- [x] Record the new hard prohibition in repo docs: no hand-coded action search patterns, movement sweeps, counted probes, scripted reset/replay loops, graph-search controller fallback, shortest-path frontier expansion, or coverage search may be used as the ARC-facing learned-agent solver.
+- [x] Record the no-pretraining-limit prerequisite in repo docs: the ARC-facing learner must see the full currently legal action surface, including dense click parameters, before any learned pruning or abstraction can be trusted.
+- [x] Record the required minimum online-learning prerequisites: live belief state, agent-owned prediction/action/error/update loop, learned action arbitration, internal question formation, learned counterfactual imagination, memory consolidation, and same-session adaptation proof.
+- [x] Remove the just-added forbidden movement macro/counting sweep/state-graph explorer control code from the spotlight runtime path; graph/state memory remains allowed only as substrate, diagnostics, or explicitly labeled baseline/ablation.
+- [x] Add `docs/MINIMALLY_CONSCIOUS_ONLINE_AGENT.md` with operational criteria, required modules, what does not count, and acceptance tests for the minimally conscious online-agent threshold.
+- [ ] Replace forbidden search/control fallback work with a learned online belief/controller update that demonstrably changes same-session action preferences from prediction error, without scripted action-pattern enumeration.
+- [x] Perform an artifact-integrity reset after the v3 audit: current `spotlight_exec_curriculum_*_v3.pkl` files are now treated as unproven because latest/best v3 show zero autonomous synthetic holdout solves, zero capped AR25 levels, and no validated move-37 events.
+- [x] Replace the scientist path's linear-only online world model with a compact recurrent bootstrap model that updates hidden state and recurrent/input/output weights online from the agent's own transitions while preserving legacy checkpoint compatibility.
+- [x] Add auditable checkpoint metadata to scientist artifacts: saved checkpoints now record learner-owned train summaries, sparse oracle query/feedback rates, teacher-free holdout summaries, promotion eligibility, spotlight schema version, and world-model schema.
+- [x] Stop default scientist best-checkpoint promotion on all-zero autonomous solve metrics; all-zero runs now write latest plus an `.unpromoted.json` sidecar unless `--allow-unproven-best-checkpoint` is explicitly passed for debugging.
+- [x] Train a fresh post-integrity scientist smoke line from scratch with autonomous promotion gates enabled. `artifacts/post_integrity_scientist_latest.pkl` was written, `post_integrity_scientist_best.pkl` was not promoted, and `post_integrity_scientist_best.pkl.unpromoted.json` records zero autonomous solve metrics.
+- [x] Replace default teacher-shaped scientist curriculum dependence with learner-owned data collection plus sparse oracle relabeling only as explicit bootstrap instrumentation; dense teacher feedback remains available only through explicit `--teacher-feedback-mode dense`.
+- [x] Add a generic stalled diagnostic-binding probe so the scientist does not stay movement-only after prolonged no-progress. The fresh post-integrity checkpoint still fails short `AR25`, but the 64-step offline probe moved from `0` interaction steps to `14` interaction steps without a game-id branch.
+- [ ] Run a substantive post-integrity scientist line beyond the 4-session smoke and require nonzero autonomous holdout solves before writing a promoted best artifact.
+- [x] Turn the clean `HybridAgent` runtime controller off by default; hand-authored `RuntimeRuleController` runs are no longer valid evidence for the clean ARC-facing learned goal.
+- [x] Remove default candidate caps from the scientist planner/spotlight path and require full-grid click expansion unless an explicitly named sparse-click smoke baseline is requested.
 - [x] Rewrite Stage 2 ARC training around persistent prize-shaped sessions: replace reset-separated episode collection in `arc_public.py`, `goal_scientist_public.py`, and `scientist/train_arc.py` with session-based collectors, soft level-boundary resets, level-completion/session-win targets, and checkpoint selection by session outcomes instead of first positive reward or per-episode return.
 - [x] Align the ARC runtime path with prize-session semantics: expose explicit `RESET`, keep the environment alive across `GAME_OVER`, preserve learned semantics across in-session level retries and completed-level boundaries, and stop treating first positive reward as terminal success.
 - [x] Fix post-binder probe downstream valuation so stale movement hypotheses are state-conditioned, contradicted by no-effect repeats, and spotlight consumes hypothesis risk during scoring.
@@ -163,6 +179,23 @@
   current blockers are weak objective discovery / completion on `AR25`, `BP35`, `CD82`, `CN04`, and `DC22` even after the audit fixes removed most of the previous interaction churn.
 - [ ] Fix post-level transfer and objective reacquisition on real `AR25`. The newer `artifacts/spotlight_exec_curriculum_best.pkl` checkpoint can now complete level 1 under an uncapped offline harness run by about step `300`, but it then stalls with repeated resets and no further reward through at least step `750`.
 - [ ] Add an uncapped real-ARC eval metric alongside the capped holdout path. Current capped evals can miss genuine first-level capability, as shown by `AR25` reaching `levels_completed = 1` only after the old `256`-step budget.
+- [x] Add spotlight runtime schema tagging and legacy checkpoint compatibility. Old scientist checkpoints without `feature_schema_version` now load as legacy `v1`, trainer/harness outputs now emit `spotlight_feature_schema_version`, and preserved baseline copies now exist under `artifacts/*_legacy_v1.pkl`.
+- [x] Fix the remaining legacy-compat gap for checkpoints with no `spotlight` subtree and restore saved spotlight config on round-trip. Base-scientist checkpoints now force legacy `v1` mode, and `SpotlightScientistAgent.from_checkpoint(...)` now rebuilds saved non-default spotlight config instead of silently defaulting.
+- [ ] Re-verify the old `AR25` level-1 solve under the patched legacy `v1` compatibility path with a longer uncapped online/offline run. Short online probing now shows `feature_schema_version = 1` and no longer shows the worst repeated-`4` collapse, but the old step-300 solve has not yet been re-confirmed after the compatibility patch.
+- [ ] Train a fresh `v2` scientist checkpoint line on the extended generic schema/cost runtime under separate artifact names. Current target artifacts:
+  - `artifacts/spotlight_exec_curriculum_best_v2.pkl`
+  - `artifacts/spotlight_exec_curriculum_latest_v2.pkl`
+  These must remain distinct from the preserved `v1` legacy baselines.
+- [ ] Measure online/offline parity beyond `AR25`. The current `spotlight_exec_curriculum_best.pkl` checkpoint now reproduces the same first-level `AR25` solve trajectory in both offline and online harness modes through at least step `850`, but broader parity across other games is still unmeasured.
+- [ ] Upgrade `AR25` carryover from shallow action priors to persistent generic effect abstractions. The current first-level solve is real, but levels 2 and 3 require stacked, revisable carryover about latent state rewrites, resource-like path constraints, and large-effect interaction structure without introducing any ARC-game nouns into the runtime path.
+- [x] Add explicit generic cost/budget planning for real ARC where path efficiency matters. The scientist planner now tracks generic family cost/effect statistics, numeric-channel slack, remaining relative cost, and continuation depth without introducing any task-specific mechanic labels.
+- [x] Extend the first generic effect-signature layer into full persistent option/schema learning. The scientist path now aggregates reusable sequence-aware effect schemas with precondition tokens, relative cost, support/contradiction, and continuation matching instead of only keeping isolated salient fragments.
+- [ ] Keep the new cross-level abstraction layer semantic-neutral. Generic effect signatures are allowed; human mechanic labels such as `door`, `healthpack`, `pusher`, `switch`, `transport`, or other ARC-shaped runtime categories are not.
+- [x] Add semantic-neutral cost/budget planning to the scientist path. Planner pressure now combines generic elapsed/retry/stall pressure with learned scarcity from numeric channels that empirically decrease during play.
+- [x] Extend option memory from raw rewarded sequences into reusable effect schemas. Option fragments and aggregated schemas now capture preconditions, family sequence, continuation depth, expected effect tags, relative cost, and support/contradiction without naming task-specific mechanics.
+- [ ] Measure whether the live spotlight chooser actually changes behavior because of the new generic schema/cost signals. Right now those signals are live planner outputs and live spotlight features, but spotlight still consumes them through learned habit/executive/adaptation arbitration rather than a direct planner override term.
+- [ ] Strengthen contradiction-driven revision for generic effect schemas. Schemas now aggregate support and cost, but they still need sharper negative updates and pruning when a once-salient sequence stops delivering its claimed effect.
+- [ ] Evaluate the fresh `v2` line against the preserved `v1` legacy baseline only through tagged runs. Never compare `v1` and `v2` artifacts without the emitted `spotlight_feature_schema_version` field in the output.
 - [x] Replace hand-tuned spotlight action scoring with a learned executive scorer over explicit workspace state while keeping the minimal generic spotlight protocol.
 - [x] Add synthetic scientist-session training that explicitly exercises hidden binding, fail/reset/retry loops, and cross-level carryover in one persistent session.
 - [ ] Verify that the learned executive scorer improves synthetic binder-to-probe-to-goal behavior without adding ARC-shaped controller hacks.
@@ -177,10 +210,24 @@
 - [x] Change the training objective from immediate action quality to attempt-to-attempt improvement quality: actions and updates should get credit when the next retry is better than the previous one.
 - [x] Add explicit adaptation metrics to the scientist trainer and spotlight diagnostics so we can measure whether the agent is learning how to learn within a session, not just whether it gets reward.
 - [ ] Convert the new adaptation signal into stable teacher-free holdout gains. The first medium run produced nonzero `simple_avg_attempt_improvement`, `rich_avg_attempt_improvement`, and even a few `move37` events, but holdout success and levels completed remained zero.
-- [ ] Fix the scientist checkpoint ranking so attempt-improvement cannot dominate when solve metrics are still zero. The long `spotlight_exec_curriculum` run selected a `best` checkpoint on higher `rich_avg_attempt_improvement` despite `rich_session_win_rate=0.0`, `rich_avg_levels_completed=0.0`, and a much worse `rich_avg_return`.
-- [ ] Separate teacher-shaped training metrics from autonomous competence in scientist-train reporting and model selection. Current `recent_*` metrics come from `_run_teacher_session(...)`, so nonzero training wins do not mean the teacher-free policy is actually competent.
+- [x] Fix the scientist checkpoint ranking so attempt-improvement cannot dominate when solve metrics are still zero. All-zero solve runs now collapse to the zero tuple, and reset-heavy holdout runs are explicitly demoted through `rich_avg_reset_steps`.
+- [x] Separate training metrics from autonomous competence in scientist-train reporting and model selection. Current logs now use `learner_owned_*` fields, explicit teacher query/feedback fractions, and best promotion only from teacher-free holdout solve metrics.
 - [ ] Tie adaptation credit to solve-boundary progress instead of generic better-failure deltas. The long curriculum run now produces heavy `habit` / `executive` / `adaptation` updates and nonzero `move37` events, but holdout `simple_success_rate` and `rich_avg_levels_completed` stay at `0.0`.
 - [ ] Fix reset-policy collapse in synthetic rich-session holdout. The long curriculum run reported `rich_avg_reset_steps = 4.0` at every observed holdout snapshot, which suggests the retry policy has converged to a fixed cadence instead of a learned state-dependent recovery decision.
+- [x] Penalize reset collapse explicitly in scientist checkpoint selection. `scientist.train` now logs recent/train reset averages and includes `rich_avg_reset_steps` in `_result_key(...)` ahead of proxy attempt-improvement terms.
+- [x] Make reset-learning materially more conservative in the live spotlight runtime. Schema `v3` now adds reset cooldown / budget features, nonterminal reset guards, reset-ended attempt penalties, and negative executive targets for repeated nonterminal resets while leaving old `v2` checkpoints on the old runtime surface.
+- [ ] Train and evaluate a fresh schema-`v3` scientist line on the reset-guard runtime. Target artifacts:
+  - `artifacts/spotlight_exec_curriculum_best_v3.pkl`
+  - `artifacts/spotlight_exec_curriculum_latest_v3.pkl`
+- [x] Validate the fresh `v2` scientist runtime line from scratch on separate quick artifacts and confirm `spotlight_feature_schema_version = 2` plus the new 7-term ranking key.
+- [x] Create the first substantive `spotlight_exec_curriculum_*_v2.pkl` checkpoints and record early `v2` eval snapshots under explicit schema tagging.
+- [x] Fix `v2` checkpoint restore so nested `planner` config does not come back as a raw dict and crash the ARC harness.
+- [x] Tighten binder credit so failed post-binder probes write immediate negative evidence instead of lingering as neutral pending loops.
+- [x] Gate option/schema writes so binding steps and unresolved binder probes do not immediately become reusable positive fragments.
+- [x] Defer teacher habit credit for binding actions until binder-probe resolution.
+- [x] Stop `scientist.train` best-checkpoint drift when all actual solve metrics are zero.
+- [ ] Finish the first substantive `v2` curriculum bootstrap snapshot on `artifacts/spotlight_exec_curriculum_best_v2.pkl` / `artifacts/spotlight_exec_curriculum_latest_v2.pkl` and compare it only against the preserved `*_legacy_v1.pkl` baseline with schema tags shown.
+- [ ] Rewrite stale operator-facing artifact references in `README.md` and `docs/ARC_COMPETITION_RUNTIME.md` so current examples use explicit `*_v2.pkl` names and preserved baselines use explicit `*_legacy_v1.pkl` names.
 - [x] Add prize-eligible real-ARC action semantics to the adapter, including effective-grid extraction and parameterized interaction affordances.
 - [x] Replace blind real-ARC graph exploration with observation-grounded motion/target planning that still falls back to generic graph novelty.
 - [x] Write the technical report with measured results.
@@ -213,8 +260,9 @@
 - ARC-facing runtime behavior should be rejected if it depends on a frozen checkpoint alone and does not improve or adapt from live within-episode experience.
 - ARC-facing runtime behavior should also be rejected if it cannot explain its current behavior in terms of revisable grounded hypotheses, rule support, and contradiction.
 - ARC-facing runtime behavior should be rejected if it encodes game-specific semantics, level-specific priors, or behavior derived from inspecting benchmark environment files.
+- ARC-facing train/eval behavior should be rejected if legal action parameters are hidden by default caps before the learner has trained or accumulated online evidence.
 - Real-ARC retries must continue to use the official adapter as a black-box interaction surface only; success claims from this point forward should mention whether they were validated offline, online, or both.
 - Internal model-based rollouts are allowed to grow only under explicit compute budgets, cached reuse, and generic claim-guided pruning; brute-force full-width depth increases are not acceptable on the target hardware.
-- The learned eval path may construct the generic runtime hypothesis controller.
-- The learned eval path must not construct or consult any synthetic-task-specific or benchmark-shaped runtime controller unless that controller is being used strictly as explicit training/bootstrap instrumentation outside the submission-relevant path.
+- The learned eval path must not construct or consult the hand-authored `RuntimeRuleController`.
+- Explicit causal theory managers may exist only as learned/evidence-updated belief state, not as scripted action-pattern controllers.
 - The learned eval path must not synthesize heuristic language/question tokens when the learned language head is silent; empty learned output is preferable to a hand-authored fallback.

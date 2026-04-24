@@ -6,7 +6,7 @@ import math
 
 import numpy as np
 
-from arcagi.core.action_schema import build_action_schema, build_action_schema_context
+from arcagi.core.action_schema import build_action_schema, build_action_schema_context, click_to_grid_cell
 from arcagi.core.types import ActionName, ObjectState, StructuredState, Transition
 from arcagi.core.spatial_workspace import INTERACT_DELTAS
 
@@ -332,8 +332,9 @@ def action_target_signatures(state: StructuredState, action: ActionName) -> tupl
             dy, dx = INTERACT_DELTAS[action]
             target_cells = {(cell[0] + dy, cell[1] + dx) for cell in agent_cells}
     elif schema.action_type == "click" and schema.click is not None:
-        click_x, click_y = schema.click
-        target_cells = {(click_y, click_x)}
+        grid_cell = click_to_grid_cell(schema.click, grid_shape=state.grid_shape, inventory=state.inventory_dict())
+        if grid_cell is not None:
+            target_cells = {grid_cell}
     if not target_cells:
         return ()
     signatures: list[ObjectSignature] = []

@@ -6,7 +6,7 @@ import math
 import numpy as np
 import torch
 
-from arcagi.core.action_schema import ActionSchemaContext, build_action_schema, build_action_schema_context
+from arcagi.core.action_schema import ActionSchemaContext, build_action_schema, build_action_schema_context, click_to_grid_cell, no_effect_family_key, parse_click_action
 from arcagi.core.types import ActionName, ActionThought, LanguageTrace, PlanOutput, RuntimeThought, StructuredState
 from arcagi.planning.rule_induction import EpisodeRuleInducer, ObjectSignature, action_target_signatures
 from arcagi.memory.episodic import EpisodicMemory
@@ -66,6 +66,8 @@ class PlannerConfig:
     value_weight: float = 1.0
     info_gain_weight: float = 0.8
     memory_weight: float = 0.6
+    policy_prior_weight: float = 1.0
+    graph_signal_weight: float = 1.0
     search_depth: int = 3
     search_root_width: int = 3
     search_branch_width: int = 2
@@ -92,6 +94,23 @@ INTERACT_DELTAS: dict[str, tuple[int, int]] = {
 def _interaction_grounding_score(state: StructuredState | _ImaginationStateProxy, action: ActionName) -> float:
     if not isinstance(state, StructuredState):
         return 0.0
+    click = parse_click_action(action)
+    if click is not None:
+        grid_cell = click_to_grid_cell(
+            click,
+            grid_shape=state.grid_shape,
+            inventory=state.inventory_dict(),
+        )
+        if grid_cell is None:
+            return -0.7
+        hit = next((obj for obj in state.objects if grid_cell in obj.cells), None)
+        if hit is None:
+            return -0.45
+        if "agent" in hit.tags:
+            return -0.1
+        if "interactable" in hit.tags or "target" in hit.tags or "selector" in hit.tags:
+            return 0.55
+        return 0.18
     if action not in INTERACT_DELTAS:
         return 0.0
     agent = next((obj for obj in state.objects if "agent" in obj.tags), None)
@@ -115,6 +134,16 @@ def _interaction_grounding_score(state: StructuredState | _ImaginationStateProxy
     return 0.15
 
 
+def _parametric_novelty_scale(schema: object, interaction_grounding: float) -> float:
+    if not hasattr(schema, "coarse_bin") or getattr(schema, "coarse_bin") is None:
+        return 1.0
+    if interaction_grounding < -0.2:
+        return 0.15
+    if interaction_grounding < 0.25:
+        return 0.45
+    return 0.75
+
+
 def _policy_bonus(
     predicted_reward: float,
     usefulness: float,
@@ -123,7 +152,7 @@ def _policy_bonus(
 ) -> float:
     base_progress = predicted_reward + (0.5 * usefulness)
     effective_weight = policy_weight if base_progress > 0.0 else (0.1 * policy_weight)
-    return effective_weight * policy_prior
+    return 0.35 * effective_weight * policy_prior
 
 
 def _predicted_outcome_value(
@@ -342,6 +371,10 @@ class HybridPlanner:
         stuck_steps: int = 0,
         last_action: ActionName | None = None,
         thought: RuntimeThought | None = None,
+        objective_stall_pressure: float = 0.0,
+        level_action_counts: dict[ActionName, int] | None = None,
+        level_action_progress_sums: dict[ActionName, float] | None = None,
+        level_action_no_objective_counts: dict[ActionName, int] | None = None,
     ) -> PlanOutput:
         if thought is None:
             thought = self.build_runtime_thought(
@@ -370,6 +403,10 @@ class HybridPlanner:
             diagnostic_action_scores=diagnostic_action_scores,
             stuck_steps=stuck_steps,
             last_action=last_action,
+            objective_stall_pressure=objective_stall_pressure,
+            level_action_counts=level_action_counts,
+            level_action_progress_sums=level_action_progress_sums,
+            level_action_no_objective_counts=level_action_no_objective_counts,
         )
         search_roots = set(search_candidates[: max(self.config.search_root_width, 0)])
         search_budget = max(self.config.max_world_model_calls - thought.world_model_calls, 0)
@@ -386,12 +423,32 @@ class HybridPlanner:
         )
         for action in state.affordances:
             schema = build_action_schema(action, context)
-            novelty = graph.action_novelty(state, action)
-            entropy = graph.action_outcome_entropy(state, action)
-            cycle_penalty = graph.action_cycle_penalty(state, action)
-            graph_stats = graph.get_action_stats(state, action)
-            empirical_reward = graph_stats.mean_reward
+            graph_weight = max(float(self.config.graph_signal_weight), 0.0)
+            if graph_weight > 0.0:
+                novelty = graph_weight * graph.action_novelty(state, action)
+                entropy = graph_weight * graph.action_outcome_entropy(state, action)
+                cycle_penalty = graph_weight * graph.action_cycle_penalty(state, action)
+                graph_stats = graph.get_action_stats(state, action)
+                empirical_reward = graph_weight * graph_stats.mean_reward
+            else:
+                novelty = 0.0
+                entropy = 0.0
+                cycle_penalty = 0.0
+                graph_stats = None
+                empirical_reward = 0.0
+            effect_family = no_effect_family_key(schema)
             global_count = 0 if action_counts is None else int(action_counts.get(action, 0))
+            level_count = 0 if level_action_counts is None else int(level_action_counts.get(action, 0))
+            level_mean_progress = (
+                0.0
+                if level_action_progress_sums is None or level_count == 0
+                else float(level_action_progress_sums.get(action, 0.0)) / float(level_count)
+            )
+            level_no_objective_rate = (
+                0.0
+                if level_action_no_objective_counts is None or level_count == 0
+                else float(level_action_no_objective_counts.get(action, 0)) / float(level_count)
+            )
             global_novelty = 1.0 / math.sqrt(global_count + 1.0)
             mean_delta = 0.0 if action_delta_sums is None or global_count == 0 else float(action_delta_sums.get(action, 0.0)) / global_count
             mean_reward = 0.0 if action_reward_sums is None or global_count == 0 else float(action_reward_sums.get(action, 0.0)) / global_count
@@ -400,15 +457,18 @@ class HybridPlanner:
                 if action_no_effect_counts is None or global_count == 0
                 else float(action_no_effect_counts.get(action, 0)) / float(global_count)
             )
-            family_count = 0 if family_counts is None else int(family_counts.get(schema.family, 0))
+            family_count = 0 if family_counts is None else int(family_counts.get(effect_family, 0))
             family_novelty = 1.0 / math.sqrt(family_count + 1.0)
             family_no_effect_rate = (
                 0.0
                 if family_no_effect_counts is None or family_count == 0
-                else float(family_no_effect_counts.get(schema.family, 0)) / float(family_count)
+                else float(family_no_effect_counts.get(effect_family, 0)) / float(family_count)
             )
             family_online_bias = 0.0 if family_bias is None else float(family_bias.get(schema.family, 0.0))
             interaction_grounding = _interaction_grounding_score(state, action)
+            parametric_novelty_scale = _parametric_novelty_scale(schema, interaction_grounding)
+            if schema.coarse_bin is not None:
+                global_novelty = min(global_novelty, parametric_novelty_scale * family_novelty)
             spatial_bonus = _spatial_action_bonus(state, action, question_tokens=question_tokens)
             context_online_bias = _context_bias_bonus(
                 state,
@@ -423,9 +483,16 @@ class HybridPlanner:
                 schema=schema,
                 plan_tokens=plan_tokens,
             )
+            question_alignment = _plan_alignment_bonus(
+                state,
+                action,
+                schema=schema,
+                plan_tokens=question_tokens,
+            )
+            plan_alignment += 0.75 * question_alignment
             wait_penalty = 0.35 if action == "wait" else 0.0
             parameter_bonus = 0.0
-            if schema.coarse_bin is not None and family_bins is not None and schema.coarse_bin not in family_bins.get(schema.family, set()):
+            if schema.coarse_bin is not None and family_bins is not None and schema.coarse_bin not in family_bins.get(effect_family, set()):
                 parameter_bonus = 0.35 * max(0.0, 1.0 - family_no_effect_rate)
             repeat_penalty = 0.35 if last_action == action else 0.0
             stuck_bonus = (0.1 * min(stuck_steps, 8)) * global_novelty
@@ -445,7 +512,8 @@ class HybridPlanner:
             elif world_model is not None and latent is not None:
                 prediction = world_model.step(latent, actions=[action], state=state, hidden=hidden)
                 policy_prior = float(prediction.policy.item())
-                policy_weight = 0.35 / float(graph_stats.visits + 1)
+                graph_visits = 0 if graph_stats is None else int(graph_stats.visits)
+                policy_weight = 0.35 / float(graph_visits + 1)
                 predicted_reward = float(prediction.reward.item())
                 predicted_return = float(prediction.return_value.item())
                 causal_value = float(prediction.causal_value.item())
@@ -521,16 +589,40 @@ class HybridPlanner:
                     - (0.25 * float(last_action == action)),
                 ),
             )
-            effective_online_bias = online_bias * prior_reliability
-            effective_family_online_bias = family_online_bias * prior_reliability
-            effective_induced_bonus = induced_bonus * (0.25 + (0.75 * prior_reliability))
+            stale_move_prior = bool(
+                float(objective_stall_pressure) >= 0.25
+                and schema.action_type == "move"
+                and global_count >= 32
+                and level_count >= 8
+                and level_mean_progress <= 0.04
+                and level_no_objective_rate >= 0.85
+            )
+            if stale_move_prior:
+                prior_reliability = min(prior_reliability, 0.08)
+            effective_online_bias = online_bias * prior_reliability if online_bias > 0.0 else online_bias
+            effective_family_online_bias = (
+                family_online_bias * prior_reliability if family_online_bias > 0.0 else family_online_bias
+            )
+            effective_induced_bonus = (1.35 * math.tanh(induced_bonus / 1.35)) * (0.25 + (0.75 * prior_reliability))
             effective_memory_bonus = memory_bonus * (0.35 + (0.65 * prior_reliability))
-            effective_diagnostic_bonus = diagnostic_bonus * (1.0 + (0.5 * (1.0 - prior_reliability)))
+            effective_diagnostic_bonus = (
+                diagnostic_bonus * 0.15
+                if stale_move_prior
+                else diagnostic_bonus * (1.0 + (0.5 * (1.0 - prior_reliability)))
+            )
+            if schema.coarse_bin is not None and interaction_grounding < -0.2:
+                effective_diagnostic_bonus *= 0.35
+            effective_policy_prior = policy_prior * max(policy_weight, 0.15) * prior_reliability
+            effective_plan_alignment = plan_alignment
+            if stale_move_prior and effective_plan_alignment > 0.0:
+                effective_plan_alignment *= 0.20
+            stale_move_penalty = 1.5 * float(objective_stall_pressure) if stale_move_prior else 0.0
             total = (
                 self.config.novelty_weight * novelty
                 + self.config.value_weight * (value + search)
                 + self.config.info_gain_weight * (entropy + disagreement)
                 + self.config.memory_weight * effective_memory_bonus
+                + self.config.policy_prior_weight * effective_policy_prior
                 + 0.8 * empirical_reward
                 + 0.5 * effective_induced_bonus
                 + effective_online_bias
@@ -543,15 +635,16 @@ class HybridPlanner:
                 + interaction_grounding
                 + spatial_bonus
                 + context_online_bias
-                + (0.9 * effective_diagnostic_bonus)
+                + (1.8 * effective_diagnostic_bonus)
                 + (0.75 * diagnostic_model_bonus)
-                + plan_alignment
+                + (1.6 * effective_plan_alignment)
                 + stuck_bonus
                 - 0.9 * cycle_penalty
                 - (1.5 * action_no_effect_rate)
                 - (1.25 * family_no_effect_rate)
                 - repeat_penalty
                 - wait_penalty
+                - stale_move_penalty
             )
             if total > best_total:
                 best_total = total
@@ -568,6 +661,7 @@ class HybridPlanner:
                     "induced": effective_induced_bonus,
                     "policy_prior": policy_prior,
                     "policy_weight": policy_weight,
+                    "effective_policy_prior": effective_policy_prior,
                     "online_bias": effective_online_bias,
                     "global_novelty": global_novelty,
                     "family_novelty": family_novelty,
@@ -581,6 +675,13 @@ class HybridPlanner:
                     "diagnostic_bonus": effective_diagnostic_bonus,
                     "diagnostic_model": diagnostic_model_bonus,
                     "plan_alignment": plan_alignment,
+                    "question_alignment": question_alignment,
+                    "effective_plan_alignment": effective_plan_alignment,
+                    "level_action_count": float(level_count),
+                    "level_mean_progress": level_mean_progress,
+                    "level_no_objective_rate": level_no_objective_rate,
+                    "stale_move_prior": float(stale_move_prior),
+                    "stale_move_penalty": stale_move_penalty,
                     "wait_penalty": wait_penalty,
                     "stuck_bonus": stuck_bonus,
                     "repeat_penalty": repeat_penalty,
@@ -669,76 +770,86 @@ class HybridPlanner:
         diagnostic_action_scores: dict[ActionName, float] | None,
         stuck_steps: int,
         last_action: ActionName | None,
+        objective_stall_pressure: float = 0.0,
+        level_action_counts: dict[ActionName, int] | None = None,
+        level_action_progress_sums: dict[ActionName, float] | None = None,
+        level_action_no_objective_counts: dict[ActionName, int] | None = None,
     ) -> tuple[ActionName, ...]:
         context = build_action_schema_context(state.affordances, dict(state.action_roles))
-        ranked = sorted(
-            state.affordances,
-            key=lambda action: (
-                lambda schema: (
-                (
-                    0.8
-                    / math.sqrt((0 if action_counts is None else int(action_counts.get(action, 0))) + 1.0)
-                )
-                + (
-                    0.6
-                    / math.sqrt(
-                        (0 if family_counts is None else int(family_counts.get(schema.family, 0)))
-                        + 1.0
-                    )
-                )
+        def rank_score(action: ActionName) -> float:
+            schema = build_action_schema(action, context)
+            effect_family = no_effect_family_key(schema)
+            global_count = 0 if action_counts is None else int(action_counts.get(action, 0))
+            family_count = 0 if family_counts is None else int(family_counts.get(effect_family, 0))
+            action_no_effect_rate = (
+                0.0
+                if action_no_effect_counts is None or global_count == 0
+                else float(action_no_effect_counts.get(action, 0)) / float(global_count)
+            )
+            family_no_effect_rate = (
+                0.0
+                if family_no_effect_counts is None or family_count == 0
+                else float(family_no_effect_counts.get(effect_family, 0)) / float(family_count)
+            )
+            level_count = 0 if level_action_counts is None else int(level_action_counts.get(action, 0))
+            level_mean_progress = (
+                0.0
+                if level_action_progress_sums is None or level_count == 0
+                else float(level_action_progress_sums.get(action, 0.0)) / float(level_count)
+            )
+            level_no_objective_rate = (
+                0.0
+                if level_action_no_objective_counts is None or level_count == 0
+                else float(level_action_no_objective_counts.get(action, 0)) / float(level_count)
+            )
+            stale_move_prior = (
+                float(objective_stall_pressure) >= 0.25
+                and schema.action_type == "move"
+                and global_count >= 32
+                and level_count >= 8
+                and level_mean_progress <= 0.04
+                and level_no_objective_rate >= 0.85
+            )
+            parameter_bonus = 0.0
+            if (
+                schema.coarse_bin is not None
+                and family_bins is not None
+                and schema.coarse_bin not in family_bins.get(effect_family, set())
+                and family_no_effect_rate < 0.75
+            ):
+                parameter_bonus = 0.35
+            interaction_grounding = _interaction_grounding_score(state, action)
+            parametric_novelty_scale = _parametric_novelty_scale(schema, interaction_grounding)
+            action_novelty = (0.8 / math.sqrt(global_count + 1.0)) * parametric_novelty_scale
+            family_novelty = 0.6 / math.sqrt(family_count + 1.0)
+            diagnostic_bonus = 0.0 if diagnostic_action_scores is None else float(diagnostic_action_scores.get(action, 0.0))
+            if schema.coarse_bin is not None and interaction_grounding < -0.2:
+                diagnostic_bonus *= 0.35
+            return (
+                action_novelty
+                + family_novelty
                 + (0.0 if family_bias is None else float(family_bias.get(schema.family, 0.0)))
-                + _interaction_grounding_score(state, action)
+                + interaction_grounding
                 + _context_bias_bonus(state, action, schema=schema, context_bias=context_bias)
-                + (0.85 * (0.0 if diagnostic_action_scores is None else float(diagnostic_action_scores.get(action, 0.0))))
+                + (1.55 * diagnostic_bonus)
                 + thought.value_for(action)
                 + (0.85 * thought.diagnostic_value_for(action))
                 + (0.8 * thought.selector_followup_for(action))
                 + (0.4 * thought.uncertainty_for(action))
-                + (0.35 * graph.action_novelty(state, action))
-                + (0.25 * graph.action_outcome_entropy(state, action))
+                + (float(self.config.graph_signal_weight) * 0.35 * graph.action_novelty(state, action))
+                + (float(self.config.graph_signal_weight) * 0.25 * graph.action_outcome_entropy(state, action))
                 + (0.0 if action_bias is None else float(action_bias.get(action, 0.0)))
-                + (
-                    0.35
-                    if (
-                        schema.coarse_bin is not None
-                        and family_bins is not None
-                        and schema.coarse_bin not in family_bins.get(schema.family, set())
-                        and (
-                            family_no_effect_counts is None
-                            or int(family_counts.get(schema.family, 0)) == 0
-                            or (
-                                float(family_no_effect_counts.get(schema.family, 0))
-                                / float(family_counts.get(schema.family, 0))
-                            )
-                            < 0.75
-                        )
-                    )
-                    else 0.0
-                )
-                + ((0.1 * min(stuck_steps, 8)) * (1.0 / math.sqrt((0 if action_counts is None else int(action_counts.get(action, 0))) + 1.0)))
-                - (0.9 * graph.action_cycle_penalty(state, action))
+                + parameter_bonus
+                + ((0.1 * min(stuck_steps, 8)) * (1.0 / math.sqrt(global_count + 1.0)) * parametric_novelty_scale)
+                - (float(self.config.graph_signal_weight) * 0.9 * graph.action_cycle_penalty(state, action))
                 - (0.35 if action == "wait" else 0.0)
-                - (
-                    1.5
-                    * (
-                        0.0
-                        if action_no_effect_counts is None or action_counts is None or int(action_counts.get(action, 0)) == 0
-                        else float(action_no_effect_counts.get(action, 0)) / float(action_counts.get(action, 0))
-                    )
-                )
-                - (
-                    1.25
-                    * (
-                        0.0
-                        if family_no_effect_counts is None or family_counts is None or int(family_counts.get(schema.family, 0)) == 0
-                        else float(family_no_effect_counts.get(schema.family, 0)) / float(family_counts.get(schema.family, 0))
-                    )
-                )
+                - (1.5 * action_no_effect_rate)
+                - (1.25 * family_no_effect_rate)
                 - (0.35 if last_action == action else 0.0)
-                )
-            )(build_action_schema(action, context)),
-            reverse=True,
-        )
+                - ((1.5 * float(objective_stall_pressure)) if stale_move_prior else 0.0)
+            )
+
+        ranked = sorted(state.affordances, key=rank_score, reverse=True)
         return tuple(ranked)
 
     def _build_action_thoughts(
@@ -765,48 +876,105 @@ class HybridPlanner:
         ] = {}
         world_model_calls = 0
         baseline_move_value = float("-inf")
-        for action in affordances:
-            if budget is not None and budget[0] <= 0:
-                break
-            prediction = world_model.step(latent, actions=[action], state=state, hidden=hidden)
-            world_model_calls += 1
-            if budget is not None:
-                budget[0] -= 1
-            graph_visits = 0
-            if graph is not None and isinstance(state, StructuredState):
-                graph_visits = graph.get_action_stats(state, action).visits
-            policy_weight = 0.35 / float(graph_visits + 1)
-            policy_prior = float(prediction.policy.item())
-            predicted_reward = float(prediction.reward.item())
-            predicted_return = float(prediction.return_value.item())
-            causal_value = float(prediction.causal_value.item())
-            diagnostic_value = float(prediction.diagnostic_value.item())
-            usefulness = float(prediction.usefulness.item())
-            uncertainty = float(prediction.uncertainty.item())
-            value = _predicted_outcome_value(
-                predicted_reward,
-                usefulness,
-                predicted_return,
-                causal_value,
-                policy_prior,
-                policy_weight,
-            )
-            next_state_proxy = self._next_state_proxy(state, prediction.delta)
-            predictions[action] = (
-                prediction,
-                value,
-                uncertainty,
-                policy_prior,
-                policy_weight,
-                predicted_reward,
-                predicted_return,
-                causal_value,
-                diagnostic_value,
-                usefulness,
-                next_state_proxy,
-            )
-            if build_action_schema(action, context).action_type == "move":
-                baseline_move_value = max(baseline_move_value, value - (0.1 * uncertainty))
+        if budget is not None and budget[0] <= 0:
+            return (), 0
+        if budget is None:
+            predicted_actions = affordances
+        else:
+            predicted_actions = affordances[: max(int(budget[0]), 0)]
+            budget[0] -= len(predicted_actions)
+        if not predicted_actions:
+            return (), 0
+        followup_budget = budget
+        if followup_budget is None:
+            followup_budget = [max(int(self.config.max_world_model_calls) - len(predicted_actions), 0)]
+        repeated_latent = latent.repeat(len(predicted_actions), 1)
+        repeated_hidden = None if hidden is None else hidden.repeat(len(predicted_actions), 1)
+        batch_prediction = world_model.step(
+            repeated_latent,
+            actions=predicted_actions,
+            state=state if isinstance(state, StructuredState) else None,
+            hidden=repeated_hidden,
+        )
+        if int(batch_prediction.policy.reshape(-1).shape[0]) == len(predicted_actions):
+            world_model_calls += len(predicted_actions)
+            for index, action in enumerate(predicted_actions):
+                graph_visits = 0
+                if graph is not None and isinstance(state, StructuredState) and float(self.config.graph_signal_weight) > 0.0:
+                    graph_visits = graph.get_action_stats(state, action).visits
+                policy_weight = 0.35 / float(graph_visits + 1)
+                policy_prior = math.tanh(float(batch_prediction.policy[index].item()) / 2.0)
+                predicted_reward = float(batch_prediction.reward[index].item())
+                predicted_return = float(batch_prediction.return_value[index].item())
+                causal_value = float(batch_prediction.causal_value[index].item())
+                diagnostic_value = float(batch_prediction.diagnostic_value[index].item())
+                usefulness = float(batch_prediction.usefulness[index].item())
+                uncertainty = float(batch_prediction.uncertainty[index].item())
+                value = _predicted_outcome_value(
+                    predicted_reward,
+                    usefulness,
+                    predicted_return,
+                    causal_value,
+                    policy_prior,
+                    policy_weight,
+                )
+                next_latent = batch_prediction.next_latent_mean[index : index + 1]
+                next_hidden = batch_prediction.hidden[index : index + 1]
+                next_state_proxy = self._next_state_proxy(state, batch_prediction.delta[index])
+                predictions[action] = (
+                    (next_latent, next_hidden),
+                    value,
+                    uncertainty,
+                    policy_prior,
+                    policy_weight,
+                    predicted_reward,
+                    predicted_return,
+                    causal_value,
+                    diagnostic_value,
+                    usefulness,
+                    next_state_proxy,
+                )
+                if build_action_schema(action, context).action_type == "move":
+                    baseline_move_value = max(baseline_move_value, value - (0.1 * uncertainty))
+        else:
+            for action in predicted_actions:
+                prediction = world_model.step(latent, actions=[action], state=state, hidden=hidden)
+                world_model_calls += 1
+                graph_visits = 0
+                if graph is not None and isinstance(state, StructuredState) and float(self.config.graph_signal_weight) > 0.0:
+                    graph_visits = graph.get_action_stats(state, action).visits
+                policy_weight = 0.35 / float(graph_visits + 1)
+                policy_prior = math.tanh(float(prediction.policy.item()) / 2.0)
+                predicted_reward = float(prediction.reward.item())
+                predicted_return = float(prediction.return_value.item())
+                causal_value = float(prediction.causal_value.item())
+                diagnostic_value = float(prediction.diagnostic_value.item())
+                usefulness = float(prediction.usefulness.item())
+                uncertainty = float(prediction.uncertainty.item())
+                value = _predicted_outcome_value(
+                    predicted_reward,
+                    usefulness,
+                    predicted_return,
+                    causal_value,
+                    policy_prior,
+                    policy_weight,
+                )
+                next_state_proxy = self._next_state_proxy(state, prediction.delta)
+                predictions[action] = (
+                    (prediction.next_latent_mean, prediction.hidden),
+                    value,
+                    uncertainty,
+                    policy_prior,
+                    policy_weight,
+                    predicted_reward,
+                    predicted_return,
+                    causal_value,
+                    diagnostic_value,
+                    usefulness,
+                    next_state_proxy,
+                )
+                if build_action_schema(action, context).action_type == "move":
+                    baseline_move_value = max(baseline_move_value, value - (0.1 * uncertainty))
         if baseline_move_value == float("-inf"):
             baseline_move_value = 0.0
 
@@ -827,36 +995,32 @@ class HybridPlanner:
             selector_followup = 0.0
             schema = build_action_schema(action, context)
             if schema.action_type in {"click", "select"} and move_actions:
-                followup_scores: list[float] = []
-                for move_action in move_actions:
-                    if budget is not None and budget[0] <= 0:
-                        break
+                move_batch = move_actions
+                if followup_budget is not None:
+                    if followup_budget[0] <= 0:
+                        move_batch = []
+                    else:
+                        move_batch = move_actions[: max(int(followup_budget[0]), 0)]
+                        followup_budget[0] -= len(move_batch)
+                if move_batch:
+                    next_latent, next_hidden = prediction
                     followup = world_model.step(
-                        prediction.next_latent_mean,
-                        actions=[move_action],
-                        state=next_state_proxy,
-                        hidden=prediction.hidden,
+                        next_latent.repeat(len(move_batch), 1),
+                        actions=move_batch,
+                        state=None,
+                        hidden=next_hidden.repeat(len(move_batch), 1),
                     )
-                    world_model_calls += 1
-                    if budget is not None:
-                        budget[0] -= 1
-                    followup_scores.append(
-                        float(
-                            (
-                                _predicted_outcome_value(
-                                    float(followup.reward.item()),
-                                    float(followup.usefulness.item()),
-                                    float(followup.return_value.item()),
-                                    float(followup.causal_value.item()),
-                                    float(followup.policy.item()),
-                                    0.25,
-                                )
-                                + (0.25 * float(followup.diagnostic_value.item()))
-                                - (0.1 * followup.uncertainty)
-                            ).item()
-                        )
+                    world_model_calls += len(move_batch)
+                    followup_scores = (
+                        followup.reward
+                        + (0.5 * followup.usefulness)
+                        + (0.35 * followup.return_value)
+                        + (0.45 * followup.causal_value)
+                        + (0.35 * 0.25 * torch.tanh(followup.policy / 2.0))
+                        + (0.25 * followup.diagnostic_value)
+                        - (0.1 * followup.uncertainty)
                     )
-                selector_followup = max(followup_scores) - baseline_move_value if followup_scores else 0.0
+                    selector_followup = float(torch.max(followup_scores).item()) - baseline_move_value
             action_thoughts.append(
                 ActionThought(
                     action=action,
@@ -870,8 +1034,8 @@ class HybridPlanner:
                     diagnostic_value=diagnostic_value,
                     usefulness=usefulness,
                     selector_followup=selector_followup,
-                    next_latent=prediction.next_latent_mean,
-                    next_hidden=prediction.hidden,
+                    next_latent=prediction[0],
+                    next_hidden=prediction[1],
                     next_state_proxy=next_state_proxy,
                 )
             )

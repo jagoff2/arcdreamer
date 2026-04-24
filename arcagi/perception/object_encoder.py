@@ -4,7 +4,7 @@ from collections import deque
 
 import numpy as np
 
-from arcagi.core.action_schema import build_action_schema, build_action_schema_context
+from arcagi.core.action_schema import build_action_schema, build_action_schema_context, click_to_grid_cell
 from arcagi.core.types import GridObservation, ObjectState, Relation, StructuredState
 
 
@@ -16,10 +16,11 @@ def extract_structured_state(observation: GridObservation) -> StructuredState:
     action_roles_dict = {str(action): str(role) for action, role in observation.extras.get("action_roles", {}).items()}
     inferred_inventory, inferred_flags = _inferred_interface_state(observation.available_actions, action_roles_dict)
     inventory_dict = {**inferred_inventory, **{str(key): str(value) for key, value in observation.extras.get("inventory", {}).items()}}
+    inventory_dict.update(_interface_metadata_inventory(observation.extras))
     flags_dict = {**inferred_flags, **{str(key): str(value) for key, value in observation.extras.get("flags", {}).items()}}
     cell_tags = _merge_cell_tags(
         observation.extras.get("cell_tags", {}),
-        _inferred_cell_tags(grid.shape, observation.available_actions, action_roles_dict),
+        _inferred_cell_tags(grid.shape, observation.available_actions, action_roles_dict, inventory_dict),
     )
     background_color = int(observation.extras.get("background_color", 0))
 
@@ -189,10 +190,30 @@ def _inferred_interface_state(
     return inventory, flags
 
 
+def _interface_metadata_inventory(extras: dict[str, object]) -> dict[str, str]:
+    inventory: dict[str, str] = {}
+    camera_shape = extras.get("camera_grid_shape")
+    if isinstance(camera_shape, (tuple, list)) and len(camera_shape) >= 2:
+        inventory["interface_camera_height"] = str(camera_shape[0])
+        inventory["interface_camera_width"] = str(camera_shape[1])
+    camera_origin = extras.get("camera_origin")
+    if isinstance(camera_origin, (tuple, list)) and len(camera_origin) >= 2:
+        inventory["interface_camera_origin_x"] = str(camera_origin[0])
+        inventory["interface_camera_origin_y"] = str(camera_origin[1])
+    display_padding = extras.get("display_padding")
+    if isinstance(display_padding, (tuple, list)) and len(display_padding) >= 2:
+        inventory["interface_display_pad_x"] = str(display_padding[0])
+        inventory["interface_display_pad_y"] = str(display_padding[1])
+    if "display_scale" in extras:
+        inventory["interface_display_scale"] = str(extras["display_scale"])
+    return inventory
+
+
 def _inferred_cell_tags(
     grid_shape: tuple[int, int],
     affordances: tuple[str, ...],
     action_roles: dict[str, str],
+    inventory: dict[str, str] | None = None,
 ) -> dict[tuple[int, int], tuple[str, ...]]:
     height, width = grid_shape
     context = build_action_schema_context(affordances, action_roles)
@@ -204,9 +225,10 @@ def _inferred_cell_tags(
         schema = build_action_schema(action, context)
         if schema.action_type != "click" or schema.click is None:
             continue
-        grid_x, grid_y = schema.click
-        if grid_y < 0 or grid_x < 0 or grid_y >= height or grid_x >= width:
+        grid_cell = click_to_grid_cell(schema.click, grid_shape=grid_shape, inventory=inventory)
+        if grid_cell is None:
             continue
+        grid_y, grid_x = grid_cell
         tags = tags_by_cell.setdefault((grid_y, grid_x), set())
         tags.add("clickable")
         tags.add("interface_target")

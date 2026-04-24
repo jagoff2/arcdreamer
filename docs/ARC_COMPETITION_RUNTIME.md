@@ -102,12 +102,33 @@ The public ARC harness and scientist runtime must therefore:
 
 This is now a hard design constraint for all ARC-facing work in this repo.
 
+## Forbidden Runtime Shortcuts
+
+The ARC-facing learned agent must not use hand-coded control shortcuts to satisfy the session semantics above.
+
+Forbidden:
+
+- fixed or counted action-pattern search
+- movement sweeps used as a solver
+- reset/replay scripts used as a solver
+- graph-search, shortest-path frontier expansion, BFS/DFS replay, or coverage search used as the solver
+- per-game or environment-source-derived behavior
+
+Allowed:
+
+- `RESET` as an environment action under prize-session semantics
+- state graphs and transition logs as memory or diagnostics
+- explicit graph-search baselines and ablations that are not reported as learned-agent success
+- learned-model lookahead where transition predictions, uncertainty, and action values come from learned or online-updated models
+
+An ARC run that succeeds because of a forbidden shortcut is invalid for the core learned-agent objective and must be labeled as such in reports.
+
 ## Operator Command
 
 To let the scientist agent keep retrying one specific offline ARC environment without a step cap:
 
 ```bash
-.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent scientist --checkpoint-path artifacts/spotlight_scientist_arc_offline_latest.pkl --game-id ar25-0c556536 --mode offline --max-steps 0 --progress-every 500
+.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent scientist --checkpoint-path artifacts/spotlight_exec_curriculum_best_v3.pkl --game-id ar25-0c556536 --mode offline --max-steps 0 --progress-every 500
 ```
 
 Notes:

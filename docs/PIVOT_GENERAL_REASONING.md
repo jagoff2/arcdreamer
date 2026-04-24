@@ -142,6 +142,14 @@ It means the synthetic curriculum must now train the right capability under the 
 
 ## Hard Rules From This Point Forward
 
+### Forbidden solver boundary
+
+- Do not use hand-coded action search patterns as the ARC-facing learned-agent solver.
+- Fixed movement sweeps, counted movement probes, canned reset/replay loops, action-pattern enumerators, graph-search controller fallback, shortest-path frontier expansion, and coverage search are forbidden as the solver.
+- Graphs may remain as memory, diagnostics, retrieval substrate, and explicit baselines/ablations, but graph search cannot be the mechanism used to claim learned-agent ARC success.
+- Learned/evidence-updated temporary options are allowed only when their contents are induced from live observations, prediction errors, and belief updates.
+- Any ARC result produced by scripted sweeps, graph-search control, replay-frontier control, per-game branches, or action-pattern code must be labeled invalid for the core learned-agent goal.
+
 ### Information boundary
 
 - No hidden synthetic rule text in observation extras.

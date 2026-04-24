@@ -48,9 +48,60 @@ class ScientistAgentConfig:
     keep_world_weights_between_episodes: bool = True
 
 
+def _coerce_planner_config(config: PlannerConfig | Mapping[str, Any] | None) -> PlannerConfig:
+    if isinstance(config, PlannerConfig):
+        return config
+    if isinstance(config, Mapping):
+        try:
+            return PlannerConfig(**dict(config))
+        except TypeError:
+            return PlannerConfig()
+    return PlannerConfig()
+
+
+def normalize_scientist_agent_config(
+    config: ScientistAgentConfig | Mapping[str, Any] | None,
+) -> ScientistAgentConfig:
+    if isinstance(config, ScientistAgentConfig) and isinstance(config.planner, PlannerConfig):
+        return config
+    if isinstance(config, Mapping):
+        data = dict(config)
+        planner = _coerce_planner_config(data.get("planner"))
+        return ScientistAgentConfig(
+            memory_capacity=int(data.get("memory_capacity", ScientistAgentConfig.memory_capacity)),
+            max_hypotheses=int(data.get("max_hypotheses", ScientistAgentConfig.max_hypotheses)),
+            planner=planner,
+            world_learning_rate=float(data.get("world_learning_rate", ScientistAgentConfig.world_learning_rate)),
+            seed=int(data.get("seed", ScientistAgentConfig.seed)),
+            keep_world_weights_between_episodes=bool(
+                data.get(
+                    "keep_world_weights_between_episodes",
+                    ScientistAgentConfig.keep_world_weights_between_episodes,
+                )
+            ),
+        )
+    if config is None:
+        return ScientistAgentConfig()
+    planner = _coerce_planner_config(getattr(config, "planner", None))
+    return ScientistAgentConfig(
+        memory_capacity=int(getattr(config, "memory_capacity", ScientistAgentConfig.memory_capacity)),
+        max_hypotheses=int(getattr(config, "max_hypotheses", ScientistAgentConfig.max_hypotheses)),
+        planner=planner,
+        world_learning_rate=float(getattr(config, "world_learning_rate", ScientistAgentConfig.world_learning_rate)),
+        seed=int(getattr(config, "seed", ScientistAgentConfig.seed)),
+        keep_world_weights_between_episodes=bool(
+            getattr(
+                config,
+                "keep_world_weights_between_episodes",
+                ScientistAgentConfig.keep_world_weights_between_episodes,
+            )
+        ),
+    )
+
+
 class ScientistAgent:
     def __init__(self, config: ScientistAgentConfig | None = None) -> None:
-        self.config = config or ScientistAgentConfig()
+        self.config = normalize_scientist_agent_config(config)
         self.engine = HypothesisEngine(max_hypotheses=self.config.max_hypotheses)
         self.memory = EpisodicMemory(capacity=self.config.memory_capacity)
         self.language = GroundedLanguage()
@@ -63,6 +114,7 @@ class ScientistAgent:
         self.transitions_observed = 0
         self.total_reward = 0.0
         self.trace: list[dict[str, Any]] = []
+        self.checkpoint_metadata: dict[str, Any] = {}
 
     def reset_episode(self) -> None:
         self.engine.reset_episode()
@@ -230,6 +282,8 @@ class ScientistAgent:
             "questions": list(self.language.questions(self.engine, limit=8)),
             "memory_items": len(self.memory.items),
             "option_items": len(self.memory.options),
+            "world_model": self.world_model.diagnostics(),
+            "checkpoint_metadata": dict(self.checkpoint_metadata),
             "last_decision": None
             if self.last_decision is None
             else {
@@ -244,6 +298,7 @@ class ScientistAgent:
         return {
             "config": asdict(self.config),
             "world_model": self.world_model.state_dict(),
+            "checkpoint_metadata": dict(self.checkpoint_metadata),
         }
 
     def load_state_dict(self, state: Mapping[str, Any]) -> None:
@@ -251,8 +306,12 @@ class ScientistAgent:
         if not isinstance(world_model_state, Mapping):
             raise ValueError("scientist checkpoint missing world_model state")
         self.world_model.load_state_dict(dict(world_model_state))
+        metadata = state.get("checkpoint_metadata", {})
+        self.checkpoint_metadata = dict(metadata) if isinstance(metadata, Mapping) else {}
 
-    def save_checkpoint(self, path: str | Path) -> None:
+    def save_checkpoint(self, path: str | Path, *, metadata: Mapping[str, Any] | None = None) -> None:
+        if metadata is not None:
+            self.checkpoint_metadata = dict(metadata)
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         with target.open("wb") as handle:
@@ -265,11 +324,15 @@ class ScientistAgent:
         *,
         config: ScientistAgentConfig | None = None,
     ) -> ScientistAgent:
-        agent = cls(config=config)
         with Path(path).open("rb") as handle:
             state = pickle.load(handle)
         if not isinstance(state, Mapping):
             raise ValueError(f"scientist checkpoint at {path!s} is not a mapping")
+        if config is None:
+            config_state = state.get("config")
+            if isinstance(config_state, Mapping):
+                config = normalize_scientist_agent_config(config_state)
+        agent = cls(config=config)
         agent.load_state_dict(state)
         return agent
 
@@ -290,8 +353,13 @@ def _score_delta(before: GridFrame, after: GridFrame, info: Mapping[str, Any]) -
     return 0.0
 
 
-def save_scientist_checkpoint(agent: ScientistAgent, path: str | Path) -> None:
-    agent.save_checkpoint(path)
+def save_scientist_checkpoint(
+    agent: ScientistAgent,
+    path: str | Path,
+    *,
+    metadata: Mapping[str, Any] | None = None,
+) -> None:
+    agent.save_checkpoint(path, metadata=metadata)
 
 
 def load_scientist_checkpoint(

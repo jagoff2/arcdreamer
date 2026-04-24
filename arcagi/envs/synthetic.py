@@ -379,6 +379,10 @@ class HiddenRuleEnv(BaseEnvironment):
             if self._selected_color == self._rule.target_color:
                 return 0.0, "selector_candidate"
             return 0.0, "selector_probe"
+        if self._rule is not None and self._rule.kind == "selector_sequence_unlock":
+            if self._selected_color == self._rule.target_color:
+                return 0.0, "selector_candidate"
+            return 0.0, "selector_probe"
         return -0.01, "unused_click"
 
     def _handle_interaction(self, action: ActionName) -> tuple[float, str]:

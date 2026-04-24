@@ -1,5 +1,7 @@
 # Technical Report
 
+Current guardrail: older sections in this report that describe controller-backed ARC success are historical baseline notes only. The clean learned eval path must not instantiate the hand-authored `RuntimeRuleController`, must not hide legal action parameters behind default caps, and must train/evaluate on the full legal action surface unless a run is explicitly labeled smoke/debug.
+
 ## Date
 
 2026-04-19
@@ -701,6 +703,28 @@ Interpretation:
 - the submission-relevant learned eval path makes decisions through the learned world model, grounded language head, episodic memory, graph statistics, and online updates only
 - there is no controller interception layer in that default learned path
 - there is no heuristic question-token fallback in that default learned path
+
+## Forbidden Solver Boundary Update
+
+The repo now treats the following as invalid for core learned-agent ARC success claims:
+
+- hand-coded action search patterns
+- fixed movement sweeps
+- counted movement probes
+- scripted reset/replay loops
+- action-pattern enumerators
+- graph-search controller fallback
+- shortest-path frontier expansion
+- BFS/DFS replay control
+- coverage search used as the action policy
+- per-game or environment-source-derived behavior
+
+Graphs remain allowed as memory, diagnostics, retrieval substrate, and explicitly labeled graph-only baselines. Learned/evidence-updated temporary options remain allowed only when their contents are induced from live observations, prediction errors, memory, and belief updates.
+
+Report consequence:
+
+- any previous or future ARC result that depends on scripted sweeps, graph-search control, replay-frontier control, controller fallback, per-game branches, or action-pattern code must be labeled invalid for the minimally conscious online-agent goal
+- broad success claims must be backed by same-session learned belief/action updates and ablations separating those updates from graph search, scripted policies, lookup tables, and frozen checkpoint behavior
 
 ## Clean Learned Path Status After Further Iteration
 

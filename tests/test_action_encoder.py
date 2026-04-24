@@ -4,9 +4,15 @@ import torch
 
 from arcagi.core.action_schema import build_action_schema, build_action_schema_context
 from arcagi.core.types import GridObservation
-from arcagi.models.action_encoder import ActionEncoder, build_action_context
+from arcagi.models.action_encoder import (
+    NUMERIC_ACTION_FEATURES,
+    ActionEncoder,
+    action_to_tokens_and_features,
+    build_action_context,
+)
 from arcagi.models.world_model import RecurrentWorldModel
 from arcagi.perception.object_encoder import extract_structured_state
+from arcagi.planning.rule_induction import action_target_signatures
 
 
 def test_action_encoder_distinguishes_dynamic_click_coordinates() -> None:
@@ -58,6 +64,68 @@ def test_world_model_accepts_dynamic_arc_actions_without_fixed_ids() -> None:
     assert prediction.hidden.shape == (1, 16)
     assert prediction.next_latent_mean.shape == (1, 16)
     assert prediction.policy.shape == (1,)
+
+
+def test_action_encoder_adds_target_features_for_click_actions() -> None:
+    observation = GridObservation(
+        task_id="arc/test",
+        episode_id="episode-target",
+        step_index=0,
+        grid=torch.tensor(
+            [
+                [0, 0, 0, 0],
+                [0, 0, 3, 0],
+                [0, 0, 0, 0],
+            ],
+            dtype=torch.int64,
+        ).numpy(),
+        available_actions=("click:2:1",),
+        extras={"action_roles": {"click:2:1": "click"}},
+    )
+    state = extract_structured_state(observation)
+    context = build_action_context(state.affordances, dict(state.action_roles))
+
+    tokens, features = action_to_tokens_and_features("click:2:1", context, state)
+
+    assert len(features) == NUMERIC_ACTION_FEATURES
+    assert "target_color:3" in tokens
+    assert "target_tag:clickable" in tokens
+    assert "target_tag:interface_target" in tokens
+    assert features[16] == 1.0
+
+
+def test_action_encoder_maps_display_click_to_grid_target_features() -> None:
+    observation = GridObservation(
+        task_id="arc/test",
+        episode_id="episode-display-target",
+        step_index=0,
+        grid=torch.tensor(
+            [
+                [0, 0, 0],
+                [0, 4, 0],
+                [0, 0, 0],
+            ],
+            dtype=torch.int64,
+        ).numpy(),
+        available_actions=("click:8:12",),
+        extras={
+            "action_roles": {"click:8:12": "click"},
+            "display_scale": 4,
+            "display_padding": (2, 6),
+            "camera_grid_shape": (3, 3),
+            "camera_origin": (12, 9),
+        },
+    )
+    state = extract_structured_state(observation)
+    context = build_action_context(state.affordances, dict(state.action_roles))
+
+    tokens, features = action_to_tokens_and_features("click:8:12", context, state)
+
+    assert state.inventory_dict()["interface_display_scale"] == "4"
+    assert "target_color:4" in tokens
+    assert "target_tag:clickable" in tokens
+    assert features[16] == 1.0
+    assert action_target_signatures(state, "click:8:12")
 
 
 def test_action_schema_groups_parametric_clicks_by_family_and_bin() -> None:

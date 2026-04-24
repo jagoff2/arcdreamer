@@ -56,14 +56,14 @@ class GoalScientistPublicTrainingConfig:
     seed: int = 17
     device: str = ""
     checkpoint_path: str = "artifacts/goal_scientist_public.pt"
-    init_checkpoint_path: str = "artifacts/manual_stage1.pt"
-    behavior_policies: tuple[str, ...] = ("hybrid", "diagnostic", "graph", "learned", "random")
+    init_checkpoint_path: str = ""
+    behavior_policies: tuple[str, ...] = ("learned", "random")
     freeze_encoder: bool = False
     language_loss_weight: float = 0.25
     policy_loss_weight: float = 0.35
     hindsight_gamma: float = 0.92
     sequence_horizon: int = 14
-    max_coordinate_probes: int = 18
+    max_coordinate_probes: int = 0
     save_epoch_snapshots: bool = True
     sessions_per_update: int = 1
     replay_buffer_sessions: int = 4
@@ -356,8 +356,6 @@ def _canonical_probe_order(actions: Sequence[str]) -> list[str]:
 def _color_centroid_clicks(grid: np.ndarray, *, limit: int) -> list[str]:
     """Return salience clicks as ``click:x:y`` using only visible grid data."""
 
-    if limit <= 0:
-        return []
     arr = np.asarray(grid)
     if arr.ndim != 2:
         return []
@@ -393,7 +391,7 @@ def _color_centroid_clicks(grid: np.ndarray, *, limit: int) -> list[str]:
         text = f"click:{x}:{y}"
         if text not in out:
             out.append(text)
-        if len(out) >= limit:
+        if limit > 0 and len(out) >= limit:
             break
     return out
 
@@ -407,7 +405,7 @@ class PublicDiagnosticAgendaAgent:
     reads environment files or game IDs and never uses semantic role names.
     """
 
-    def __init__(self, *, max_coordinate_probes: int = 18) -> None:
+    def __init__(self, *, max_coordinate_probes: int = 0) -> None:
         self.max_coordinate_probes = int(max_coordinate_probes)
         self._agenda: list[str] = []
         self._cursor = 0
@@ -460,7 +458,7 @@ class PublicDiagnosticAgendaAgent:
 
         existing_clicks = [action for action in actions if action.startswith("click:")]
         if existing_clicks:
-            agenda.extend(existing_clicks[: self.max_coordinate_probes])
+            agenda.extend(existing_clicks if self.max_coordinate_probes <= 0 else existing_clicks[: self.max_coordinate_probes])
         elif self._has_parametric_click(actions) and grid is not None:
             agenda.extend(_color_centroid_clicks(grid, limit=self.max_coordinate_probes))
 
@@ -911,20 +909,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--learning-rate", type=float, default=1.0e-4)
     parser.add_argument("--device", type=str, default="")
     parser.add_argument("--checkpoint-path", type=str, default="artifacts/goal_scientist_public.pt")
-    parser.add_argument("--init-checkpoint-path", type=str, default="artifacts/manual_stage1.pt")
+    parser.add_argument("--init-checkpoint-path", type=str, default="")
     parser.add_argument("--seed", type=int, default=17)
     parser.add_argument(
         "--behavior-policies",
         type=str,
-        default="hybrid,diagnostic,graph,learned,random",
-        help="comma-separated collector policies from {hybrid,diagnostic,graph,learned,random}",
+        default="learned,random",
+        help="comma-separated collector policies from {learned,random}; graph/hybrid/diagnostic are baseline-only and not valid for clean success claims",
     )
     parser.add_argument("--freeze-encoder", action="store_true")
     parser.add_argument("--language-loss-weight", type=float, default=0.25)
     parser.add_argument("--policy-loss-weight", type=float, default=0.35)
     parser.add_argument("--hindsight-gamma", type=float, default=0.92)
     parser.add_argument("--sequence-horizon", type=int, default=14)
-    parser.add_argument("--max-coordinate-probes", type=int, default=18)
+    parser.add_argument("--max-coordinate-probes", type=int, default=0)
     parser.add_argument("--no-epoch-snapshots", action="store_true")
     parser.add_argument("--sessions-per-update", "--episodes-per-update", dest="sessions_per_update", type=int, default=1)
     parser.add_argument(

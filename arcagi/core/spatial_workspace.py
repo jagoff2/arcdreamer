@@ -123,6 +123,9 @@ class SpatialBeliefWorkspace:
         self.contradiction_sites.clear()
         self.last_anchor = None
 
+    def reset_level(self) -> None:
+        self.visited_positions.clear()
+
     def observe_state(self, state: StructuredState) -> None:
         position = _agent_position(state)
         if position is not None:

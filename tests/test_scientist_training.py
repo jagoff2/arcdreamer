@@ -5,7 +5,7 @@ from pathlib import Path
 from arcagi.core.types import GridObservation, StepResult
 from arcagi.envs.session import PersistentLevelSessionEnv
 from arcagi.agents.scientist_agent import load_spotlight_scientist_checkpoint
-from arcagi.scientist.train import ScientistTrainingConfig, train_scientist
+from arcagi.scientist.train import ScientistTrainingConfig, _result_key, train_scientist
 
 
 class _FailThenWinLevel:
@@ -147,14 +147,23 @@ def test_train_scientist_runs_tiny_session_smoke(tmp_path: Path) -> None:
     )
 
     assert summary["sessions"] == 2
-    assert "train_session_win_rate" in summary
-    assert "train_avg_levels_completed" in summary
-    assert "train_avg_attempt_improvement" in summary
+    assert "learner_owned_session_win_rate" in summary
+    assert "learner_owned_avg_levels_completed" in summary
+    assert "learner_owned_avg_attempt_improvement" in summary
+    assert "teacher_feedback_fraction" in summary
     assert "final_holdout" in summary
     assert "simple_avg_attempt_improvement" in summary["final_holdout"]
     assert "rich_avg_attempt_improvement" in summary["final_holdout"]
-    assert (tmp_path / "best.pkl").exists()
     assert (tmp_path / "latest.pkl").exists()
+    restored = load_spotlight_scientist_checkpoint(tmp_path / "latest.pkl")
+    metadata = restored.diagnostics()["checkpoint_metadata"]
+    assert metadata["training_mode"] == "learner_owned_sparse_oracle_relabel_autonomous_holdout"
+    assert "autonomous_holdout" in metadata
+    assert "learner_owned_recent" in metadata
+    if summary["best_checkpoint_valid"]:
+        assert (tmp_path / "best.pkl").exists()
+    else:
+        assert (tmp_path / "best.pkl.unpromoted.json").exists()
 
 
 def test_train_scientist_uses_teacher_habit_path(tmp_path: Path, monkeypatch) -> None:
@@ -183,6 +192,7 @@ def test_train_scientist_uses_teacher_habit_path(tmp_path: Path, monkeypatch) ->
             holdout_rich_sessions=1,
             checkpoint_path=str(tmp_path / "best.pkl"),
             latest_checkpoint_path=str(tmp_path / "latest.pkl"),
+            teacher_feedback_mode="dense",
         )
     )
 
@@ -192,3 +202,99 @@ def test_train_scientist_uses_teacher_habit_path(tmp_path: Path, monkeypatch) ->
     assert teacher_calls["count"] > 0
     assert diagnostics["habit_updates"] > 0
     assert "adaptation_updates" in diagnostics
+
+
+def test_result_key_ignores_better_failure_when_all_solve_metrics_are_zero() -> None:
+    worse_failure = _result_key(
+        {
+            "rich_session_win_rate": 0.0,
+            "rich_avg_levels_completed": 0.0,
+            "rich_avg_reset_steps": 4.0,
+            "rich_avg_attempt_improvement": 0.35,
+            "simple_success_rate": 0.0,
+            "simple_avg_attempt_improvement": 0.22,
+            "rich_avg_return": -2.0,
+            "simple_avg_return": 0.4,
+        }
+    )
+    different_failure = _result_key(
+        {
+            "rich_session_win_rate": 0.0,
+            "rich_avg_levels_completed": 0.0,
+            "rich_avg_reset_steps": 28.0,
+            "rich_avg_attempt_improvement": 0.05,
+            "simple_success_rate": 0.0,
+            "simple_avg_attempt_improvement": -0.10,
+            "rich_avg_return": -6.0,
+            "simple_avg_return": 0.0,
+        }
+    )
+    real_solve = _result_key(
+        {
+            "rich_session_win_rate": 0.0,
+            "rich_avg_levels_completed": 0.0,
+            "rich_avg_reset_steps": 4.0,
+            "rich_avg_attempt_improvement": 0.01,
+            "simple_success_rate": 0.25,
+            "simple_avg_attempt_improvement": -0.25,
+            "rich_avg_return": -9.0,
+            "simple_avg_return": 0.1,
+        }
+    )
+
+    assert worse_failure == (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    assert different_failure == worse_failure
+    assert real_solve > worse_failure
+
+
+def test_result_key_penalizes_reset_collapse_when_solve_metrics_tie() -> None:
+    healthier = _result_key(
+        {
+            "rich_session_win_rate": 0.0,
+            "rich_avg_levels_completed": 0.0,
+            "rich_avg_reset_steps": 4.0,
+            "rich_avg_attempt_improvement": 0.20,
+            "simple_success_rate": 0.75,
+            "simple_avg_attempt_improvement": 0.60,
+            "rich_avg_return": -4.0,
+            "simple_avg_return": 0.8,
+        }
+    )
+    collapse = _result_key(
+        {
+            "rich_session_win_rate": 0.0,
+            "rich_avg_levels_completed": 0.0,
+            "rich_avg_reset_steps": 28.0,
+            "rich_avg_attempt_improvement": 0.20,
+            "simple_success_rate": 0.75,
+            "simple_avg_attempt_improvement": 0.60,
+            "rich_avg_return": -4.0,
+            "simple_avg_return": 0.8,
+        }
+    )
+
+    assert healthier > collapse
+
+
+def test_train_scientist_does_not_promote_zero_solve_best_by_default(tmp_path: Path) -> None:
+    summary = train_scientist(
+        ScientistTrainingConfig(
+            seed=991,
+            stage1_sessions=1,
+            stage2_sessions=0,
+            eval_every=1,
+            simple_max_steps=6,
+            rich_level_max_steps=6,
+            rich_session_max_steps=8,
+            rich_levels_per_session=1,
+            holdout_simple_sessions=1,
+            holdout_rich_sessions=1,
+            checkpoint_path=str(tmp_path / "best.pkl"),
+            latest_checkpoint_path=str(tmp_path / "latest.pkl"),
+        )
+    )
+
+    assert (tmp_path / "latest.pkl").exists()
+    if not summary["final_promotion_eligible"]:
+        assert not (tmp_path / "best.pkl").exists()
+        assert (tmp_path / "best.pkl.unpromoted.json").exists()

@@ -12,6 +12,11 @@ import torch
 from arcagi.agents.graph_agent import GraphExplorerAgent
 from arcagi.agents.random_agent import RandomHeuristicAgent
 from arcagi.core.action_schema import build_action_schema, build_action_schema_context
+from arcagi.core.progress_signals import (
+    action_family,
+    visible_online_policy_supervision,
+    visible_online_usefulness_target,
+)
 from arcagi.core.types import StructuredState
 from arcagi.core.utils import seed_everything
 from arcagi.envs.arc_adapter import ArcToolkitEnv, arc_operation_mode, arc_toolkit_available, list_arc_games
@@ -36,8 +41,8 @@ class ArcPublicTrainingConfig:
     seed: int = 17
     device: str = ""
     checkpoint_path: str = "artifacts/arc_public_hybrid.pt"
-    init_checkpoint_path: str = "artifacts/mixed_policy_hybrid.pt"
-    behavior_policies: tuple[str, ...] = ("graph", "learned", "random")
+    init_checkpoint_path: str = ""
+    behavior_policies: tuple[str, ...] = ("learned", "random")
     policy_positive_threshold: float = 0.15
     freeze_encoder: bool = True
     language_loss_weight: float = 0.2
@@ -110,9 +115,23 @@ def _behavior_agent(
                 device=collector_device,
             )
         planner = HybridPlanner(
-            PlannerConfig(search_depth=2, search_root_width=2, search_branch_width=1, max_world_model_calls=48)
+            PlannerConfig(
+                search_depth=2,
+                search_root_width=2,
+                search_branch_width=1,
+                max_world_model_calls=48,
+                graph_signal_weight=0.0,
+                policy_prior_weight=3.0,
+            )
             if collector_device.type == "cpu"
-            else PlannerConfig(search_depth=2, search_root_width=2, search_branch_width=1, max_world_model_calls=32)
+            else PlannerConfig(
+                search_depth=2,
+                search_root_width=2,
+                search_branch_width=1,
+                max_world_model_calls=32,
+                graph_signal_weight=0.0,
+                policy_prior_weight=3.0,
+            )
         )
         if name == "learned":
             return (
@@ -147,7 +166,8 @@ def _make_sample(
 ) -> dict[str, object]:
     delta = next_state.transition_vector() - state.transition_vector()
     delta_norm = float(np.linalg.norm(delta))
-    usefulness = max(float(reward), 0.0) + (0.5 * delta_norm)
+    usefulness = visible_online_usefulness_target(action, float(reward), delta_norm)
+    policy = visible_online_policy_supervision(action, float(reward), delta_norm)
     return {
         "state": state,
         "next_state": next_state,
@@ -155,10 +175,54 @@ def _make_sample(
         "reward": float(reward),
         "delta": delta.astype(np.float32),
         "usefulness": usefulness,
+        "policy_target": float(policy.target),
+        "policy_weight": float(policy.weight),
         "belief_tokens": _belief_tokens(state, action, reward, usefulness),
         "question_tokens": _question_tokens(state, action, reward, usefulness),
         "plan_tokens": _plan_tokens(state, action, reward, usefulness),
     }
+
+
+def _apply_arc_objective_labels(sample: dict[str, object]) -> None:
+    action = str(sample.get("action", ""))
+    reward = float(sample.get("reward", 0.0))
+    level_delta = int(sample.get("level_delta", 0) or 0)
+    game_state_before = str(sample.get("game_state_before", "")).upper()
+    game_state_after = str(sample.get("game_state_after", "")).upper()
+    family = action_family(action)
+    objective_progress = reward >= 0.5 or level_delta > 0 or game_state_after.endswith("WIN")
+    terminal_continuation = bool(
+        sample.get("reset_action", False)
+        and not objective_progress
+        and ("GAME_OVER" in game_state_before or "SESSION_ENDED" in game_state_before)
+    )
+    terminal_failure = bool(sample.get("failure_terminal", False)) and not objective_progress and not terminal_continuation
+    base_usefulness = float(sample.get("usefulness", 0.0))
+
+    if objective_progress:
+        usefulness = max(base_usefulness, 0.85 + (0.35 * max(level_delta, 0)) + max(reward, 0.0))
+        policy_target = 1.0
+        policy_weight = max(float(sample.get("policy_weight", 1.0)), 1.6)
+    elif terminal_continuation:
+        usefulness = 0.05
+        policy_target = 0.25
+        policy_weight = max(float(sample.get("policy_weight", 1.0)), 0.75)
+    elif terminal_failure:
+        usefulness = min(base_usefulness, -0.55)
+        policy_target = 0.0
+        policy_weight = max(float(sample.get("policy_weight", 1.0)), 1.8)
+    elif family in {"reset", "undo", "wait"}:
+        usefulness = min(base_usefulness, -0.25)
+        policy_target = 0.0
+        policy_weight = max(float(sample.get("policy_weight", 1.0)), 1.2)
+    else:
+        usefulness = min(base_usefulness, 0.04)
+        policy_target = min(float(sample.get("policy_target", 0.0)), 0.15)
+        policy_weight = float(sample.get("policy_weight", 1.0))
+
+    sample["usefulness"] = float(usefulness)
+    sample["policy_target"] = float(max(0.0, min(1.0, policy_target)))
+    sample["policy_weight"] = float(policy_weight)
 
 
 def _belief_tokens(
@@ -289,6 +353,8 @@ def collect_arc_public_sessions(
                 )
                 seed_cursor += 1
                 annotate_session_returns(session_samples)
+                for sample in session_samples:
+                    _apply_arc_objective_labels(sample)
                 dataset.extend(session_samples)
                 session_summaries.append(asdict(session_summary))
         finally:
@@ -403,13 +469,14 @@ def train_arc_public(
                 hidden=sequence_hidden,
             )
             policy_target = torch.tensor(
-                [1.0 if usefulness >= config.policy_positive_threshold else 0.0],
+                [float(sample.get("policy_target", 1.0 if usefulness >= config.policy_positive_threshold else 0.0))],
                 dtype=torch.float32,
                 device=device,
             )
             policy_loss = torch.nn.functional.binary_cross_entropy_with_logits(
                 prediction.policy,
                 policy_target,
+                weight=torch.tensor([float(sample.get("policy_weight", 1.0))], dtype=torch.float32, device=device),
             )
             belief_loss = language_model.teacher_forcing_loss(
                 encoded.latent,
@@ -500,13 +567,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--device", type=str, default="")
     parser.add_argument("--checkpoint-path", type=str, default="artifacts/arc_public_hybrid.pt")
-    parser.add_argument("--init-checkpoint-path", type=str, default="artifacts/mixed_policy_hybrid.pt")
+    parser.add_argument("--init-checkpoint-path", type=str, default="")
     parser.add_argument("--seed", type=int, default=17)
     parser.add_argument(
         "--behavior-policies",
         type=str,
-        default="graph,learned,random",
-        help="comma-separated collector policies from {graph,random,learned}",
+        default="learned,random",
+        help="comma-separated collector policies from {random,learned}; graph/hybrid are baseline-only and not valid for clean success claims",
     )
     parser.add_argument("--unfreeze-encoder", action="store_true")
     return parser

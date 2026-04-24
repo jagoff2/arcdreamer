@@ -101,6 +101,10 @@ class Hypothesis:
     def utility_prior(self) -> float:
         if self.kind.startswith("reward") or self.kind.startswith("goal"):
             return 1.5
+        if self.kind.startswith("effect_contact_large_displacement"):
+            return 1.10
+        if self.kind.startswith("effect_contact_disappears"):
+            return 0.90
         if self.kind.startswith("action_moves"):
             return 0.65
         if self.kind.startswith("targeted"):
@@ -134,6 +138,21 @@ class HypothesisActionScore:
     information_gain: float
     risk: float
     posterior_mass: float
+    rationale: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class MechanicBelief:
+    mechanic_id: str
+    kind: str
+    action_family: str
+    color: int | None
+    object_signature: str | None
+    confidence: float
+    posterior: float
+    support: float
+    contradiction: float
+    utility: float
     rationale: tuple[str, ...]
 
 
@@ -222,6 +241,7 @@ class HypothesisEngine:
         self._induce_targeted_effects(record, fam=fam, step=step)
         self._induce_reward_hypotheses(record, fam=fam, step=step)
         self._induce_mode_hypotheses(record, fam=fam, step=step)
+        self._induce_mechanic_hypotheses(record, fam=fam, step=step)
 
     def _update_hypothesis(self, hyp: Hypothesis, record: TransitionRecord, *, fam: str, step: int) -> None:
         if hyp.kind == "action_moves_object":
@@ -282,6 +302,36 @@ class HypothesisEngine:
                 hyp.observe(supported=True, strength=0.7, step=step)
             elif fam == hyp.action_family:
                 hyp.observe(supported=False, strength=0.25, step=step)
+
+        elif hyp.kind == "effect_contact_disappears_object":
+            if fam != hyp.action_family:
+                return
+            target_sig = str(hyp.params.get("object_signature", ""))
+            target_color = int(hyp.params.get("color", -999))
+            target_present = self._state_contains_signature(record.before, target_sig)
+            supported = target_sig in record.delta.disappeared
+            engaged = self._touches_signature_or_color(record, target_sig, target_color)
+            if supported:
+                hyp.observe(supported=True, strength=0.9 + 0.20 * record.delta.changed_fraction, step=step)
+            elif target_present and engaged:
+                hyp.observe(supported=False, strength=0.28, step=step)
+
+        elif hyp.kind == "effect_contact_large_displacement":
+            if fam != hyp.action_family:
+                return
+            target_sig = str(hyp.params.get("object_signature", ""))
+            target_color = int(hyp.params.get("color", -999))
+            min_distance = float(hyp.params.get("min_distance", 1.0))
+            target_present = self._state_contains_signature(record.before, target_sig)
+            supported = any(
+                motion.before_signature == target_sig and motion.distance >= min_distance - 1e-6
+                for motion in record.delta.moved_objects
+            )
+            engaged = self._touches_signature_or_color(record, target_sig, target_color)
+            if supported:
+                hyp.observe(supported=True, strength=0.85 + 0.15 * min(record.delta.changed_fraction, 1.0), step=step)
+            elif target_present and engaged:
+                hyp.observe(supported=False, strength=0.24, step=step)
 
     def _induce_action_effects(self, record: TransitionRecord, *, fam: str, step: int) -> None:
         if not record.delta.moved_objects:
@@ -375,6 +425,43 @@ class HypothesisEngine:
             )
             hyp.observe(supported=True, strength=0.8, step=step)
 
+    def _induce_mechanic_hypotheses(self, record: TransitionRecord, *, fam: str, step: int) -> None:
+        nominal_delta = action_delta(record.action)
+        nominal_distance = 0 if nominal_delta is None else abs(nominal_delta[0]) + abs(nominal_delta[1])
+
+        for object_id in record.delta.disappeared:
+            obj = record.before.object_by_id(object_id)
+            if obj is None:
+                continue
+            if not self._touches_signature_or_color(record, obj.signature, obj.color):
+                continue
+            hyp = self._get_or_create(
+                kind="effect_contact_disappears_object",
+                action_fam=fam,
+                params={"color": obj.color, "object_signature": obj.signature},
+                description=f"action family {fam} can cause touched object {obj.signature} to disappear",
+                step=step,
+                mdl_penalty=0.05,
+            )
+            hyp.observe(supported=True, strength=0.55 + 0.25 * record.delta.changed_fraction, step=step)
+
+        for motion in record.delta.moved_objects:
+            if motion.distance <= max(1.25, float(nominal_distance) + 0.75):
+                continue
+            hyp = self._get_or_create(
+                kind="effect_contact_large_displacement",
+                action_fam=fam,
+                params={
+                    "color": motion.color,
+                    "object_signature": motion.before_signature,
+                    "min_distance": float(max(1.0, round(motion.distance))),
+                },
+                description=f"action family {fam} can cause large displacement of {motion.before_signature}",
+                step=step,
+                mdl_penalty=0.06,
+            )
+            hyp.observe(supported=True, strength=0.60 + 0.15 * min(motion.distance, 4.0), step=step)
+
     def _state_contains_color(self, state: StructuredState, color: int) -> bool:
         return any(obj.color == color for obj in state.objects)
 
@@ -385,6 +472,16 @@ class HypothesisEngine:
         for oid in record.delta.touched_objects:
             before = record.before.object_by_id(oid)
             after = record.after.object_by_id(oid)
+            if (before is not None and before.color == color) or (after is not None and after.color == color):
+                return True
+        return False
+
+    def _touches_signature_or_color(self, record: TransitionRecord, signature: str, color: int) -> bool:
+        for oid in record.delta.touched_objects:
+            before = record.before.object_by_id(oid)
+            after = record.after.object_by_id(oid)
+            if (before is not None and before.signature == signature) or (after is not None and after.signature == signature):
+                return True
             if (before is not None and before.color == color) or (after is not None and after.color == color):
                 return True
         return False
@@ -495,6 +592,38 @@ class HypothesisEngine:
                     posterior_mass += belief
                 rationale.extend(("test", "mode"))
 
+            elif hyp.kind == "effect_contact_disappears_object" and relevant:
+                color = int(hyp.params.get("color", -999))
+                if not any(obj.color == color for obj in state.objects):
+                    continue
+                if is_move_action(action) or is_interact_action(action) or fam == hyp.action_family:
+                    if bounded:
+                        expected_change = _bounded_accumulate(expected_change, 0.35 * belief, cap=1.0)
+                        expected_reward = _bounded_accumulate(expected_reward, 0.10 * belief * hyp.utility_prior, cap=1.25)
+                        info_gain = _bounded_accumulate(info_gain, max(hyp.uncertainty, 0.10) * 0.40, cap=1.5)
+                        posterior_mass = _bounded_accumulate(posterior_mass, 0.55 * belief, cap=2.0)
+                    else:
+                        expected_change += 0.30 * belief
+                        expected_reward += 0.08 * belief * hyp.utility_prior
+                        info_gain += max(hyp.uncertainty, 0.10) * 0.45
+                        posterior_mass += 0.70 * belief
+                    rationale.extend(("test", "effect_disappear", f"c{color}"))
+
+            elif hyp.kind == "effect_contact_large_displacement" and relevant:
+                color = int(hyp.params.get("color", -999))
+                if not any(obj.color == color for obj in state.objects):
+                    continue
+                if is_move_action(action) or is_interact_action(action) or fam == hyp.action_family:
+                    if bounded:
+                        expected_change = _bounded_accumulate(expected_change, 0.60 * belief, cap=1.0)
+                        info_gain = _bounded_accumulate(info_gain, max(hyp.uncertainty, 0.08) * 0.30, cap=1.5)
+                        posterior_mass = _bounded_accumulate(posterior_mass, 0.65 * belief, cap=2.0)
+                    else:
+                        expected_change += 0.55 * belief
+                        info_gain += max(hyp.uncertainty, 0.08) * 0.35
+                        posterior_mass += 0.75 * belief
+                    rationale.extend(("test", "effect_large_motion", f"c{color}"))
+
             if relevant and hyp.posterior < 0.20 and hyp.evidence.contradiction > hyp.evidence.support + 1:
                 risk += 0.10
 
@@ -577,6 +706,57 @@ class HypothesisEngine:
                 continue
             colors[color] = max(colors.get(color, 0.0), float(hyp.posterior * (0.5 + hyp.evidence.confidence)))
         return colors
+
+    def mechanic_beliefs(self, *, min_confidence: float = 0.14, limit: int = 16) -> tuple[MechanicBelief, ...]:
+        beliefs: list[MechanicBelief] = []
+        kind_map = {
+            "effect_contact_disappears_object": "effect_disappear",
+            "effect_contact_large_displacement": "effect_large_motion",
+            "mode_action_changes_dynamics": "effect_mode_rewrite",
+            "targeted_action_changes_object": "effect_targeted_rewrite",
+            "reward_when_touch_color": "effect_progress",
+        }
+        for hyp in self.hypotheses.values():
+            mapped = kind_map.get(hyp.kind)
+            if mapped is None:
+                continue
+            confidence = float(hyp.posterior * (0.35 + 0.65 * hyp.evidence.confidence))
+            if confidence < min_confidence:
+                continue
+            color = hyp.params.get("color")
+            try:
+                color_value = None if color is None else int(color)
+            except Exception:
+                color_value = None
+            signature = hyp.params.get("object_signature", hyp.params.get("signature"))
+            support = float(hyp.evidence.support)
+            contradiction = float(hyp.evidence.contradiction)
+            utility = float(confidence * hyp.utility_prior)
+            beliefs.append(
+                MechanicBelief(
+                    mechanic_id=hyp.hypothesis_id,
+                    kind=mapped,
+                    action_family=hyp.action_family,
+                    color=color_value,
+                    object_signature=None if signature is None else str(signature),
+                    confidence=confidence,
+                    posterior=float(hyp.posterior),
+                    support=support,
+                    contradiction=contradiction,
+                    utility=utility,
+                    rationale=hyp.as_tokens()[:8],
+                )
+            )
+        beliefs.sort(key=lambda item: (item.utility, item.confidence, item.support - item.contradiction), reverse=True)
+        return tuple(beliefs[:limit])
+
+    def mechanic_color_priors(self) -> dict[int, float]:
+        priors: dict[int, float] = {}
+        for belief in self.mechanic_beliefs(limit=32):
+            if belief.color is None:
+                continue
+            priors[belief.color] = max(priors.get(belief.color, 0.0), float(belief.utility))
+        return priors
 
     def credible_hypotheses(self, *, min_posterior: float = 0.55, limit: int = 16) -> tuple[Hypothesis, ...]:
         ranked = sorted(

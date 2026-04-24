@@ -36,6 +36,10 @@ from .types import (
     parse_action_target,
 )
 
+LEGACY_FEATURE_SCHEMA_VERSION = 1
+EXTENDED_FEATURE_SCHEMA_VERSION = 2
+CURRENT_FEATURE_SCHEMA_VERSION = 3
+
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
@@ -121,7 +125,7 @@ class SpotlightConfig:
     no_effect_penalty: float = 0.85
     repeat_penalty: float = 0.45
     commitment_bonus: float = 0.40
-    max_candidates: int = 96
+    max_candidates: int = 0
     trace_capacity: int = 256
     selector_probe_horizon: int = 4
     selector_null_grace: int = 1
@@ -131,6 +135,11 @@ class SpotlightConfig:
     override_margin: float = 0.18
     confidence_temperature: float = 0.75
     reset_stall_threshold: int = 56
+    reset_cooldown_steps: int = 28
+    reset_session_budget: int = 4
+    reset_retry_penalty: float = 1.15
+    reset_positive_improvement_guard: float = 0.08
+    diagnostic_binding_stall_threshold: int = 24
 
 
 @dataclass
@@ -207,6 +216,17 @@ class PendingActionUpdate:
 
 
 @dataclass
+class DeferredTeacherBinding:
+    teacher_action: ActionName
+    teacher_feature_vector: np.ndarray
+    weight: float
+    chosen_feature_vector: np.ndarray | None = None
+    chosen_zero_weight: float = 0.0
+    contrast_feature_vector: np.ndarray | None = None
+    contrast_weight: float = 0.0
+
+
+@dataclass
 class AttemptActionRecord:
     action: ActionName
     feature_vector: np.ndarray
@@ -244,12 +264,14 @@ class ActionSpotlight:
 
     def __init__(self, config: SpotlightConfig | None = None) -> None:
         self.config = config or SpotlightConfig()
+        self.feature_schema_version = CURRENT_FEATURE_SCHEMA_VERSION
         self.executive = ExecutiveScorer()
         self.habit = HabitPolicy(feature_dim=self.executive.feature_dim)
         self.adaptation = AdaptationScorer(feature_dim=self.executive.feature_dim)
         self._intention_counter = 0
         self.active_intention: SpotlightIntention | None = None
         self.pending_binder_probe: PendingBinderProbe | None = None
+        self.pending_teacher_binding: DeferredTeacherBinding | None = None
         self.pending_update: PendingActionUpdate | None = None
         self.state_action_visits: defaultdict[tuple[str, ActionName], int] = defaultdict(int)
         self.abstract_action_visits: defaultdict[tuple[str, str], int] = defaultdict(int)
@@ -284,11 +306,14 @@ class ActionSpotlight:
         self.attempt_improvements: deque[float] = deque(maxlen=64)
         self.last_broadcast: SpotlightBroadcast | None = None
         self.trace: deque[dict[str, Any]] = deque(maxlen=self.config.trace_capacity)
+        self.session_reset_count = 0
+        self.steps_since_reset = int(self.config.reset_cooldown_steps)
 
     def reset_episode(self) -> None:
         self._intention_counter = 0
         self.active_intention = None
         self.pending_binder_probe = None
+        self.pending_teacher_binding = None
         self.pending_update = None
         self._last_scored_candidates.clear()
         self.state_action_visits.clear()
@@ -319,11 +344,14 @@ class ActionSpotlight:
         self.attempt_improvements.clear()
         self.last_broadcast = None
         self.trace.clear()
+        self.session_reset_count = 0
+        self.steps_since_reset = int(self.config.reset_cooldown_steps)
 
     def reset_level(self) -> None:
         self._intention_counter = 0
         self.active_intention = None
         self.pending_binder_probe = None
+        self.pending_teacher_binding = None
         self.pending_update = None
         self._last_scored_candidates.clear()
         self.state_action_visits.clear()
@@ -362,14 +390,15 @@ class ActionSpotlight:
         language: Any,
     ) -> ActionDecision:
         self._ensure_attempt(state)
-        candidates = self._candidate_actions(state, planner=planner, engine=engine)
+        lang_tokens = self._language_tokens(language, state, engine)
+        candidates = self._candidate_actions(state, planner=planner, engine=engine, memory=memory, lang_tokens=lang_tokens)
         if not candidates:
             raise RuntimeError("ActionSpotlight received no candidate actions")
 
-        lang_tokens = self._language_tokens(language, state, engine)
         scored = self._score_candidates(
             state,
             candidates,
+            planner=planner,
             engine=engine,
             world_model=world_model,
             memory=memory,
@@ -448,7 +477,7 @@ class ActionSpotlight:
             chosen_reason="; ".join(chosen.rationale[:4]) or chosen.intent_kind,
         )
 
-    def notify_transition(self, *, record: TransitionRecord, engine: Any | None = None) -> None:
+    def notify_transition(self, *, record: TransitionRecord, engine: Any | None = None) -> dict[str, Any]:
         progress = combined_progress_signal(record.reward, record.delta.score_delta)
         visible_effect = bool(record.delta.has_visible_effect or abs(progress) > 1e-8)
         pending_before = self.pending_binder_probe
@@ -480,6 +509,11 @@ class ActionSpotlight:
             self.steps_since_progress = 0
         else:
             self.steps_since_progress += 1
+        if is_reset_action(record.action):
+            self.session_reset_count += 1
+            self.steps_since_reset = 0
+        else:
+            self.steps_since_reset = min(self.steps_since_reset + 1, 10_000)
 
         if self.pending_update is not None and self.pending_update.action == record.action:
             self._current_attempt_actions.append(
@@ -505,7 +539,7 @@ class ActionSpotlight:
                 immediate_visible_effect=visible_effect,
             )
 
-        probe_supported = self._update_pending_binder_probe(
+        probe_supported, probe_failed = self._update_pending_binder_probe(
             record,
             pending_probe=pending_before,
             visible_effect=visible_effect,
@@ -549,6 +583,11 @@ class ActionSpotlight:
                 "probe_supported": bool(probe_supported),
             }
 
+        if probe_supported:
+            self._finalize_deferred_teacher_binding(success=True)
+        elif probe_failed:
+            self._finalize_deferred_teacher_binding(success=False)
+
         self.trace.append(
             {
                 "step": int(record.before.step_index),
@@ -562,36 +601,115 @@ class ActionSpotlight:
                 "contradiction": bool(contradiction),
             }
         )
+        return {
+            "binding_action": bool(binding_action),
+            "probe_supported": bool(probe_supported),
+            "probe_failed": bool(probe_failed),
+            "pending_binder_before": bool(pending_before is not None),
+            "pending_binder_after": bool(self.pending_binder_probe is not None),
+        }
 
     def observe_teacher_action(self, teacher_action: ActionName, *, weight: float = 1.0) -> None:
         teacher_candidate = self._last_scored_candidates.get(teacher_action)
         if teacher_candidate is None or teacher_candidate.feature_vector is None:
             return
+        if _is_binding_action(teacher_action):
+            deferred = DeferredTeacherBinding(
+                teacher_action=teacher_action,
+                teacher_feature_vector=teacher_candidate.feature_vector.copy(),
+                weight=float(weight),
+            )
+            pending = self.pending_update
+            if pending is not None and pending.action != teacher_action:
+                chosen_candidate = self._last_scored_candidates.get(pending.action)
+                if chosen_candidate is not None and chosen_candidate.feature_vector is not None:
+                    deferred.chosen_feature_vector = chosen_candidate.feature_vector.copy()
+                    deferred.chosen_zero_weight = 0.5 * float(weight)
+                    deferred.contrast_feature_vector = chosen_candidate.feature_vector.copy()
+                    deferred.contrast_weight = float(weight)
+            else:
+                habit_best = self._habit_best_candidate(tuple(self._last_scored_candidates.values()))
+                if habit_best.action != teacher_action and habit_best.feature_vector is not None:
+                    deferred.contrast_feature_vector = habit_best.feature_vector.copy()
+                    deferred.contrast_weight = 0.5 * float(weight)
+            self.pending_teacher_binding = deferred
+            self.last_teacher_action = f"{teacher_action} [deferred]"
+            self.last_habit_loss = 0.0
+            return
         self.last_teacher_action = str(teacher_action)
-        losses: list[float] = [self.habit.update(teacher_candidate.feature_vector, 1.0, weight=weight)]
         pending = self.pending_update
+        chosen_feature_vector: np.ndarray | None = None
+        chosen_zero_weight = 0.0
+        contrast_feature_vector: np.ndarray | None = None
+        contrast_weight = 0.0
         if pending is not None and pending.action != teacher_action:
             chosen_candidate = self._last_scored_candidates.get(pending.action)
             if chosen_candidate is not None and chosen_candidate.feature_vector is not None:
-                losses.append(self.habit.update(chosen_candidate.feature_vector, 0.0, weight=0.5 * weight))
-                losses.append(
-                    self.habit.update_preference(
-                        teacher_candidate.feature_vector,
-                        chosen_candidate.feature_vector,
-                        weight=weight,
-                    )
-                )
+                chosen_feature_vector = chosen_candidate.feature_vector.copy()
+                chosen_zero_weight = 0.5 * float(weight)
+                contrast_feature_vector = chosen_candidate.feature_vector.copy()
+                contrast_weight = float(weight)
         else:
             habit_best = self._habit_best_candidate(tuple(self._last_scored_candidates.values()))
             if habit_best.action != teacher_action and habit_best.feature_vector is not None:
+                contrast_feature_vector = habit_best.feature_vector.copy()
+                contrast_weight = 0.5 * float(weight)
+        self._apply_teacher_feedback(
+            teacher_feature_vector=teacher_candidate.feature_vector.copy(),
+            weight=float(weight),
+            positive=True,
+            chosen_feature_vector=chosen_feature_vector,
+            chosen_zero_weight=chosen_zero_weight,
+            contrast_feature_vector=contrast_feature_vector,
+            contrast_weight=contrast_weight,
+        )
+
+    def _apply_teacher_feedback(
+        self,
+        *,
+        teacher_feature_vector: np.ndarray,
+        weight: float,
+        positive: bool,
+        chosen_feature_vector: np.ndarray | None = None,
+        chosen_zero_weight: float = 0.0,
+        contrast_feature_vector: np.ndarray | None = None,
+        contrast_weight: float = 0.0,
+    ) -> None:
+        label = 1.0 if positive else 0.0
+        losses: list[float] = [self.habit.update(teacher_feature_vector, label, weight=weight)]
+        if positive:
+            if chosen_feature_vector is not None and chosen_zero_weight > 0.0:
+                losses.append(self.habit.update(chosen_feature_vector, 0.0, weight=chosen_zero_weight))
+            if contrast_feature_vector is not None and contrast_weight > 0.0:
                 losses.append(
                     self.habit.update_preference(
-                        teacher_candidate.feature_vector,
-                        habit_best.feature_vector,
-                        weight=0.5 * weight,
+                        teacher_feature_vector,
+                        contrast_feature_vector,
+                        weight=contrast_weight,
                     )
                 )
         self.last_habit_loss = float(sum(losses) / max(len(losses), 1))
+
+    def _finalize_deferred_teacher_binding(self, *, success: bool) -> None:
+        deferred = self.pending_teacher_binding
+        if deferred is None:
+            return
+        self.pending_teacher_binding = None
+        self.last_teacher_action = (
+            str(deferred.teacher_action)
+            if success
+            else f"{deferred.teacher_action} [failed]"
+        )
+        applied_weight = float(deferred.weight if success else (0.35 * deferred.weight))
+        self._apply_teacher_feedback(
+            teacher_feature_vector=deferred.teacher_feature_vector,
+            weight=applied_weight,
+            positive=bool(success),
+            chosen_feature_vector=deferred.chosen_feature_vector if success else None,
+            chosen_zero_weight=deferred.chosen_zero_weight if success else 0.0,
+            contrast_feature_vector=deferred.contrast_feature_vector if success else None,
+            contrast_weight=deferred.contrast_weight if success else 0.0,
+        )
 
     def learn_from_transition(
         self,
@@ -617,13 +735,26 @@ class ActionSpotlight:
             memory=memory,
             language=language,
         )
-        target = float(progress + level_delta + (self.executive.gamma * bootstrap) - pending.habit_baseline)
+        reset_penalty = 0.0
+        if self._uses_reset_guard_schema() and is_reset_action(record.action):
+            terminal_failure = is_failure_terminal_game_state(observation_game_state(record.after))
+            if not terminal_failure and level_delta <= 0 and progress <= 1e-8:
+                reset_penalty = 0.35
+                if self.steps_since_progress <= self.config.reset_stall_threshold:
+                    reset_penalty += 0.45
+                if self.steps_since_reset < self.config.reset_cooldown_steps:
+                    reset_penalty += 0.55
+                if self.last_attempt_improvement > self.config.reset_positive_improvement_guard:
+                    reset_penalty += 0.35
+                reset_penalty += 0.12 * min(float(self._reset_over_budget()), 8.0)
+        target = float(progress + level_delta + (self.executive.gamma * bootstrap) - pending.habit_baseline - reset_penalty)
         self.last_executive_loss = float(self.executive.update(pending.feature_vector, target))
         self.last_executive_target = float(target)
         self.pending_update = None
 
     def diagnostics(self) -> dict[str, Any]:
         return {
+            "feature_schema_version": int(self.feature_schema_version),
             "active_intention": None if self.active_intention is None else self._intention_dict(self.active_intention),
             "pending_binder_probe": None
             if self.pending_binder_probe is None
@@ -656,6 +787,8 @@ class ActionSpotlight:
             "prior_binding_failure_total": int(sum(self.prior_binding_failure.values())),
             "probe_baseline_trials": {family: int(value) for family, value in self.probe_baseline_trials.items()},
             "steps_since_progress": int(self.steps_since_progress),
+            "session_reset_count": int(self.session_reset_count),
+            "steps_since_reset": int(self.steps_since_reset),
             "max_levels_completed": int(self.max_levels_completed),
             "adaptation_updates": int(self.adaptation.updates),
             "adaptation_last_loss": float(self.last_adaptation_loss),
@@ -676,6 +809,7 @@ class ActionSpotlight:
     def state_dict(self) -> dict[str, Any]:
         return {
             "config": self.config.__dict__,
+            "feature_schema_version": int(self.feature_schema_version),
             "executive": self.executive.state_dict(),
             "habit": self.habit.state_dict(),
             "adaptation": self.adaptation.state_dict(),
@@ -691,6 +825,11 @@ class ActionSpotlight:
         }
 
     def load_state_dict(self, state: Mapping[str, Any]) -> None:
+        self._clear_runtime_state()
+        try:
+            self.feature_schema_version = int(state.get("feature_schema_version", LEGACY_FEATURE_SCHEMA_VERSION))
+        except Exception:
+            self.feature_schema_version = LEGACY_FEATURE_SCHEMA_VERSION
         self.no_effect_counts.clear()
         self.no_effect_family_counts.clear()
         self.contradiction_counts.clear()
@@ -724,20 +863,38 @@ class ActionSpotlight:
         self.move37_candidates = int(state.get("move37_candidates", 0))
         self.move37_validated = int(state.get("move37_validated", 0))
 
-    def _candidate_actions(self, state: StructuredState, *, planner: Any, engine: Any) -> tuple[ActionName, ...]:
+    def _candidate_actions(
+        self,
+        state: StructuredState,
+        *,
+        planner: Any,
+        engine: Any,
+        memory: Any | None = None,
+        lang_tokens: tuple[str, ...] = (),
+    ) -> tuple[ActionName, ...]:
         candidates: Iterable[ActionName]
         if hasattr(planner, "candidate_actions"):
-            candidates = planner.candidate_actions(state, engine=engine)
+            if self._uses_extended_feature_schema():
+                try:
+                    candidates = planner.candidate_actions(state, engine=engine, memory=memory, language_tokens=lang_tokens)
+                except TypeError:
+                    candidates = planner.candidate_actions(state, engine=engine)
+            else:
+                candidates = planner.candidate_actions(state, engine=engine)
         else:
             candidates = tuple(getattr(state, "available_actions", ()) or ())
         deduped = tuple(dict.fromkeys(candidates))
-        return deduped[: self.config.max_candidates]
+        max_candidates = int(self.config.max_candidates)
+        if max_candidates > 0:
+            return deduped[:max_candidates]
+        return deduped
 
     def _score_candidates(
         self,
         state: StructuredState,
         candidates: tuple[ActionName, ...],
         *,
+        planner: Any,
         engine: Any,
         world_model: Any,
         memory: Any,
@@ -769,6 +926,7 @@ class ActionSpotlight:
             raw["change"][action] = hyp_score["expected_change"] + world["change_mean"]
             raw["uncertainty"][action] = world["total_uncertainty"]
             raw["memory"][action] = self._memory_bonus(memory, state, action, lang_tokens)
+            option_profile = self._option_profile(planner, memory, state, action, lang_tokens) if self._uses_extended_feature_schema() else {}
             raw["coverage"][action] = self._coverage_bonus(state, action)
             raw["binder"][action] = self._binder_bonus(action)
             raw["probe"][action] = self._post_binder_probe_bonus(action, state.step_index)
@@ -794,6 +952,17 @@ class ActionSpotlight:
                 "commitment_bonus": commitment,
                 "penalty": penalty,
             }
+            if self._uses_extended_feature_schema():
+                components.update(
+                    {
+                        "option_schema_bonus": _safe_float(option_profile.get("schema_bonus", 0.0)),
+                        "option_continuation": _safe_float(option_profile.get("continuation_depth", 0.0)),
+                        "option_efficiency": _safe_float(option_profile.get("efficiency", 0.0)),
+                        "action_cost": self._planner_action_cost(planner, action, option_profile),
+                        "budget_pressure": self._planner_budget_pressure(planner, state),
+                        "family_efficiency": self._planner_family_efficiency(planner, action, option_profile),
+                    }
+                )
             intent_kind = self._intent_kind(action, components)
             precomputed.append(
                 {
@@ -901,6 +1070,9 @@ class ActionSpotlight:
             "max_levels_completed": float(min(self.max_levels_completed, 8)) / 8.0,
             "last_attempt_improvement": float(max(min(self.last_attempt_improvement, 2.0), -2.0)) / 2.0,
             "avg_attempt_improvement": float(np.mean(self.attempt_improvements)) / 2.0 if self.attempt_improvements else 0.0,
+            "session_reset_count": float(min(self.session_reset_count, 16)) / 16.0,
+            "steps_since_reset": float(min(self.steps_since_reset, max(2 * self.config.reset_cooldown_steps, 1)))
+            / max(float(2 * self.config.reset_cooldown_steps), 1.0),
             "has_active_intention": float(active_intention is not None),
             "active_intention_confidence": 0.0 if active_intention is None else float(active_intention.confidence),
             "same_as_active_intention": float(active_intention is not None and active_intention.action == action),
@@ -951,7 +1123,44 @@ class ActionSpotlight:
             feature_map[f"raw::{key}"] = _safe_float(value)
         for key, value in norm_components.items():
             feature_map[f"norm::{key}"] = _safe_float(value)
+        if self._uses_reset_guard_schema():
+            feature_map["reset_over_budget"] = float(min(max(0, self.session_reset_count - self.config.reset_session_budget), 8)) / 8.0
+            feature_map["reset_under_cooldown"] = float(self.steps_since_reset < self.config.reset_cooldown_steps)
         return feature_map
+
+    def _uses_extended_feature_schema(self) -> bool:
+        return int(self.feature_schema_version) >= EXTENDED_FEATURE_SCHEMA_VERSION
+
+    def _uses_reset_guard_schema(self) -> bool:
+        return int(self.feature_schema_version) >= CURRENT_FEATURE_SCHEMA_VERSION
+
+    def _clear_runtime_state(self) -> None:
+        self._intention_counter = 0
+        self.active_intention = None
+        self.pending_binder_probe = None
+        self.pending_teacher_binding = None
+        self.pending_update = None
+        self._last_scored_candidates.clear()
+        self.steps_since_progress = 0
+        self.max_levels_completed = 0
+        self.last_surprise = 0.0
+        self.last_executive_target = 0.0
+        self.last_executive_loss = 0.0
+        self.last_habit_loss = 0.0
+        self.last_adaptation_loss = 0.0
+        self.last_attempt_improvement = 0.0
+        self.last_teacher_action = ""
+        self.last_move37_event = None
+        self._current_attempt_actions.clear()
+        self._current_attempt_level_key = None
+        self._current_attempt_reward = 0.0
+        self._current_attempt_steps = 0
+        self._previous_attempt_outcome.clear()
+        self.attempt_improvements.clear()
+        self.last_broadcast = None
+        self.trace.clear()
+        self.session_reset_count = 0
+        self.steps_since_reset = int(self.config.reset_cooldown_steps)
 
     def _estimate_state_value(
         self,
@@ -969,6 +1178,7 @@ class ActionSpotlight:
         scored = self._score_candidates(
             state,
             candidates,
+            planner=planner,
             engine=engine,
             world_model=world_model,
             memory=memory,
@@ -985,6 +1195,7 @@ class ActionSpotlight:
         *,
         success: bool,
         terminal_failure: bool,
+        ended_by_reset: bool = False,
     ) -> float:
         level_key = self._current_attempt_level_key or self._level_key(state)
         outcome = AttemptOutcome(
@@ -994,6 +1205,7 @@ class ActionSpotlight:
                 steps=self._current_attempt_steps,
                 success=success,
                 terminal_failure=terminal_failure,
+                ended_by_reset=ended_by_reset,
             ),
             reward=float(self._current_attempt_reward),
             steps=int(self._current_attempt_steps),
@@ -1043,6 +1255,7 @@ class ActionSpotlight:
         steps: int,
         success: bool,
         terminal_failure: bool,
+        ended_by_reset: bool = False,
     ) -> float:
         score = float(reward)
         score -= 0.01 * float(steps)
@@ -1050,6 +1263,11 @@ class ActionSpotlight:
             score += 2.0
         if terminal_failure:
             score -= 0.25
+        if ended_by_reset and self._uses_reset_guard_schema():
+            score -= 0.15
+            if steps < self.config.reset_cooldown_steps:
+                score -= 0.25 * (1.0 - (float(steps) / max(float(self.config.reset_cooldown_steps), 1.0)))
+            score -= 0.05 * min(float(max(0, self.session_reset_count - self.config.reset_session_budget) + 1), 8.0)
         return score
 
     def _can_continue_after_terminal(self, state: StructuredState) -> bool:
@@ -1093,6 +1311,58 @@ class ActionSpotlight:
         except Exception:
             return 0.0
 
+    def _option_profile(
+        self,
+        planner: Any,
+        memory: Any,
+        state: StructuredState,
+        action: ActionName,
+        lang_tokens: tuple[str, ...],
+    ) -> dict[str, float]:
+        profile_fn = getattr(memory, "action_option_profile", None)
+        if callable(profile_fn):
+            try:
+                profile = profile_fn(state, action, lang_tokens)
+                if isinstance(profile, Mapping):
+                    return {str(key): _safe_float(value, default=0.0) for key, value in profile.items()}
+            except Exception:
+                pass
+        return {
+            "schema_bonus": 0.0,
+            "relative_cost": 1.0,
+            "efficiency": 0.0,
+            "support": 0.0,
+            "contradiction": 0.0,
+            "continuation_depth": 0.0,
+        }
+
+    def _planner_action_cost(self, planner: Any, action: ActionName, option_profile: Mapping[str, float]) -> float:
+        fn = getattr(planner, "_action_cost_estimate", None)
+        if callable(fn):
+            try:
+                return _safe_float(fn(action, option_profile=dict(option_profile)))
+            except Exception:
+                pass
+        return float(max(option_profile.get("relative_cost", 1.0), 1.0))
+
+    def _planner_family_efficiency(self, planner: Any, action: ActionName, option_profile: Mapping[str, float]) -> float:
+        fn = getattr(planner, "_action_efficiency_prior", None)
+        if callable(fn):
+            try:
+                return _safe_float(fn(action, option_profile=dict(option_profile)))
+            except Exception:
+                pass
+        return _safe_float(option_profile.get("efficiency", 0.0))
+
+    def _planner_budget_pressure(self, planner: Any, state: StructuredState) -> float:
+        fn = getattr(planner, "_budget_pressure", None)
+        if callable(fn):
+            try:
+                return _safe_float(fn(state))
+            except Exception:
+                pass
+        return 0.0
+
     def _coverage_bonus(self, state: StructuredState, action: ActionName) -> float:
         exact_visits = self.state_action_visits[(state.exact_fingerprint, action)]
         family_visits = self.abstract_action_visits[(state.abstract_fingerprint, _family(action))]
@@ -1126,9 +1396,50 @@ class ActionSpotlight:
         urgency = 1.0 + 0.15 * max(0, self.config.selector_probe_horizon - ttl_left)
         return float(urgency * (0.25 + (0.85 * uncertainty) + (0.35 * empirical)))
 
+    def _reset_over_budget(self) -> int:
+        return max(0, int(self.session_reset_count) - int(self.config.reset_session_budget))
+
+    def _allow_nonterminal_reset(self, state: StructuredState) -> bool:
+        if self.pending_binder_probe is not None:
+            return False
+        if self.steps_since_reset < self.config.reset_cooldown_steps:
+            return False
+        if self.steps_since_progress <= self.config.reset_stall_threshold:
+            return False
+        if self.last_attempt_improvement > self.config.reset_positive_improvement_guard:
+            return False
+        if self._reset_over_budget() > 0 and self.last_attempt_improvement >= 0.0:
+            return False
+        return not is_failure_terminal_game_state(observation_game_state(state))
+
+    def _reset_choice_allowed(self, state: StructuredState, candidate: SpotlightCandidate) -> bool:
+        if not is_reset_action(candidate.action):
+            return True
+        if is_failure_terminal_game_state(observation_game_state(state)):
+            return True
+        if candidate.components.get("reset_bonus", 0.0) <= 0.0:
+            return False
+        return self._allow_nonterminal_reset(state)
+
     def _reset_bonus(self, state: StructuredState, action: ActionName) -> float:
         if not is_reset_action(action):
             return 0.0
+        if self._uses_reset_guard_schema():
+            game_state = observation_game_state(state)
+            if is_failure_terminal_game_state(game_state):
+                bonus = 2.25 - (0.20 * min(float(self._reset_over_budget()), 6.0))
+                if self.steps_since_reset < self.config.reset_cooldown_steps:
+                    cooldown_frac = 1.0 - (float(self.steps_since_reset) / max(float(self.config.reset_cooldown_steps), 1.0))
+                    bonus -= 0.75 * max(0.0, cooldown_frac)
+                return float(max(0.5, bonus))
+            if not self._allow_nonterminal_reset(state):
+                return 0.0
+            stall_excess = max(0, self.steps_since_progress - self.config.reset_stall_threshold)
+            bonus = min(1.25, stall_excess / 24.0)
+            bonus /= 1.0 + (0.35 * min(float(self.session_reset_count), 8.0))
+            if self.last_attempt_improvement < -0.05:
+                bonus += min(0.45, -self.last_attempt_improvement)
+            return float(max(0.0, bonus))
         game_state = observation_game_state(state)
         if is_failure_terminal_game_state(game_state):
             return 4.0
@@ -1139,6 +1450,25 @@ class ActionSpotlight:
 
     def _penalty(self, state: StructuredState, action: ActionName) -> float:
         if is_reset_action(action):
+            if self._uses_reset_guard_schema():
+                terminal_failure = is_failure_terminal_game_state(observation_game_state(state))
+                penalty = 0.35 if terminal_failure else 3.75
+                if self.pending_binder_probe is not None:
+                    penalty += 2.0
+                if self.steps_since_reset < self.config.reset_cooldown_steps:
+                    cooldown_frac = 1.0 - (float(self.steps_since_reset) / max(float(self.config.reset_cooldown_steps), 1.0))
+                    penalty += 2.5 * max(0.0, cooldown_frac)
+                if not terminal_failure and self.steps_since_progress <= self.config.reset_stall_threshold:
+                    penalty += 2.0
+                if self.last_attempt_improvement > self.config.reset_positive_improvement_guard:
+                    penalty += 1.5 * min(
+                        self.last_attempt_improvement / max(self.config.reset_positive_improvement_guard, 1e-6),
+                        2.0,
+                    )
+                penalty += self.config.reset_retry_penalty * min(float(self._reset_over_budget()), 8.0)
+                if not terminal_failure and not self._allow_nonterminal_reset(state):
+                    penalty += 1.75
+                return float(penalty)
             if is_failure_terminal_game_state(observation_game_state(state)):
                 return 0.0
             if self.steps_since_progress > self.config.reset_stall_threshold:
@@ -1194,15 +1524,72 @@ class ActionSpotlight:
             ),
         )
 
-    def _default_choice(self, scored: list[SpotlightCandidate]) -> SpotlightCandidate:
+    def _default_choice(self, state: StructuredState, scored: list[SpotlightCandidate]) -> SpotlightCandidate:
         best_combined = scored[0]
         habit_best = self._habit_best_candidate(scored)
         if best_combined.action == habit_best.action:
-            return best_combined
-        override_margin = best_combined.executive_advantage - habit_best.executive_advantage
-        if override_margin >= self.config.override_margin and best_combined.score > habit_best.score:
-            return best_combined
-        return habit_best
+            choice = best_combined
+        else:
+            override_margin = best_combined.executive_advantage - habit_best.executive_advantage
+            if override_margin >= self.config.override_margin and best_combined.score > habit_best.score:
+                choice = best_combined
+            else:
+                choice = habit_best
+        if self._uses_reset_guard_schema() and is_reset_action(choice.action) and not self._reset_choice_allowed(state, choice):
+            for candidate in scored:
+                if not is_reset_action(candidate.action):
+                    choice = candidate
+                    break
+        diagnostic_binding = self._stalled_binding_probe_choice(state, scored)
+        if diagnostic_binding is not None and not is_reset_action(choice.action):
+            return diagnostic_binding
+        return choice
+
+    def _stalled_binding_probe_choice(
+        self,
+        state: StructuredState,
+        scored: list[SpotlightCandidate],
+    ) -> SpotlightCandidate | None:
+        if self.pending_binder_probe is not None:
+            return None
+        if is_failure_terminal_game_state(observation_game_state(state)):
+            return None
+        if self.steps_since_progress < int(self.config.diagnostic_binding_stall_threshold):
+            return None
+        candidates: list[SpotlightCandidate] = []
+        for candidate in scored:
+            if is_reset_action(candidate.action) or not _is_binding_action(candidate.action):
+                continue
+            exact_key = (state.exact_fingerprint, candidate.action)
+            if self.state_action_visits[exact_key] > 0:
+                continue
+            fam = _family(candidate.action)
+            known_failures = sum(value for (binder, _probe), value in self.binding_failure.items() if binder == fam)
+            known_failures += 0.35 * sum(value for (binder, _probe), value in self.prior_binding_failure.items() if binder == fam)
+            known_successes = sum(value for (binder, _probe), value in self.binding_success.items() if binder == fam)
+            known_successes += 0.35 * sum(value for (binder, _probe), value in self.prior_binding_success.items() if binder == fam)
+            if known_failures > known_successes + 2.0:
+                continue
+            candidates.append(candidate)
+        if not candidates:
+            return None
+        chosen = max(
+            candidates,
+            key=lambda candidate: (
+                float(candidate.target is not None),
+                float(candidate.components.get("coverage", 0.0)),
+                float(candidate.executive_uncertainty),
+                -float(candidate.components.get("penalty", 0.0)),
+                float(candidate.score),
+            ),
+        )
+        chosen.components["diagnostic_binding_probe"] = 1.0
+        chosen.components["stalled_steps"] = float(self.steps_since_progress)
+        chosen.rationale = (
+            "stalled without progress; test an untried latent binding or interaction affordance",
+        ) + tuple(chosen.rationale)
+        chosen.intent_kind = "diagnostic_binding_probe"
+        return chosen
 
     def _is_move37_candidate(self, chosen: SpotlightCandidate, habit_best: SpotlightCandidate) -> bool:
         if chosen.action == habit_best.action:
@@ -1214,11 +1601,11 @@ class ActionSpotlight:
         return bool(chosen.executive_advantage >= habit_best.executive_advantage + self.config.override_margin)
 
     def _select_with_commitment(self, state: StructuredState, scored: list[SpotlightCandidate]) -> SpotlightCandidate:
-        best = self._default_choice(scored)
         if is_failure_terminal_game_state(observation_game_state(state)):
             for candidate in scored:
                 if is_reset_action(candidate.action):
                     return candidate
+        best = self._default_choice(state, scored)
         intention = self.active_intention
         if intention is None or state.step_index > intention.expires_step:
             return best
@@ -1402,20 +1789,20 @@ class ActionSpotlight:
         pending_probe: PendingBinderProbe | None,
         visible_effect: bool,
         progress: float,
-    ) -> bool:
+    ) -> tuple[bool, bool]:
         probe = pending_probe
         if probe is None:
-            return False
+            return False, False
         if _is_binding_action(record.action) and record.action == probe.binder_action:
-            return False
+            return False, False
         if record.before.step_index > probe.expires_step:
             self.binding_failure[(_family(probe.binder_action), "expired")] += 1
             self.prior_binding_failure[(_family(probe.binder_action), "expired")] += 1
             if self.pending_binder_probe is probe:
                 self.pending_binder_probe = None
-            return False
+            return False, True
         if not _is_probe_action(record.action):
-            return False
+            return False, False
         probe.probes_taken += 1
         key = (_family(probe.binder_action), _family(record.action))
         supported = self._probe_supports_binder(
@@ -1429,14 +1816,16 @@ class ActionSpotlight:
             self.prior_binding_success[key] += 1
             if self.pending_binder_probe is probe:
                 self.pending_binder_probe = None
-            return True
+            return True, False
         if probe.probes_taken >= self.config.selector_null_grace:
             self.binding_failure[key] += 1
             self.prior_binding_failure[key] += 1
-        if probe.probes_taken >= self.config.selector_probe_horizon:
             if self.pending_binder_probe is probe:
                 self.pending_binder_probe = None
-        return False
+            return False, True
+        if probe.probes_taken >= self.config.selector_probe_horizon and self.pending_binder_probe is probe:
+            self.pending_binder_probe = None
+        return False, False
 
     def _probe_supports_binder(
         self,
@@ -1451,13 +1840,18 @@ class ActionSpotlight:
         action_set_changed = set(record.before.available_actions) != set(record.after.available_actions)
         if action_set_changed or record.delta.appeared or record.delta.disappeared:
             return True
+        if not visible_effect:
+            return False
         probe_family = _family(record.action)
         baseline_trials = self.probe_baseline_trials[probe_family]
-        if baseline_trials < 2:
+        if baseline_trials < 3:
             return False
         baseline_mean = self._probe_baseline_mean(probe_family)
         effect_score = self._probe_effect_score(record, progress=progress, visible_effect=visible_effect)
-        return bool(effect_score > (baseline_mean + 0.18))
+        changed_fraction = _safe_float(getattr(record.delta, "changed_fraction", 0.0))
+        if changed_fraction < 0.12:
+            return False
+        return bool(effect_score > (baseline_mean + 0.28))
 
     def _update_probe_baseline(self, record: TransitionRecord, *, progress: float, visible_effect: bool) -> None:
         family = _family(record.action)

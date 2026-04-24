@@ -176,7 +176,7 @@ python -m arcagi.training.goal_scientist_public \
   --behavior-policies hybrid,diagnostic,graph,learned,random \
   --hindsight-gamma 0.92 \
   --sequence-horizon 14 \
-  --max-coordinate-probes 18
+  --max-coordinate-probes 0
 ```
 
 Evaluate with the current harness, using the existing hybrid path and the new checkpoint:

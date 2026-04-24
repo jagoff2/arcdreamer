@@ -25,6 +25,25 @@ Non-negotiable design constraints:
 9. ABOVE ALL ELSE FAVOR FAST ITERATION IN ALL DESIGN CHOICES. NEED TO LEARN FAST, ITERATE FAST, ALL ON THIS PC.
 10. Use TASKS.MD to track your progress. 
 
+Hard runtime prohibitions added after failed implementation attempts:
+11. Do not use hand-coded search patterns as the ARC-facing solver. This forbids canned action sequences, fixed movement sweeps, counted movement probes, scripted reset/replay loops, action-pattern enumerators, and any variant that solves by trying a manually designed traversal schedule.
+12. Do not use graph search, shortest-path frontier expansion, BFS/DFS-style replay, or coverage search as the primary ARC-facing controller. A graph may exist as memory, logging, retrieval substrate, or a baseline/ablation, but it must not be the mechanism that claims success for the learned agent.
+13. Do not disguise forbidden search as "generic." If the behavior is a hand-authored policy over action patterns, resets, replay paths, or frontier enumeration, it is forbidden even when it is not keyed by game id.
+14. Do not claim ARC success from a forbidden mechanism. Any run that depends on scripted sweeps, graph-search control, replay-frontier control, or per-game/action-pattern code must be labeled invalid for the core goal.
+15. Do not add per-game, benchmark-specific, or environment-source-derived runtime behavior. The runtime agent must treat ARC as a black-box interaction surface.
+16. Do not hide legal ARC action parameters behind default candidate caps before training. Dense click/action parameters must be exposed to the learner in the ARC-facing train/eval path unless a run is explicitly labeled smoke/debug.
+
+Required online-learning prerequisites for the ARC-facing learned agent:
+1. The agent must maintain a live belief state over objects, relations, latent variables, goals, action meanings, and uncertainty, updated from its own observations and transitions.
+2. The agent must have an agent-owned learning loop: prediction -> action -> observation -> error/surprise -> belief/model update -> changed future action choice in the same session.
+3. Action selection must be driven by learned or online-updated value, uncertainty, diagnostic utility, and world-model predictions, not by fixed action-pattern enumeration.
+4. Internal questions must be generated from model uncertainty or competing hypotheses and converted into diagnostic actions by learned or evidence-updated mechanisms.
+5. Counterfactual/imagination is required, but it must use learned dynamics or learned hypothesis models rooted in observed evidence, not scripted search trees.
+6. Explicit graph/state memory is allowed only as substrate: it can store experience, support retrieval, and provide baselines/ablations, but it cannot be the solver for the full hybrid learned agent.
+7. A minimally acceptable agent must show small-data adaptation: one or a few observed transitions must measurably change beliefs and action preferences inside the same episode/session.
+8. The repo must include tests/ablations that separate learned online adaptation from graph search, scripted policies, static heuristics, and frozen checkpoint behavior.
+9. The agent must train/adapt on the full currently legal action surface before learned pruning, learned abstraction, or learned confidence can justify ignoring actions.
+
 What to build:
 A hybrid ARC-AGI-3 agent with these components:
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 from arcagi.core.progress_signals import (
     transition_policy_supervision,
     transition_usefulness_target,
+    visible_online_policy_supervision,
+    visible_online_usefulness_target,
 )
 
 
@@ -76,3 +78,86 @@ def test_correct_switch_gets_strong_positive_supervision() -> None:
 
     assert supervision.target == 1.0
     assert supervision.weight >= 1.5
+
+
+def test_visible_online_selector_click_with_hidden_event_stripped_is_diagnostic_positive() -> None:
+    usefulness = visible_online_usefulness_target(
+        "click:2:3",
+        0.0,
+        0.089,
+        prediction_error=0.2,
+        predicted_uncertainty=0.05,
+    )
+    supervision = visible_online_policy_supervision(
+        "click:2:3",
+        0.0,
+        0.089,
+        prediction_error=0.2,
+        predicted_uncertainty=0.05,
+    )
+
+    assert usefulness > 0.0
+    assert supervision.target > 0.0
+    assert supervision.weight > 0.0
+
+
+def test_visible_online_small_move_delta_is_not_objective_progress() -> None:
+    usefulness = visible_online_usefulness_target(
+        "right",
+        0.0,
+        0.04,
+        prediction_error=0.05,
+        predicted_uncertainty=0.03,
+    )
+    supervision = visible_online_policy_supervision(
+        "right",
+        0.0,
+        0.04,
+        prediction_error=0.05,
+        predicted_uncertainty=0.03,
+    )
+
+    assert usefulness <= 0.0
+    assert supervision.target == 0.0
+    assert supervision.sibling_move_target == 0.0
+
+
+def test_visible_online_small_interaction_delta_is_diagnostic_positive() -> None:
+    usefulness = visible_online_usefulness_target(
+        "interact_right",
+        0.0,
+        0.04,
+        prediction_error=0.05,
+        predicted_uncertainty=0.03,
+    )
+    supervision = visible_online_policy_supervision(
+        "interact_right",
+        0.0,
+        0.04,
+        prediction_error=0.05,
+        predicted_uncertainty=0.03,
+    )
+
+    assert usefulness > 0.0
+    assert supervision.target > 0.0
+
+
+def test_visible_online_reset_is_negative_even_when_display_changes() -> None:
+    usefulness = visible_online_usefulness_target(
+        "0",
+        0.0,
+        0.8,
+        prediction_error=0.9,
+        predicted_uncertainty=0.1,
+    )
+    supervision = visible_online_policy_supervision(
+        "0",
+        0.0,
+        0.8,
+        prediction_error=0.9,
+        predicted_uncertainty=0.1,
+    )
+
+    assert usefulness < 0.0
+    assert supervision.target == 0.0
+    assert supervision.weight > 0.0

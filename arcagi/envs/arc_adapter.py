@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+import os
 from typing import Any
 
 import numpy as np
@@ -106,11 +107,16 @@ class ArcToolkitEnv(BaseEnvironment):
         display = _extract_display_grid(observation)
         self._camera_meta = _camera_metadata(self.env) or _infer_camera_metadata_from_display(display)
         grid = _coerce_grid(display, self._camera_meta)
+        if grid.size <= 0:
+            grid = np.zeros((1, 1), dtype=np.int64)
         self._last_base_actions = self._discover_actions(observation)
-        self._last_actions = _expand_actions(
-            self._last_base_actions,
-            grid,
-            self._camera_meta,
+        self._last_actions = _with_terminal_reset(
+            _expand_actions(
+                self._last_base_actions,
+                grid,
+                self._camera_meta,
+            ),
+            observation,
         )
         self._last_levels_completed = int(getattr(observation, "levels_completed", 0) or 0)
         self._last_grid = grid
@@ -176,11 +182,16 @@ class ArcToolkitEnv(BaseEnvironment):
         display = _extract_display_grid(observation)
         self._camera_meta = _camera_metadata(self.env) or _infer_camera_metadata_from_display(display)
         grid = _coerce_grid(display, self._camera_meta)
+        if grid.size <= 0:
+            grid = self._last_grid.copy() if self._last_grid.size > 0 else np.zeros((1, 1), dtype=np.int64)
         self._last_base_actions = self._discover_actions(observation)
-        self._last_actions = _expand_actions(
-            self._last_base_actions,
-            grid,
-            self._camera_meta,
+        self._last_actions = _with_terminal_reset(
+            _expand_actions(
+                self._last_base_actions,
+                grid,
+                self._camera_meta,
+            ),
+            observation,
         )
         self._last_grid = grid
         step_index = self._step_index
@@ -414,18 +425,65 @@ def _expand_actions(
     camera_meta: dict[str, int] | None,
 ) -> tuple[ActionName, ...]:
     actions = [action for action in base_actions if action != "6"]
-    if GameAction is not None and hasattr(GameAction, "RESET") and "0" not in actions:
-        actions.insert(0, "0")
-    if "6" in base_actions and camera_meta is not None:
-        click_actions = _click_actions_for_grid(grid, camera_meta)
+    if "6" in base_actions:
+        if camera_meta is None:
+            raise RuntimeError(
+                "ARC click action 6 is legal but camera metadata is unavailable, so dense click actions cannot be exposed."
+            )
+        legacy_dense_setting = os.environ.get("ARCAGI_DENSE_CLICKS")
+        if legacy_dense_setting is not None and str(legacy_dense_setting).strip().lower() in {"0", "false", "no", "off"}:
+            raise RuntimeError(
+                "ARCAGI_DENSE_CLICKS=0 silently hides legal ARC click actions. "
+                "Use ARCAGI_SPARSE_CLICKS_BASELINE=1 only for explicitly labeled smoke/debug runs."
+            )
+        sparse_clicks = str(os.environ.get("ARCAGI_SPARSE_CLICKS_BASELINE", "")).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        dense_clicks = not sparse_clicks
+        click_actions = _click_actions_for_grid(grid, camera_meta, dense=dense_clicks)
         if click_actions:
             actions.extend(click_actions)
         else:
-            actions.append("6")
+            raise RuntimeError("ARC click action 6 is legal but no dense click actions could be generated.")
     return tuple(dict.fromkeys(actions))
 
 
-def _click_actions_for_grid(grid: np.ndarray, camera_meta: dict[str, int], max_candidates: int = 24) -> list[ActionName]:
+def _with_terminal_reset(actions: tuple[ActionName, ...], observation: Any) -> tuple[ActionName, ...]:
+    if "0" in actions:
+        return actions
+    if GameAction is None or not hasattr(GameAction, "RESET"):
+        return actions
+    if not _is_game_over_observation(observation):
+        return actions
+    return ("0", *actions)
+
+
+def _is_game_over_observation(observation: Any) -> bool:
+    state = getattr(observation, "state", "")
+    value = str(getattr(state, "value", state) or "")
+    return value.endswith("GAME_OVER")
+
+
+def _click_actions_for_grid(
+    grid: np.ndarray,
+    camera_meta: dict[str, int],
+    max_candidates: int | None = None,
+    *,
+    dense: bool = False,
+) -> list[ActionName]:
+    if grid.ndim != 2 or grid.size <= 0:
+        return []
+    if dense and (max_candidates is None or int(max_candidates) <= 0):
+        actions: list[ActionName] = []
+        height, width = grid.shape
+        for grid_y in range(height):
+            for grid_x in range(width):
+                display_x, display_y = _grid_cell_to_display(grid_x, grid_y, camera_meta)
+                actions.append(f"click:{display_x}:{display_y}")
+        return actions
     representatives = _component_representatives(grid)
     actions: list[ActionName] = []
     for _, _, grid_y, grid_x in _rank_component_representatives(representatives, grid.shape, max_candidates=max_candidates):
@@ -435,7 +493,7 @@ def _click_actions_for_grid(grid: np.ndarray, camera_meta: dict[str, int], max_c
 
 
 def _component_representatives(grid: np.ndarray) -> list[tuple[int, int, int, int]]:
-    if grid.ndim != 2:
+    if grid.ndim != 2 or grid.size <= 0:
         return []
     background = int(np.bincount(grid.flatten()).argmax())
     visited = np.zeros_like(grid, dtype=bool)
@@ -474,8 +532,11 @@ def _component_representatives(grid: np.ndarray) -> list[tuple[int, int, int, in
 def _rank_component_representatives(
     representatives: list[tuple[int, int, int, int]],
     grid_shape: tuple[int, int],
-    max_candidates: int,
+    max_candidates: int | None,
 ) -> list[tuple[int, int, int, int]]:
+    if max_candidates is None or int(max_candidates) <= 0:
+        return sorted(representatives, key=lambda item: (-item[1], item[0], item[2], item[3]))
+    max_candidates = int(max_candidates)
     if len(representatives) <= max_candidates:
         return sorted(representatives, key=lambda item: (-item[1], item[0], item[2], item[3]))
     height, width = grid_shape
@@ -501,8 +562,8 @@ def _rank_component_representatives(
 
 
 def _grid_cell_to_display(grid_x: int, grid_y: int, camera_meta: dict[str, int]) -> tuple[int, int]:
-    display_x = int(camera_meta["pad_x"] + ((grid_x - camera_meta["x"]) * camera_meta["scale"]) + (camera_meta["scale"] // 2))
-    display_y = int(camera_meta["pad_y"] + ((grid_y - camera_meta["y"]) * camera_meta["scale"]) + (camera_meta["scale"] // 2))
+    display_x = int(camera_meta["pad_x"] + (grid_x * camera_meta["scale"]) + (camera_meta["scale"] // 2))
+    display_y = int(camera_meta["pad_y"] + (grid_y * camera_meta["scale"]) + (camera_meta["scale"] // 2))
     return display_x, display_y
 
 
@@ -585,6 +646,9 @@ def _arc_interface_inventory_flags(
     if camera_meta is not None:
         inventory["interface_camera_width"] = str(int(camera_meta["width"]))
         inventory["interface_camera_height"] = str(int(camera_meta["height"]))
+        inventory["interface_display_scale"] = str(int(camera_meta["scale"]))
+        inventory["interface_display_pad_x"] = str(int(camera_meta["pad_x"]))
+        inventory["interface_display_pad_y"] = str(int(camera_meta["pad_y"]))
     flags: dict[str, str] = {
         "interface_has_click": "1" if counts["click"] > 0 else "0",
         "interface_has_select": "1" if counts["select"] > 0 else "0",
@@ -611,6 +675,7 @@ def _arc_cell_tags(
     selector_count = sum(
         1 for action in affordances if build_action_schema(action, context).action_type in {"click", "select"}
     )
+    background = int(np.bincount(np.asarray(grid).astype(np.int64).reshape(-1)).argmax())
     tags_by_cell: dict[tuple[int, int], set[str]] = {}
     for action in affordances:
         schema = build_action_schema(action, context)
@@ -624,6 +689,8 @@ def _arc_cell_tags(
             continue
         grid_y, grid_x = grid_cell
         if grid_y < 0 or grid_x < 0 or grid_y >= height or grid_x >= width:
+            continue
+        if int(grid[grid_y, grid_x]) == background:
             continue
         tags = tags_by_cell.setdefault((grid_y, grid_x), set())
         tags.add("clickable")
@@ -645,10 +712,8 @@ def _display_to_grid_cell(
         return None
     pad_x = int(camera_meta.get("pad_x", 0) or 0)
     pad_y = int(camera_meta.get("pad_y", 0) or 0)
-    origin_x = int(camera_meta.get("x", 0) or 0)
-    origin_y = int(camera_meta.get("y", 0) or 0)
-    grid_x = int((display_x - pad_x) // scale) + origin_x
-    grid_y = int((display_y - pad_y) // scale) + origin_y
+    grid_x = int((display_x - pad_x) // scale)
+    grid_y = int((display_y - pad_y) // scale)
     return (grid_y, grid_x)
 
 

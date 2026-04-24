@@ -8,6 +8,7 @@ from typing import Iterable
 
 import numpy as np
 
+from .effects import state_numeric_channels, transition_numeric_deltas
 from .hypotheses import HypothesisEngine
 from .language import GroundedLanguage
 from .memory import EpisodicMemory
@@ -41,10 +42,14 @@ class PlannerConfig:
     change_weight: float = 0.45
     uncertainty_weight: float = 0.35
     memory_weight: float = 0.75
+    mechanic_weight: float = 0.90
+    option_weight: float = 0.75
+    efficiency_weight: float = 0.65
+    cost_weight: float = 0.50
     spatial_goal_weight: float = 1.15
     navigation_weight: float = 2.10
     repeat_penalty: float = 0.55
-    max_candidates: int = 96
+    max_candidates: int = 0
     random_tie_noise: float = 1e-4
 
 
@@ -63,6 +68,14 @@ class ScientistPlanner:
         self.nonproductive_colors: dict[int, int] = defaultdict(int)
         self.productive_colors: dict[int, int] = defaultdict(int)
         self.pending_interactions = 0
+        self.family_cost_sum: dict[str, float] = defaultdict(float)
+        self.family_cost_count: dict[str, int] = defaultdict(int)
+        self.family_effect_sum: dict[str, float] = defaultdict(float)
+        self.family_effect_count: dict[str, int] = defaultdict(int)
+        self.channel_min: dict[str, float] = {}
+        self.channel_max: dict[str, float] = {}
+        self.channel_spend_sum: dict[str, float] = defaultdict(float)
+        self.channel_spend_count: dict[str, int] = defaultdict(int)
 
     def reset_episode(self) -> None:
         self.state_action_visits.clear()
@@ -76,6 +89,14 @@ class ScientistPlanner:
         self.nonproductive_colors.clear()
         self.productive_colors.clear()
         self.pending_interactions = 0
+        self.family_cost_sum.clear()
+        self.family_cost_count.clear()
+        self.family_effect_sum.clear()
+        self.family_effect_count.clear()
+        self.channel_min.clear()
+        self.channel_max.clear()
+        self.channel_spend_sum.clear()
+        self.channel_spend_count.clear()
 
     def reset_level(self) -> None:
         self.state_action_visits.clear()
@@ -104,6 +125,14 @@ class ScientistPlanner:
             return
         if engine is not None:
             self._update_contact_statistics(record, engine)
+        fam = action_family(record.action)
+        observed_effect = self._observed_effect_value(record)
+        observed_cost = self._observed_action_cost(record, observed_effect=observed_effect)
+        self.family_cost_sum[fam] += float(observed_cost)
+        self.family_cost_count[fam] += 1
+        self.family_effect_sum[fam] += float(observed_effect)
+        self.family_effect_count[fam] += 1
+        self._update_numeric_channel_stats(record)
         key = (record.before.exact_fingerprint, record.action)
         if changed:
             self.ineffective_actions.pop(key, None)
@@ -131,7 +160,8 @@ class ScientistPlanner:
         memory: EpisodicMemory,
         language: GroundedLanguage,
     ) -> ActionDecision:
-        candidates = self.candidate_actions(state, engine=engine)
+        lang_tokens = language.memory_tokens(state, engine)
+        candidates = self.candidate_actions(state, engine=engine, memory=memory, language_tokens=lang_tokens)
         if not candidates:
             raise RuntimeError("No legal actions are available for ScientistPlanner")
 
@@ -161,17 +191,21 @@ class ScientistPlanner:
                         chosen_reason=f"terminal state {game_state} requires reset to continue the environment",
                     )
 
-        lang_tokens = language.memory_tokens(state, engine)
         navigation_action = self._navigation_next_action(state, engine, candidates)
         scored: list[tuple[float, ActionName, dict[str, float], tuple[str, ...]]] = []
+        budget_pressure = self._budget_pressure(state)
         for action in candidates:
             hyp_score = engine.score_action(state, action)
             world = world_model.predict(state, action)
             novelty = self._novelty(state, action)
             memory_bonus = memory.action_memory_bonus(state, action, lang_tokens)
+            option_profile = self._option_profile(memory, state, action, lang_tokens)
+            mechanic_goal = self._mechanic_goal_value(state, action, engine)
             repeat = self._repeat_penalty(state, action)
             spatial_goal = self._spatial_goal_value(state, action, engine)
             navigation_goal = 1.0 if navigation_action == action else 0.0
+            action_cost = self._action_cost_estimate(action, option_profile=option_profile)
+            efficiency = self._action_efficiency_prior(action, option_profile=option_profile)
             components = {
                 "expected_reward": hyp_score.expected_reward + world.reward_mean,
                 "information_gain": hyp_score.information_gain,
@@ -179,6 +213,13 @@ class ScientistPlanner:
                 "expected_change": hyp_score.expected_change + world.change_mean,
                 "world_uncertainty": world.total_uncertainty,
                 "memory_bonus": memory_bonus,
+                "option_schema_bonus": option_profile["schema_bonus"],
+                "option_continuation": option_profile["continuation_depth"],
+                "option_efficiency": option_profile["efficiency"],
+                "action_cost": action_cost,
+                "budget_pressure": budget_pressure,
+                "family_efficiency": efficiency,
+                "mechanic_goal": mechanic_goal,
                 "spatial_goal": spatial_goal,
                 "navigation_goal": navigation_goal,
                 "risk": hyp_score.risk,
@@ -192,8 +233,12 @@ class ScientistPlanner:
                 + self.config.change_weight * components["expected_change"]
                 + self.config.uncertainty_weight * components["world_uncertainty"]
                 + self.config.memory_weight * components["memory_bonus"]
+                + self.config.option_weight * (components["option_schema_bonus"] + (0.25 * components["option_continuation"]))
+                + self.config.efficiency_weight * components["family_efficiency"]
+                + self.config.mechanic_weight * components["mechanic_goal"]
                 + self.config.spatial_goal_weight * components["spatial_goal"]
                 + self.config.navigation_weight * components["navigation_goal"]
+                - self.config.cost_weight * components["action_cost"] * components["budget_pressure"]
                 - components["risk"]
                 - repeat
             )
@@ -219,34 +264,46 @@ class ScientistPlanner:
             chosen_reason=reason,
         )
 
-    def candidate_actions(self, state: StructuredState, *, engine: HypothesisEngine) -> tuple[ActionName, ...]:
+    def candidate_actions(
+        self,
+        state: StructuredState,
+        *,
+        engine: HypothesisEngine,
+        memory: EpisodicMemory | None = None,
+        language_tokens: Iterable[str] = (),
+    ) -> tuple[ActionName, ...]:
         legal = tuple(state.available_actions)
         if not legal:
             legal = ("up", "down", "left", "right", "interact", "click")
         candidates: list[ActionName] = list(legal)
         candidates.extend(engine.diagnostic_actions(state, legal, limit=48))
+        if memory is not None:
+            legal_families = {action_family(action) for action in legal}
+            for option in memory.retrieve_options(state, language_tokens, k=8):
+                entry = option.first_action
+                if entry in legal or action_family(entry) in legal_families:
+                    candidates.append(entry)
 
-        # Expand click-like actions to object centers and a small frontier set.  The
-        # official ARC docs expose ACTION6 as a coordinate-bearing action in the
-        # direct API, so this representation is adapter-friendly.
+        # Expand click-like actions to the full grid. Restricting this before
+        # training would hide legal action parameters from the learner.
         click_bases = [a for a in legal if action_family(a) in {"click", "action6", "interact_at", "select_at"}]
         if click_bases:
             base = click_bases[0]
-            for obj in sorted(state.objects, key=lambda o: ("background_candidate" in o.role_tags, -o.area))[:24]:
-                r, c = obj.center_cell
-                tr, tc = grid_cell_to_action_coordinates(r, c, state.frame.extras)
-                candidates.append(make_targeted_action(base, tr, tc))
             rows, cols = state.grid.shape
-            for r, c in ((0, 0), (0, cols - 1), (rows - 1, 0), (rows - 1, cols - 1), (rows // 2, cols // 2)):
-                tr, tc = grid_cell_to_action_coordinates(r, c, state.frame.extras)
-                candidates.append(make_targeted_action(base, tr, tc))
+            for r in range(rows):
+                for c in range(cols):
+                    tr, tc = grid_cell_to_action_coordinates(r, c, state.frame.extras)
+                    candidates.append(make_targeted_action(base, tr, tc))
 
         # If all recent actions are stalling, force broad coverage before repeating.
         if self.stall_count >= 3:
             candidates = sorted(candidates, key=lambda a: (self.action_visits[a], self.state_action_visits[(state.abstract_fingerprint, a)]))
 
         deduped = tuple(dict.fromkeys(candidates))
-        return deduped[: self.config.max_candidates]
+        max_candidates = int(self.config.max_candidates)
+        if max_candidates > 0:
+            return deduped[:max_candidates]
+        return deduped
 
 
 
@@ -273,6 +330,7 @@ class ScientistPlanner:
         start = actor.center_cell
         self.visited_actor_positions.add(start)
         color_priors = engine.color_progress_priors()
+        mechanic_priors = engine.mechanic_color_priors()
         best: tuple[float, ObjectToken, int] | None = None
         for obj in state.objects:
             if obj.object_id == actor.object_id:
@@ -284,6 +342,7 @@ class ScientistPlanner:
                 continue
             weight = 0.20
             weight += color_priors.get(obj.color, 0.0)
+            weight += 0.35 * mechanic_priors.get(obj.color, 0.0)
             weight += 0.20 * self.productive_colors.get(obj.color, 0)
             weight -= 0.35 * self.nonproductive_colors.get(obj.color, 0)
             if "point" in obj.role_tags or "small" in obj.role_tags:
@@ -379,6 +438,7 @@ class ScientistPlanner:
         if (nr, nc) in self.blocked_cells:
             return -0.75
         color_priors = engine.color_progress_priors()
+        mechanic_priors = engine.mechanic_color_priors()
         value = 0.0
         for obj in state.objects:
             if obj.object_id == actor.object_id:
@@ -394,12 +454,162 @@ class ScientistPlanner:
                 continue
             weight = 0.10
             weight += color_priors.get(obj.color, 0.0)
+            weight += 0.25 * mechanic_priors.get(obj.color, 0.0)
             if "point" in obj.role_tags or "small" in obj.role_tags:
                 weight += 0.08
             if "large" in obj.role_tags or "boundary_touching" in obj.role_tags:
                 weight *= 0.55
             value += weight * progress / (1.0 + after_dist)
         return float(min(value, 1.25))
+
+    def _mechanic_goal_value(self, state: StructuredState, action: ActionName, engine: HypothesisEngine) -> float:
+        mechanic_priors = engine.mechanic_color_priors()
+        if not mechanic_priors:
+            return 0.0
+
+        target = parse_action_target(action)
+        value = 0.0
+        if target is not None:
+            for obj in state.objects:
+                prior = mechanic_priors.get(obj.color, 0.0)
+                if prior <= 0.0:
+                    continue
+                if abs(obj.center_cell[0] - target[0]) + abs(obj.center_cell[1] - target[1]) <= 1:
+                    value += 0.35 * prior
+
+        delta = action_delta(action)
+        actor = self._controlled_object(state, engine)
+        if delta is None or actor is None:
+            return float(min(value, 1.25))
+        start = actor.center_cell
+        rows, cols = state.grid.shape
+        nxt = (min(max(start[0] + delta[0], 0), rows - 1), min(max(start[1] + delta[1], 0), cols - 1))
+        for obj in state.objects:
+            if obj.object_id == actor.object_id:
+                continue
+            prior = mechanic_priors.get(obj.color, 0.0)
+            if prior <= 0.0:
+                continue
+            before_dist = self._learned_grid_distance(start, obj.center_cell, state)
+            after_dist = self._learned_grid_distance(nxt, obj.center_cell, state)
+            if before_dist is None or after_dist is None or before_dist == 0:
+                continue
+            progress = (before_dist - after_dist) / max(before_dist, 1)
+            if progress > 0:
+                value += 0.45 * prior * progress / (1.0 + after_dist)
+        return float(min(value, 1.25))
+
+    def _option_profile(
+        self,
+        memory: EpisodicMemory,
+        state: StructuredState,
+        action: ActionName,
+        language_tokens: Iterable[str],
+    ) -> dict[str, float]:
+        profile_fn = getattr(memory, "action_option_profile", None)
+        if callable(profile_fn):
+            try:
+                return dict(profile_fn(state, action, language_tokens))
+            except Exception:
+                pass
+        return {
+            "schema_bonus": 0.0,
+            "relative_cost": 1.0,
+            "efficiency": 0.0,
+            "support": 0.0,
+            "contradiction": 0.0,
+            "continuation_depth": 0.0,
+        }
+
+    def _action_cost_estimate(self, action: ActionName, *, option_profile: dict[str, float]) -> float:
+        fam = action_family(action)
+        empirical = self.family_cost_sum[fam] / self.family_cost_count[fam] if self.family_cost_count[fam] else 1.0
+        option_cost = float(option_profile.get("relative_cost", 1.0) or 1.0)
+        blended = 0.75 * empirical + 0.25 * min(option_cost, 6.0) / 2.0
+        return float(max(blended, 0.25))
+
+    def _action_efficiency_prior(self, action: ActionName, *, option_profile: dict[str, float]) -> float:
+        fam = action_family(action)
+        empirical = self.family_effect_sum[fam] / self.family_effect_count[fam] if self.family_effect_count[fam] else 0.0
+        option_efficiency = float(option_profile.get("efficiency", 0.0) or 0.0)
+        return float(max(0.0, (0.70 * empirical) + (0.30 * option_efficiency)))
+
+    def _budget_pressure(self, state: StructuredState) -> float:
+        extras = state.frame.extras if isinstance(state.frame.extras, dict) else {}
+        retry_index = 0.0
+        if isinstance(extras, dict):
+            try:
+                retry_index = float(extras.get("session_retry_index", 0) or 0)
+            except Exception:
+                retry_index = 0.0
+        pressure = 0.20
+        pressure += 0.35 * min(float(state.step_index), 96.0) / 96.0
+        pressure += 0.30 * min(retry_index, 4.0) / 4.0
+        pressure += 0.25 * min(float(self.stall_count), 8.0) / 8.0
+        pressure += 0.45 * self._numeric_budget_pressure(state)
+        return float(min(pressure, 1.25))
+
+    def _observed_effect_value(self, record: TransitionRecord) -> float:
+        progress = max(0.0, combined_progress_signal(record.reward, record.delta.score_delta))
+        value = progress
+        value += 0.20 * min(record.delta.changed_fraction, 1.0)
+        if record.delta.disappeared:
+            value += 0.20
+        large_motions = sum(1 for motion in record.delta.moved_objects if motion.distance > 1.25)
+        value += 0.18 * min(float(large_motions), 2.0)
+        if tuple(record.before.available_actions) != tuple(record.after.available_actions):
+            value += 0.16
+        numeric_deltas = transition_numeric_deltas(record)
+        if any(delta > 0.0 for delta in numeric_deltas.values()):
+            value += 0.12
+        if len(numeric_deltas) >= 2:
+            value += 0.06
+        return float(min(value, 2.5))
+
+    def _observed_action_cost(self, record: TransitionRecord, *, observed_effect: float) -> float:
+        cost = 1.0
+        progress = combined_progress_signal(record.reward, record.delta.score_delta)
+        if observed_effect <= 0.05:
+            cost += 0.35
+        if not record.delta.has_visible_effect and progress <= 0.0:
+            cost += 0.35
+        if record.delta.terminated and progress <= 0.0:
+            cost += 0.45
+        if is_reset_action(record.action):
+            cost += 0.25
+        numeric_spend = sum(max(-delta, 0.0) for delta in transition_numeric_deltas(record).values())
+        cost += 0.20 * min(numeric_spend, 2.0)
+        return float(min(cost, 3.0))
+
+    def _update_numeric_channel_stats(self, record: TransitionRecord) -> None:
+        before = state_numeric_channels(record.before)
+        after = state_numeric_channels(record.after)
+        for key, value in {**before, **after}.items():
+            current = float(value)
+            self.channel_min[key] = current if key not in self.channel_min else min(self.channel_min[key], current)
+            self.channel_max[key] = current if key not in self.channel_max else max(self.channel_max[key], current)
+        for key, delta in transition_numeric_deltas(record).items():
+            if delta >= 0.0:
+                continue
+            self.channel_spend_sum[key] += float(-delta)
+            self.channel_spend_count[key] += 1
+
+    def _numeric_budget_pressure(self, state: StructuredState) -> float:
+        channels = state_numeric_channels(state)
+        if not channels:
+            return 0.0
+        pressure = 0.0
+        for key, current in channels.items():
+            span = self.channel_max.get(key, current) - self.channel_min.get(key, current)
+            if span <= 1e-6:
+                continue
+            spend_count = self.channel_spend_count.get(key, 0)
+            if spend_count <= 0:
+                continue
+            scarcity = 1.0 - ((float(current) - self.channel_min.get(key, current)) / span)
+            spend_intensity = min(self.channel_spend_sum.get(key, 0.0), 8.0) / 8.0
+            pressure += max(0.0, scarcity) * (0.35 + (0.65 * spend_intensity))
+        return float(min(pressure, 1.0))
 
 
     def _learned_grid_distance(
