@@ -88,7 +88,7 @@ class LearnedOnlinePolicy:
             pred = self.model.predict(features)
             total_scored += len(chunk)
             for index, action in enumerate(chunk):
-                q_progress = float(pred.reward[index]) + float(pred.useful[index])
+                q_progress = float(pred.value[index]) + float(pred.reward[index]) + (0.5 * float(pred.useful[index]))
                 q_info = float(pred.info_gain[index])
                 learned_cost = float(pred.cost[index])
                 score = q_progress + (self.beta_info * q_info) - learned_cost
@@ -97,6 +97,7 @@ class LearnedOnlinePolicy:
                     "q_info": float(q_info),
                     "pred_reward": float(pred.reward[index]),
                     "pred_useful": float(pred.useful[index]),
+                    "pred_value": float(pred.value[index]),
                     "pred_visible": float(pred.visible[index]),
                     "pred_info_gain": float(pred.info_gain[index]),
                     "pred_uncertainty": float(pred.uncertainty[index]),

@@ -726,3 +726,37 @@ ARC level-transition verification and 1000-step continuation:
 5. Fixed a repo CLI hygiene issue discovered during verification:
    - `python -m arcagi.cli list-arc-games` previously printed nothing because `arcagi.cli` did not call `main()` under module execution.
    - Added the module entrypoint so future inventory checks can use the CLI.
+
+## 2026-04-24 15:43 EDT
+
+GPT-Pro follow-up implementation batch:
+
+1. Asked GPT-Pro to review the pushed level-1 success, 1000-step continuation failure, and verified AR25 level semantics.
+2. Implemented the first validity-fix batch from the review:
+   - pre-outcome recurrent feature snapshots;
+   - hidden snapshots in memory/probe loss;
+   - separate `pretrain_updates` from fresh `online_adapt_updates`;
+   - `value` head;
+   - partial sparse non-progress cost target;
+   - retrospective current-level success credit;
+   - session-global plus level-local belief stats;
+   - recurrent policy diagnostics in traces;
+   - mixed learner-owned training rollouts.
+3. Validation:
+   - focused learned-online tests: `19 passed in 0.35s`;
+   - broad targeted regression: `122 passed in 139.96s`.
+4. Synthetic result:
+   - `artifacts\learned_online_recurrent_mixed_localbelief_2000.pkl`
+   - mixed training success rate `0.985`
+   - heldout synthetic gates all `40/40`, including the previously regressed movement-required-after-mode gate.
+5. AR25 post-fix diagnostic:
+   - command: `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent learned_online_recurrent --checkpoint-path artifacts\learned_online_recurrent_mixed_localbelief_2000.pkl --game-id ar25-0c556536 --mode offline --max-steps 320 --progress-every 80 --trace-path artifacts\traces\learned_online_recurrent_mixed_localbelief_2000_ar25_320.jsonl`
+   - result: `success=false`, `won=false`, `return=0.0`, `levels_completed=0`, `steps=320`
+   - action histogram: `click:31:1=300`, `click:31:10=7`, `click:31:4=7`, `click:31:7=6`
+   - family histogram: `click=320`
+   - max same-action streak: `292`
+   - final diagnostics: `all_negative_scores=true`, `mean_pred_cost=0.8813`, `mean_q_progress=0.0022`, `score_margin_top2=0.00158`, `score_entropy=6.076`
+6. Current conclusion:
+   - the original level-1 prototype remains logged as a real prior result;
+   - the new validity-fixed checkpoint does not reproduce it;
+   - the current failure mode is dense-click fixation under all-negative tiny-margin scores, so the next work must address learned policy calibration/exploration without scripted action-pattern search or dense-click caps.

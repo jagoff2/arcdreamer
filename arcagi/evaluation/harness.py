@@ -529,6 +529,7 @@ def _compact_diagnostics(diagnostics: Any) -> dict[str, Any]:
         "max_levels_completed_observed",
         "last_plan_scores",
         "latest_language",
+        "last_top_scores",
         "latest_self_model_scores",
         "self_belief",
         "self_model",
@@ -537,6 +538,18 @@ def _compact_diagnostics(diagnostics: Any) -> dict[str, Any]:
         "hypothesis_count",
         "memory_items",
         "transitions_observed",
+        "score_entropy",
+        "score_margin_top2",
+        "all_negative_scores",
+        "top_score",
+        "mean_score",
+        "mean_pred_cost",
+        "mean_q_progress",
+        "mean_q_info",
+        "level_epoch",
+        "level_step",
+        "online_adapt_updates",
+        "pretrain_updates",
     }
     compact: dict[str, Any] = {}
     for key in keep_keys:

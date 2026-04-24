@@ -44,6 +44,8 @@ class LearnedOnlineRecurrentAgent(BaseAgent):
         self.last_loss: float = 0.0
         self.last_realized_info_gain: float = 0.0
         self.last_prediction_error: float = 0.0
+        self.credit_gamma: float = 0.985
+        self.credit_horizon: int | None = 512
 
     def reset_episode(self) -> None:
         super().reset_episode()
@@ -54,6 +56,7 @@ class LearnedOnlineRecurrentAgent(BaseAgent):
         self.policy.last_legal_action_count = 0
         self.policy.last_scores.clear()
         self.policy.last_components.clear()
+        self.policy.last_policy_diagnostics.clear()
         self.current_question = QuestionToken.TEST_ACTION_MEANING
         self.last_decision = None
         self.last_question = self.current_question
@@ -82,35 +85,57 @@ class LearnedOnlineRecurrentAgent(BaseAgent):
 
     def on_transition(self, transition: Transition) -> None:
         labels = labels_from_transition(transition)
+        pre_feature = self.policy.feature_for_action(transition.state, transition.action, question=self.last_question)
+        hidden_before = self.model.hidden.copy()
         probe_batch = self.memory.sample_probe_batch(k=8, exclude_action=transition.action)
         pre_probe_loss = self.model.batch_prediction_loss(probe_batch) if probe_batch else None
-        self.belief.observe(
-            transition.state,
-            transition.action,
+        pre_loss = self.model.prediction_loss(
+            pre_feature,
             labels,
             realized_info_gain=0.0,
-            prediction_error=0.0,
+            hidden=hidden_before,
         )
-        feature = self.policy.feature_for_action(transition.state, transition.action, question=self.last_question)
-        pre_loss = self.model.prediction_loss(feature, labels, realized_info_gain=0.0)
-        update_loss = self.model.online_update(feature, labels, realized_info_gain=0.0)
+        update_loss = self.model.online_update(
+            pre_feature,
+            labels,
+            realized_info_gain=0.0,
+            hidden=hidden_before,
+        )
         post_probe_loss = self.model.batch_prediction_loss(probe_batch) if probe_batch else None
         if pre_probe_loss is None or post_probe_loss is None:
             realized_info_gain = 0.0
         else:
             realized_info_gain = float(np.clip(pre_probe_loss - post_probe_loss, -1.0, 1.0))
         if realized_info_gain > 0.0:
-            self.model.online_update(feature, labels, realized_info_gain=realized_info_gain)
+            self.model.online_update(
+                pre_feature,
+                labels,
+                realized_info_gain=realized_info_gain,
+                hidden=hidden_before,
+            )
         prediction_error = float(pre_loss)
         self.belief.recent_prediction_error = prediction_error
+        level_epoch = int(self.belief.level_epoch)
+        self.belief.observe(
+            transition.state,
+            transition.action,
+            labels,
+            realized_info_gain=realized_info_gain,
+            prediction_error=prediction_error,
+        )
         self.memory.write(
             state=transition.state,
             action=transition.action,
             question=self.last_question,
             labels=labels,
             realized_info_gain=realized_info_gain,
-            feature=feature,
+            feature=pre_feature,
+            hidden=hidden_before,
+            level_epoch=level_epoch,
+            level_step=int(self.belief.level_step),
         )
+        if labels.objective_progress > 0.0 or labels.terminal_progress > 0.0:
+            self._credit_current_level_success(level_epoch)
         self.model.observe_event(
             event_features(
                 transition.state,
@@ -124,6 +149,9 @@ class LearnedOnlineRecurrentAgent(BaseAgent):
         self.last_loss = float(update_loss)
         self.last_realized_info_gain = realized_info_gain
         self.last_prediction_error = prediction_error
+        if labels.objective_progress > 0.0 or labels.terminal_progress > 0.0:
+            self.belief.start_new_level()
+            self.memory.start_new_level(self.belief.level_epoch)
 
     def score_actions_for_state(
         self,
@@ -152,15 +180,37 @@ class LearnedOnlineRecurrentAgent(BaseAgent):
             "scored_action_count": int(self.policy.last_scored_action_count),
             "online_updates": int(self.belief.online_update_count),
             "model_updates": int(self.model.updates),
+            "pretrain_updates": int(self.model.pretrain_updates),
+            "online_adapt_updates": int(self.model.online_adapt_updates),
             "last_loss": float(self.last_loss),
             "last_realized_info_gain": float(self.last_realized_info_gain),
             "last_prediction_error": float(self.last_prediction_error),
             "current_question": self.current_question.name,
             "memory_items": len(self.memory.entries),
             "hidden_norm": float(np.linalg.norm(self.model.hidden)),
+            "level_epoch": int(self.belief.level_epoch),
+            "level_step": int(self.belief.level_step),
             "belief": self.belief.summary(),
+            **self.policy.last_policy_diagnostics,
             "last_top_scores": self._last_top_scores(limit=12),
         }
+
+    def _credit_current_level_success(self, level_epoch: int) -> None:
+        credited = self.memory.credit_recent_success(
+            level_epoch=level_epoch,
+            gamma=self.credit_gamma,
+            max_entries=self.credit_horizon,
+        )
+        for entry in credited:
+            if entry.feature is None:
+                continue
+            self.model.online_update(
+                entry.feature,
+                entry.labels,
+                realized_info_gain=float(entry.realized_info_gain),
+                hidden=entry.hidden,
+                return_credit=float(entry.return_credit),
+            )
 
     def _last_top_scores(self, *, limit: int) -> list[dict[str, object]]:
         ranked = sorted(self.policy.last_scores.items(), key=lambda item: item[1], reverse=True)[:limit]

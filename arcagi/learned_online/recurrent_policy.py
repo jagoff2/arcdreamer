@@ -44,6 +44,7 @@ class RecurrentOnlinePolicy:
         self.last_legal_action_count = 0
         self.last_scores: dict[ActionName, float] = {}
         self.last_components: dict[ActionName, dict[str, float]] = {}
+        self.last_policy_diagnostics: dict[str, float | bool] = {}
 
     def build_feature_matrix(
         self,
@@ -87,7 +88,7 @@ class RecurrentOnlinePolicy:
             pred = self.model.predict(features)
             total_scored += len(chunk)
             for index, action in enumerate(chunk):
-                q_progress = float(pred.reward[index]) + float(pred.useful[index])
+                q_progress = float(pred.value[index]) + float(pred.reward[index]) + (0.5 * float(pred.useful[index]))
                 q_info = float(pred.info_gain[index])
                 learned_cost = float(pred.cost[index])
                 score = q_progress + (self.beta_info * q_info) - learned_cost
@@ -96,6 +97,7 @@ class RecurrentOnlinePolicy:
                     "q_info": float(q_info),
                     "pred_reward": float(pred.reward[index]),
                     "pred_useful": float(pred.useful[index]),
+                    "pred_value": float(pred.value[index]),
                     "pred_visible": float(pred.visible[index]),
                     "pred_info_gain": float(pred.info_gain[index]),
                     "pred_uncertainty": float(pred.uncertainty[index]),
@@ -115,6 +117,7 @@ class RecurrentOnlinePolicy:
         self.last_legal_action_count = len(actions)
         self.last_scores = {action: decision.score for action, decision in results.items()}
         self.last_components = {action: dict(decision.components) for action, decision in results.items()}
+        self.last_policy_diagnostics = _policy_diagnostics(self.last_scores, self.last_components)
         return results
 
     def choose_action(
@@ -140,3 +143,35 @@ class RecurrentOnlinePolicy:
         question: QuestionToken,
     ) -> np.ndarray:
         return self.build_feature_matrix(state, (str(action),), question=question)[0]
+
+
+def _policy_diagnostics(
+    scores_by_action: dict[ActionName, float],
+    components_by_action: dict[ActionName, dict[str, float]],
+) -> dict[str, float | bool]:
+    if not scores_by_action:
+        return {}
+    scores = np.asarray(list(scores_by_action.values()), dtype=np.float64)
+    centered = scores - float(np.max(scores))
+    exp_scores = np.exp(np.clip(centered, -60.0, 0.0))
+    probs = exp_scores / max(float(np.sum(exp_scores)), 1e-12)
+    entropy = float(-np.sum(probs * np.log(np.clip(probs, 1e-12, 1.0))))
+    ranked = np.sort(scores)[::-1]
+    margin = float(ranked[0] - ranked[1]) if len(ranked) > 1 else float("inf")
+    components = list(components_by_action.values())
+    return {
+        "score_entropy": entropy,
+        "score_margin_top2": margin,
+        "all_negative_scores": bool(np.all(scores < 0.0)),
+        "top_score": float(ranked[0]),
+        "mean_score": float(np.mean(scores)),
+        "mean_pred_cost": _component_mean(components, "learned_cost"),
+        "mean_q_progress": _component_mean(components, "q_progress"),
+        "mean_q_info": _component_mean(components, "q_info"),
+    }
+
+
+def _component_mean(components: list[dict[str, float]], key: str) -> float:
+    if not components:
+        return 0.0
+    return float(np.mean([float(item.get(key, 0.0)) for item in components]))

@@ -31,6 +31,14 @@ class RecurrentOnlineModel:
     def updates(self) -> int:
         return int(self.fast_heads.updates)
 
+    @property
+    def pretrain_updates(self) -> int:
+        return int(self.fast_heads.pretrain_updates)
+
+    @property
+    def online_adapt_updates(self) -> int:
+        return int(self.fast_heads.online_adapt_updates)
+
     def reset_episode(self, *, keep_weights: bool = True) -> None:
         self.hidden = np.zeros((self.hidden_dim,), dtype=np.float32)
         if not keep_weights:
@@ -38,6 +46,8 @@ class RecurrentOnlineModel:
                 input_dim=self.candidate_input_dim + self.hidden_dim,
                 learning_rate=self.learning_rate,
             )
+        else:
+            self.fast_heads.reset_online_adaptation()
 
     def observe_event(self, event: np.ndarray) -> None:
         event = np.asarray(event, dtype=np.float32)
@@ -45,21 +55,31 @@ class RecurrentOnlineModel:
         recurrent = self.hidden @ self.hidden_recurrence
         self.hidden = np.tanh(projected + recurrent).astype(np.float32)
 
-    def augment_features(self, candidate_features: np.ndarray) -> np.ndarray:
+    def augment_features(self, candidate_features: np.ndarray, *, hidden: np.ndarray | None = None) -> np.ndarray:
         features = np.asarray(candidate_features, dtype=np.float32)
+        hidden_vector = self.hidden if hidden is None else np.asarray(hidden, dtype=np.float32)
         if features.ndim == 1:
-            return np.concatenate([features, self.hidden]).astype(np.float32)
-        hidden = np.repeat(self.hidden[None, :], features.shape[0], axis=0)
-        return np.concatenate([features, hidden], axis=1).astype(np.float32)
+            return np.concatenate([features, hidden_vector]).astype(np.float32)
+        hidden_batch = np.repeat(hidden_vector[None, :], features.shape[0], axis=0)
+        return np.concatenate([features, hidden_batch], axis=1).astype(np.float32)
 
     def predict(self, candidate_features: np.ndarray) -> MinimalPredictions:
         return self.fast_heads.predict(self.augment_features(candidate_features))
 
-    def prediction_loss(self, feature: np.ndarray, labels, *, realized_info_gain: float) -> float:
+    def prediction_loss(
+        self,
+        feature: np.ndarray,
+        labels,
+        *,
+        realized_info_gain: float,
+        hidden: np.ndarray | None = None,
+        return_credit: float = 0.0,
+    ) -> float:
         return self.fast_heads.prediction_loss(
-            self.augment_features(np.asarray(feature, dtype=np.float32)),
+            self.augment_features(np.asarray(feature, dtype=np.float32), hidden=hidden),
             labels,
             realized_info_gain=realized_info_gain,
+            return_credit=return_credit,
         )
 
     def batch_prediction_loss(self, entries: Sequence[object]) -> float:
@@ -70,16 +90,35 @@ class RecurrentOnlineModel:
             if feature is None or labels is None:
                 continue
             realized_info_gain = float(getattr(entry, "realized_info_gain", 0.0) or 0.0)
-            losses.append(self.prediction_loss(feature, labels, realized_info_gain=realized_info_gain))
+            hidden = getattr(entry, "hidden", None)
+            return_credit = float(getattr(entry, "return_credit", 0.0) or 0.0)
+            losses.append(
+                self.prediction_loss(
+                    feature,
+                    labels,
+                    realized_info_gain=realized_info_gain,
+                    hidden=hidden,
+                    return_credit=return_credit,
+                )
+            )
         if not losses:
             return 0.0
         return float(np.mean(losses))
 
-    def online_update(self, feature: np.ndarray, labels, *, realized_info_gain: float = 0.0) -> float:
+    def online_update(
+        self,
+        feature: np.ndarray,
+        labels,
+        *,
+        realized_info_gain: float = 0.0,
+        hidden: np.ndarray | None = None,
+        return_credit: float = 0.0,
+    ) -> float:
         return self.fast_heads.online_update(
-            self.augment_features(np.asarray(feature, dtype=np.float32)),
+            self.augment_features(np.asarray(feature, dtype=np.float32), hidden=hidden),
             labels,
             realized_info_gain=realized_info_gain,
+            return_credit=return_credit,
         )
 
     def state_dict(self) -> dict[str, object]:

@@ -18,6 +18,7 @@ class MinimalPredictions:
     visible: np.ndarray
     info_gain: np.ndarray
     cost: np.ndarray
+    value: np.ndarray
     uncertainty: np.ndarray
 
 
@@ -28,6 +29,8 @@ class MinimalOnlineModel:
     weights: dict[str, np.ndarray] = field(init=False)
     biases: dict[str, float] = field(init=False)
     updates: int = 0
+    pretrain_updates: int = 0
+    online_adapt_updates: int = 0
 
     def __post_init__(self) -> None:
         self.weights = {name: np.zeros((self.input_dim,), dtype=np.float32) for name in _HEADS}
@@ -37,6 +40,7 @@ class MinimalOnlineModel:
             "visible": -0.4,
             "info_gain": -0.2,
             "cost": -1.2,
+            "value": -1.5,
         }
         self._initialize_generic_belief_priors()
 
@@ -47,6 +51,7 @@ class MinimalOnlineModel:
         visible = _sigmoid(x @ self.weights["visible"] + self.biases["visible"])
         info_gain = _sigmoid(x @ self.weights["info_gain"] + self.biases["info_gain"])
         cost = _sigmoid(x @ self.weights["cost"] + self.biases["cost"])
+        value = _sigmoid(x @ self.weights["value"] + self.biases["value"])
         uncertainty = np.clip((1.0 - np.maximum(useful, cost)) + 0.25 * info_gain, 0.0, 1.0)
         return MinimalPredictions(
             reward=reward.astype(np.float32),
@@ -54,12 +59,20 @@ class MinimalOnlineModel:
             visible=visible.astype(np.float32),
             info_gain=info_gain.astype(np.float32),
             cost=cost.astype(np.float32),
+            value=value.astype(np.float32),
             uncertainty=uncertainty.astype(np.float32),
         )
 
-    def prediction_loss(self, feature: np.ndarray, labels: TransitionLabels, *, realized_info_gain: float) -> float:
+    def prediction_loss(
+        self,
+        feature: np.ndarray,
+        labels: TransitionLabels,
+        *,
+        realized_info_gain: float,
+        return_credit: float = 0.0,
+    ) -> float:
         pred = self.predict(np.asarray(feature, dtype=np.float32)[None, :])
-        targets = _targets(labels, realized_info_gain=realized_info_gain)
+        targets = _targets(labels, realized_info_gain=realized_info_gain, return_credit=return_credit)
         loss = 0.0
         for name, target in targets.items():
             value = float(getattr(pred, name)[0])
@@ -74,11 +87,13 @@ class MinimalOnlineModel:
             if feature is None or labels is None:
                 continue
             realized_info_gain = float(getattr(entry, "realized_info_gain", 0.0) or 0.0)
+            return_credit = float(getattr(entry, "return_credit", 0.0) or 0.0)
             losses.append(
                 self.prediction_loss(
                     np.asarray(feature, dtype=np.float32),
                     labels,
                     realized_info_gain=realized_info_gain,
+                    return_credit=return_credit,
                 )
             )
         if not losses:
@@ -91,20 +106,25 @@ class MinimalOnlineModel:
         labels: TransitionLabels,
         *,
         realized_info_gain: float = 0.0,
+        return_credit: float = 0.0,
     ) -> float:
         x = np.asarray(feature, dtype=np.float32)
-        targets = _targets(labels, realized_info_gain=realized_info_gain)
+        targets = _targets(labels, realized_info_gain=realized_info_gain, return_credit=return_credit)
         pred = self.predict(x[None, :])
         loss = 0.0
+        rate = self.learning_rate / float((self.online_adapt_updates + 1) ** 0.5)
         for name, target in targets.items():
             value = float(getattr(pred, name)[0])
             error = float(target) - value
             loss += error * error
-            rate = self.learning_rate / float((self.updates + 1) ** 0.5)
             self.weights[name] += np.asarray(rate * error * x, dtype=np.float32)
             self.biases[name] += rate * error
+        self.online_adapt_updates += 1
         self.updates += 1
         return float(loss / max(float(len(targets)), 1.0))
+
+    def reset_online_adaptation(self) -> None:
+        self.online_adapt_updates = 0
 
     def state_dict(self) -> dict[str, object]:
         return {
@@ -113,6 +133,8 @@ class MinimalOnlineModel:
             "weights": {key: value.copy() for key, value in self.weights.items()},
             "biases": dict(self.biases),
             "updates": int(self.updates),
+            "pretrain_updates": int(max(self.pretrain_updates, self.updates)),
+            "online_adapt_updates": int(self.online_adapt_updates),
         }
 
     def load_state_dict(self, state: dict[str, object]) -> None:
@@ -120,13 +142,20 @@ class MinimalOnlineModel:
         if isinstance(weights, dict):
             for key in _HEADS:
                 if key in weights:
-                    self.weights[key] = np.asarray(weights[key], dtype=np.float32).copy()
+                    loaded = np.asarray(weights[key], dtype=np.float32).copy()
+                    target = self.weights[key]
+                    target.fill(0.0)
+                    overlap = min(int(target.shape[0]), int(loaded.shape[0]))
+                    if overlap > 0:
+                        target[:overlap] = loaded[:overlap]
         biases = state.get("biases", {})
         if isinstance(biases, dict):
             for key in _HEADS:
                 if key in biases:
                     self.biases[key] = float(biases[key])
         self.updates = int(state.get("updates", self.updates) or 0)
+        self.pretrain_updates = int(state.get("pretrain_updates", self.updates) or 0)
+        self.online_adapt_updates = 0
 
     def _initialize_generic_belief_priors(self) -> None:
         if self.input_dim < ACTION_FEATURE_DIM + BELIEF_FEATURE_DIM + MEMORY_FEATURE_DIM:
@@ -136,10 +165,22 @@ class MinimalOnlineModel:
         family = belief
         exact = belief + 7
         context = belief + 14
-        for offset, value_scale, cost_scale in ((family, 0.30, 0.85), (exact, 0.85, 2.10), (context, 0.60, 1.65)):
+        level_family = belief + 21
+        level_exact = belief + 28
+        level_context = belief + 35
+        stat_blocks = (
+            (family, 0.25, 0.70),
+            (exact, 0.70, 1.70),
+            (context, 0.50, 1.35),
+            (level_family, 0.35, 1.10),
+            (level_exact, 1.00, 2.60),
+            (level_context, 0.75, 2.05),
+        )
+        for offset, value_scale, cost_scale in stat_blocks:
             self.weights["visible"][offset + 1] += value_scale
             self.weights["useful"][offset + 2] += value_scale
             self.weights["reward"][offset + 3] += value_scale
+            self.weights["value"][offset + 3] += value_scale
             self.weights["info_gain"][offset + 4] += 0.40 * value_scale
             self.weights["cost"][offset + 5] += cost_scale
             self.weights["info_gain"][offset + 6] += 0.25 * value_scale
@@ -147,19 +188,22 @@ class MinimalOnlineModel:
         self.weights["visible"][memory + 2] += 0.35
         self.weights["cost"][memory + 3] += 0.55
         self.weights["reward"][memory + 4] += 0.45
+        self.weights["value"][memory + 4] += 0.45
         self.weights["info_gain"][memory + 5] += 0.45
 
 
-_HEADS: tuple[str, ...] = ("reward", "useful", "visible", "info_gain", "cost")
+_HEADS: tuple[str, ...] = ("reward", "useful", "visible", "info_gain", "cost", "value")
 
 
-def _targets(labels: TransitionLabels, *, realized_info_gain: float) -> dict[str, float]:
+def _targets(labels: TransitionLabels, *, realized_info_gain: float, return_credit: float = 0.0) -> dict[str, float]:
+    nonprogress = max(float(labels.visible_only_nonprogress), float(labels.no_effect_nonprogress))
     return {
         "reward": float(labels.reward_progress),
-        "useful": float(labels.useful_change),
+        "useful": float(max(labels.useful_change, return_credit)),
         "visible": float(labels.visible_change),
         "info_gain": float(max(0.0, min(1.0, realized_info_gain))),
-        "cost": float(max(labels.visible_only_nonprogress, labels.no_effect_nonprogress, labels.harm)),
+        "cost": float(max(float(labels.harm), 0.25 * nonprogress)),
+        "value": float(max(float(labels.reward_progress), float(return_credit))),
     }
 
 
