@@ -41,13 +41,21 @@ def list_arc_games(operation_mode: Any | None = None) -> list[str]:
     if Arcade is None:
         return []
     arcade = Arcade(operation_mode=operation_mode if operation_mode is not None else _default_operation_mode())
-    environments = getattr(arcade, "get_environments", lambda: [])()
-    if isinstance(environments, dict):
-        return sorted(str(key) for key in environments.keys())
-    game_ids = []
-    for item in environments:
-        game_ids.append(str(getattr(item, "game_id", item)))
-    return sorted(game_ids)
+    try:
+        environments = getattr(arcade, "get_environments", lambda: [])()
+        if isinstance(environments, dict):
+            return sorted(str(key) for key in environments.keys())
+        game_ids = []
+        for item in environments:
+            game_ids.append(str(getattr(item, "game_id", item)))
+        return sorted(game_ids)
+    finally:
+        close_scorecard = getattr(arcade, "close_scorecard", None)
+        if callable(close_scorecard):
+            try:
+                close_scorecard()
+            except Exception:
+                pass
 
 
 class ArcToolkitEnv(BaseEnvironment):

@@ -695,3 +695,34 @@ ARC task success prototype:
 4. Follow-up already started:
    - A 1000-step continuation run is active to test cross-level carryover and full game completion:
      - `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent learned_online_recurrent --checkpoint-path artifacts\learned_online_recurrent_synth_actionid_12000.pkl --game-id ar25-0c556536 --mode offline --max-steps 1000 --progress-every 100 --trace-path artifacts\traces\learned_online_recurrent_synth12000_1000.jsonl`
+
+## 2026-04-24 15:12 EDT
+
+ARC level-transition verification and 1000-step continuation:
+
+1. The 1000-step continuation finished:
+   - `success=true`
+   - `won=false`
+   - `return=1.0`
+   - `levels_completed=1`
+   - `steps=1000`
+   - `interaction_steps=64`
+   - `reset_steps=2`
+   - `family_histogram={"move":747,"undo":187,"select":1,"click":63,"reset":2}`
+   - `max_same_action_streak=183`
+2. Interpretation:
+   - The clean learned recurrent controller preserves the level-1 ARC task success prototype.
+   - It does not yet win AR25 because it remains stuck after level 1.
+   - The post-level failure mode is movement/undo-heavy action arbitration, not an environment reset to the same level.
+3. Verified local ARC inventory:
+   - OFFLINE mode has one cached local game: `ar25-0c556536`.
+   - That game contains 8 internal levels: `win_score=8`, `_levels=8`, `_clean_levels=8`.
+   - ONLINE mode can fetch 25 environment descriptors through the ARC API, but those are not local offline cached games.
+4. Verified first level completion semantics by replaying the recorded action sequence:
+   - step `299`, action `1`: `levels_completed` changes `0 -> 1`, `reward=1.0`, state remains `GameState.NOT_FINISHED`, no termination/truncation.
+   - internal game `level_index` changes `0 -> 1`.
+   - grid hash changes from reset `d1cf6c65a8c9510a` to post-boundary `23389de4e0a7e7b3`, then to `e793346c71d0d291` on the next level-1-index step.
+   - Therefore the environment advances to the next internal AR25 level in the same session; it is not serving the same level again.
+5. Fixed a repo CLI hygiene issue discovered during verification:
+   - `python -m arcagi.cli list-arc-games` previously printed nothing because `arcagi.cli` did not call `main()` under module execution.
+   - Added the module entrypoint so future inventory checks can use the CLI.
