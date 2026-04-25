@@ -192,6 +192,12 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         level_param = torch.nn.Parameter(self.level_belief.detach().clone())
         optimizer = torch.optim.AdamW([*self.model.online_parameters(), session_param, level_param], lr=self.online_lr)
         output = self._forward_state_actions_with_beliefs(transition.state, actions, session_param, level_param)[0]
+        state_batch = encode_state_tokens(transition.state)
+        action_tokens = encode_action_tokens(transition.state, actions)
+        state_numeric = torch.as_tensor(state_batch.numeric[None, :, :], dtype=torch.float32, device=device)
+        state_type_ids = torch.as_tensor(state_batch.type_ids[None, :], dtype=torch.long, device=device)
+        state_mask = torch.as_tensor(state_batch.mask[None, :], dtype=torch.bool, device=device)
+        action_numeric = torch.as_tensor(action_tokens.numeric[None, :, :], dtype=torch.float32, device=device)
         losses = self.model.loss(
             output,
             target_outcome=target_outcome,
@@ -206,8 +212,18 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         with torch.no_grad():
             event = torch.cat([target_outcome, target_delta], dim=-1)
             residual = torch.tanh(self.model.event_encoder(event)).squeeze(0)
-            self.session_belief = (session_param.detach() + 0.03 * residual).detach()
-            self.level_belief = (level_param.detach() + 0.05 * residual).detach()
+            belief_delta = self.model.observed_event_belief_delta(
+                output,
+                target_outcome=target_outcome,
+                target_delta=target_delta,
+                actual_action_index=action_index,
+                state_numeric=state_numeric,
+                state_type_ids=state_type_ids,
+                state_mask=state_mask,
+                action_numeric=action_numeric,
+            ).squeeze(0)
+            self.session_belief = (session_param.detach() + 0.03 * residual + 0.25 * belief_delta).detach()
+            self.level_belief = (level_param.detach() + 0.05 * residual + 0.10 * belief_delta).detach()
         self.online_update_count += 1
         self.last_online_loss = float(losses["loss"].detach().cpu())
         self.last_prediction_error = float(
@@ -340,6 +356,7 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
                 "fast_outcome_head",
                 "fast_delta_head",
                 "fast_value_head",
+                "observed_event_belief_encoder",
                 "session_belief",
                 "level_belief",
             ],

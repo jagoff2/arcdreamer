@@ -8,6 +8,10 @@ import numpy as np
 from arcagi.agents.learned_online_object_event_agent import LearnedOnlineObjectEventAgent
 from arcagi.core.types import GridObservation, ObjectState, StructuredState, Transition
 from arcagi.evaluation.harness import build_agent
+from arcagi.learned_online.object_event_curriculum import (
+    OnlineObjectEventCurriculumConfig,
+    build_online_object_event_curriculum,
+)
 
 
 def test_object_event_agent_scores_all_legal_actions_and_reports_contract_diagnostics() -> None:
@@ -54,6 +58,62 @@ def test_object_event_online_update_count_and_level_belief_boundary_semantics() 
     assert diagnostics["level_step"] == 0
     assert diagnostics["session_belief_norm"] > initial_session
     assert diagnostics["level_belief_norm"] == 0.0
+
+
+def test_object_event_agent_relation_memory_carries_across_level_transition() -> None:
+    split = build_online_object_event_curriculum(
+        OnlineObjectEventCurriculumConfig(
+            seed=31,
+            train_sessions=1,
+            heldout_sessions=0,
+            levels_per_session=3,
+            max_objects=3,
+            include_distractors=False,
+        )
+    )
+    session = split.train[0]
+    support = session.levels[0].example
+    query = session.levels[1].example
+    agent = LearnedOnlineObjectEventAgent(seed=4, device="cpu", temperature=0.1, epsilon_floor=0.0)
+
+    before_scores = agent.score_actions_for_state(query.state, query.legal_actions)
+    before_diag = agent.diagnostics()
+    wrong_index = (
+        int(support.metadata["blue_action_index"])
+        if int(support.correct_action_index) == int(support.metadata["red_action_index"])
+        else int(support.metadata["red_action_index"])
+    )
+    agent.on_transition(
+        Transition(
+            state=support.state,
+            action=support.legal_actions[wrong_index],
+            reward=0.0,
+            next_state=support.state,
+            terminated=False,
+            info={"score_delta": 0.0},
+        )
+    )
+    mid_diag = agent.diagnostics()
+    after_scores = agent.score_actions_for_state(query.state, query.legal_actions)
+    correct = query.legal_actions[query.correct_action_index]
+
+    assert before_diag["legal_action_count"] == 68
+    assert before_diag["scored_action_count"] == 68
+    assert mid_diag["online_update_count"] == 1
+    assert mid_diag["session_belief_norm"] > 0.0
+    assert mid_diag["level_belief_norm"] > 0.0
+    assert after_scores[correct].score != before_scores[correct].score
+
+    session_norm = float(agent.diagnostics()["session_belief_norm"])
+    agent.reset_level()
+    final = agent.diagnostics()
+
+    assert final["level_belief_norm"] == 0.0
+    assert final["session_belief_norm"] == session_norm
+    assert final["runtime_trace_cursor"] is False
+    assert final["runtime_action_sequence_replay"] is False
+    assert final["runtime_state_hash_to_action"] is False
+    assert final["runtime_per_game_behavior"] is False
 
 
 def test_object_event_checkpoint_roundtrip_contains_anti_replay_metadata(tmp_path: Path) -> None:

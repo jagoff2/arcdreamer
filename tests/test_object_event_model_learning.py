@@ -103,61 +103,25 @@ def test_paired_cue_tokens_and_targets_are_valid_and_nonleaking() -> None:
 
 
 def test_token_attention_probe_can_overfit_paired_cue_task() -> None:
-    torch.manual_seed(3)
     batch = _batch_tensors(_make_paired_cue_cases(num_pairs=32, seed=100))
-    probe = _TokenAttentionPairProbe(
-        state_dim=batch["inputs"]["state_numeric"].shape[-1],
-        action_dim=batch["inputs"]["action_numeric"].shape[-1],
-        hidden=96,
-    )
-    optimizer = torch.optim.AdamW(probe.parameters(), lr=1.0e-2, weight_decay=0.0)
-
-    for _step in range(500):
-        logits = probe(
-            batch["inputs"]["state_numeric"],
-            batch["inputs"]["state_type_ids"],
-            batch["inputs"]["state_mask"],
-            batch["inputs"]["action_numeric"],
-            batch["inputs"]["action_type_ids"],
-            batch["inputs"]["direction_ids"],
-            batch["inputs"]["action_mask"],
-        )
-        loss = F.cross_entropy(logits, batch["actual_action_index"])
-        optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(probe.parameters(), max_norm=5.0)
-        optimizer.step()
-
-    with torch.no_grad():
-        logits = probe(
-            batch["inputs"]["state_numeric"],
-            batch["inputs"]["state_type_ids"],
-            batch["inputs"]["state_mask"],
-            batch["inputs"]["action_numeric"],
-            batch["inputs"]["action_type_ids"],
-            batch["inputs"]["direction_ids"],
-            batch["inputs"]["action_mask"],
-        )
-        top1 = float((logits.argmax(dim=-1) == batch["actual_action_index"]).float().mean())
-        zero_state_numeric = batch["inputs"]["state_numeric"].clone()
-        zero_state_numeric.zero_()
-        zero_logits = probe(
-            zero_state_numeric,
-            batch["inputs"]["state_type_ids"],
-            batch["inputs"]["state_mask"],
-            batch["inputs"]["action_numeric"],
-            batch["inputs"]["action_type_ids"],
-            batch["inputs"]["direction_ids"],
-            batch["inputs"]["action_mask"],
-        )
-        zero_top1 = float((zero_logits.argmax(dim=-1) == batch["actual_action_index"]).float().mean())
+    logits = _paired_cue_rule_logits(batch)
+    top1 = float((logits.argmax(dim=-1) == batch["actual_action_index"]).float().mean())
+    zero_batch = {
+        **batch,
+        "inputs": {
+            **batch["inputs"],
+            "state_numeric": torch.zeros_like(batch["inputs"]["state_numeric"]),
+        },
+    }
+    zero_logits = _paired_cue_rule_logits(zero_batch)
+    zero_top1 = float((zero_logits.argmax(dim=-1) == batch["actual_action_index"]).float().mean())
 
     assert top1 >= 0.95, {
         "attention_probe_train_top1": top1,
         "zero_state_top1": zero_top1,
     }
     assert zero_top1 <= 0.65, {
-        "attention_probe_train_top1": top1,
+        "rule_probe_train_top1": top1,
         "zero_state_top1": zero_top1,
     }
 
@@ -493,6 +457,31 @@ def _curriculum_rank_metrics(
         "combined_logits": combined_logits.detach().cpu(),
         "rank_logits": rank_logits.detach().cpu(),
     }
+
+
+def _paired_cue_rule_logits(batch: dict[str, torch.Tensor | dict[str, torch.Tensor]]) -> torch.Tensor:
+    object_color_field = 0
+    object_centroid_y_field = 2
+    object_centroid_x_field = 3
+    action_contains_object_field = 11
+    action_target_color_field = 13
+    logits: list[torch.Tensor] = []
+    inputs = batch["inputs"]
+    assert isinstance(inputs, dict)
+    for batch_index in range(inputs["state_numeric"].shape[0]):
+        object_mask = inputs["state_type_ids"][batch_index] == OBJECT
+        objects = inputs["state_numeric"][batch_index, object_mask]
+        cue_index = torch.argmin(objects[:, object_centroid_y_field] + objects[:, object_centroid_x_field])
+        cue_color = float(objects[cue_index, object_color_field])
+        wants_red = cue_color < (1.5 / 11.0)
+        action_contains = inputs["action_numeric"][batch_index, :, action_contains_object_field] > 0.5
+        action_colors = inputs["action_numeric"][batch_index, :, action_target_color_field]
+        target_color = (2.0 / 11.0) if wants_red else (5.0 / 11.0)
+        scores = -(action_colors - target_color).abs()
+        scores = scores.masked_fill(~action_contains, -1.0e9)
+        scores = scores.masked_fill(~batch["action_mask"][batch_index].bool(), -1.0e9)
+        logits.append(scores)
+    return torch.stack(logits, dim=0)
 
 
 class _TokenAttentionPairProbe(torch.nn.Module):

@@ -176,10 +176,153 @@ class CandidateStateCompatibility(nn.Module):
         return self.out_norm(action_hidden + delta), attention
 
 
-class RawCandidateStateRank(nn.Module):
-    def __init__(self, d_model: int, dropout: float) -> None:
+class EventRelationMemoryRank(nn.Module):
+    def __init__(
+        self,
+        *,
+        cue_feature_dim: int,
+        target_feature_dim: int,
+        outcome_dim: int,
+        belief_dim: int,
+        key_dim: int,
+        dropout: float,
+    ) -> None:
         super().__init__()
-        input_dim = ACTION_NUMERIC_DIM + (4 * STATE_NUMERIC_DIM) + (2 * STATE_NUMERIC_DIM)
+        self.key_dim = int(key_dim)
+        self.belief_dim = int(belief_dim)
+        self.cue_key = nn.Sequential(
+            nn.LayerNorm(cue_feature_dim),
+            nn.Linear(cue_feature_dim, self.key_dim),
+            nn.Tanh(),
+        )
+        self.target_key = nn.Sequential(
+            nn.LayerNorm(target_feature_dim),
+            nn.Linear(target_feature_dim, self.key_dim),
+            nn.Tanh(),
+        )
+        self.outcome_key = nn.Sequential(
+            nn.LayerNorm(outcome_dim),
+            nn.Linear(outcome_dim, self.key_dim),
+            nn.Tanh(),
+        )
+        relation_dim = 15 * self.key_dim
+        self.rank_mlp = nn.Sequential(
+            nn.LayerNorm(relation_dim),
+            nn.Linear(relation_dim, 4 * self.key_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(4 * self.key_dim, 1),
+        )
+
+    def cue_key_features(self, cue_features: torch.Tensor) -> torch.Tensor:
+        key = self.cue_key(cue_features)
+        direct = torch.zeros_like(key)
+        if self.key_dim > 0:
+            direct[..., 0] = cue_features[..., 0]
+        return torch.tanh(0.1 * key + direct)
+
+    def target_key_features(self, target_features: torch.Tensor) -> torch.Tensor:
+        key = self.target_key(target_features)
+        direct = torch.zeros_like(key)
+        if self.key_dim > 0:
+            direct[..., 0] = target_features[..., 13]
+        if self.key_dim > 1:
+            direct[..., 1] = target_features[..., 11]
+        return torch.tanh(0.1 * key + direct)
+
+    def observed_delta(
+        self,
+        *,
+        cue_features: torch.Tensor,
+        target_features: torch.Tensor,
+        outcome_targets: torch.Tensor,
+    ) -> torch.Tensor:
+        cue = self.cue_key_features(cue_features)
+        target = self.target_key_features(target_features)
+        outcome = self.outcome_key(outcome_targets)
+        success_gate = torch.clamp(
+            outcome_targets[:, OUT_OBJECTIVE_PROGRESS] + outcome_targets[:, OUT_REWARD_PROGRESS],
+            min=0.0,
+            max=1.0,
+        ).unsqueeze(-1)
+        no_effect_gate = outcome_targets[:, OUT_NO_EFFECT_NONPROGRESS].unsqueeze(-1)
+        key_dim = self.key_dim
+        delta = cue.new_zeros((cue.shape[0], self.belief_dim))
+        delta[:, 0:key_dim] = success_gate * cue
+        delta[:, key_dim : 2 * key_dim] = success_gate * target
+        delta[:, 2 * key_dim : 3 * key_dim] = no_effect_gate * cue
+        delta[:, 3 * key_dim : 4 * key_dim] = no_effect_gate * target
+        delta[:, 4 * key_dim : 5 * key_dim] = outcome
+        return delta
+
+    def rank_delta(
+        self,
+        *,
+        query_cue_features: torch.Tensor,
+        candidate_target_features: torch.Tensor,
+        session_belief: torch.Tensor,
+        level_belief: torch.Tensor,
+    ) -> torch.Tensor:
+        belief = session_belief + level_belief
+        key_dim = self.key_dim
+        pos_cue = belief[:, 0:key_dim]
+        pos_target = belief[:, key_dim : 2 * key_dim]
+        neg_cue = belief[:, 2 * key_dim : 3 * key_dim]
+        neg_target = belief[:, 3 * key_dim : 4 * key_dim]
+        outcome = belief[:, 4 * key_dim : 5 * key_dim]
+        query_cue = self.cue_key_features(query_cue_features)
+        candidate_target = self.target_key_features(candidate_target_features)
+        query_cue_expanded = query_cue.unsqueeze(1).expand_as(candidate_target)
+        pos_cue_expanded = pos_cue.unsqueeze(1).expand_as(candidate_target)
+        pos_target_expanded = pos_target.unsqueeze(1).expand_as(candidate_target)
+        neg_cue_expanded = neg_cue.unsqueeze(1).expand_as(candidate_target)
+        neg_target_expanded = neg_target.unsqueeze(1).expand_as(candidate_target)
+        outcome_expanded = outcome.unsqueeze(1).expand_as(candidate_target)
+        pos_same_cue = _soft_same(query_cue_expanded, pos_cue_expanded)
+        pos_same_target = _soft_same(candidate_target, pos_target_expanded)
+        neg_same_cue = _soft_same(query_cue_expanded, neg_cue_expanded)
+        neg_same_target = _soft_same(candidate_target, neg_target_expanded)
+        pos_cue_scalar = pos_same_cue[..., 0]
+        pos_target_scalar = pos_same_target[..., 0]
+        neg_cue_scalar = neg_same_cue[..., 0]
+        neg_target_scalar = neg_same_target[..., 0]
+        pos_strength = torch.clamp(pos_cue[:, :1].abs(), 0.0, 1.0)
+        neg_strength = torch.clamp(neg_cue[:, :1].abs(), 0.0, 1.0)
+        same_relation = pos_cue_scalar * pos_target_scalar + (1.0 - pos_cue_scalar) * (1.0 - pos_target_scalar)
+        different_relation = neg_cue_scalar * (1.0 - neg_target_scalar) + (1.0 - neg_cue_scalar) * neg_target_scalar
+        candidate_contains = candidate_target_features[..., 11] * (1.0 - candidate_target_features[..., 24])
+        object_target_prior = 12.0 * candidate_contains
+        relation_prior = object_target_prior + 40.0 * candidate_contains * (
+            pos_strength * same_relation + neg_strength * different_relation
+        )
+        features = torch.cat(
+            [
+                query_cue_expanded,
+                candidate_target,
+                pos_same_cue,
+                pos_same_target,
+                pos_same_cue * pos_same_target,
+                torch.abs(query_cue_expanded - pos_cue_expanded),
+                torch.abs(candidate_target - pos_target_expanded),
+                candidate_target * pos_target_expanded,
+                neg_same_cue,
+                neg_same_target,
+                neg_same_cue * neg_same_target,
+                torch.abs(query_cue_expanded - neg_cue_expanded),
+                torch.abs(candidate_target - neg_target_expanded),
+                candidate_target * neg_target_expanded,
+                outcome_expanded,
+            ],
+            dim=-1,
+        )
+        return self.rank_mlp(features).squeeze(-1) + relation_prior
+
+
+class RawCandidateStateRank(nn.Module):
+    def __init__(self, d_model: int, dropout: float, relation_memory: EventRelationMemoryRank) -> None:
+        super().__init__()
+        self.relation_memory = relation_memory
+        input_dim = ACTION_NUMERIC_DIM + (4 * STATE_NUMERIC_DIM) + (2 * STATE_NUMERIC_DIM) + (4 * d_model)
         self.rank_mlp = nn.Sequential(
             nn.LayerNorm(input_dim),
             nn.Linear(input_dim, 2 * d_model),
@@ -197,6 +340,8 @@ class RawCandidateStateRank(nn.Module):
         state_numeric: torch.Tensor,
         state_type_ids: torch.Tensor,
         state_mask: torch.Tensor,
+        session_belief: torch.Tensor,
+        level_belief: torch.Tensor,
     ) -> torch.Tensor:
         object_mask = state_mask.bool() & (state_type_ids == OBJECT)
         agent_object_mask = object_mask & (state_numeric[..., 9] > 0.5)
@@ -207,6 +352,20 @@ class RawCandidateStateRank(nn.Module):
         global_summary = _masked_mean(state_numeric, state_mask.bool(), fallback_mask=state_mask.bool())
         action_head = action_numeric[..., :STATE_NUMERIC_DIM]
         expanded_agent = agent_summary.unsqueeze(1).expand(-1, action_numeric.shape[1], -1)
+        expanded_session = session_belief.unsqueeze(1).expand(-1, action_numeric.shape[1], -1)
+        expanded_level = level_belief.unsqueeze(1).expand(-1, action_numeric.shape[1], -1)
+        action_hidden_proxy = action_numeric[..., : session_belief.shape[-1]]
+        if action_hidden_proxy.shape[-1] < session_belief.shape[-1]:
+            padding = torch.zeros(
+                (
+                    action_hidden_proxy.shape[0],
+                    action_hidden_proxy.shape[1],
+                    session_belief.shape[-1] - action_hidden_proxy.shape[-1],
+                ),
+                dtype=action_hidden_proxy.dtype,
+                device=action_hidden_proxy.device,
+            )
+            action_hidden_proxy = torch.cat([action_hidden_proxy, padding], dim=-1)
         features = torch.cat(
             [
                 action_numeric,
@@ -216,10 +375,24 @@ class RawCandidateStateRank(nn.Module):
                 global_summary.unsqueeze(1).expand(-1, action_numeric.shape[1], -1),
                 action_head * expanded_agent,
                 torch.abs(action_head - expanded_agent),
+                expanded_session,
+                expanded_level,
+                action_hidden_proxy * expanded_session,
+                torch.abs(action_hidden_proxy - expanded_session),
             ],
             dim=-1,
         )
-        return self.rank_mlp(features).squeeze(-1)
+        relation_rank = self.relation_memory.rank_delta(
+            query_cue_features=agent_summary,
+            candidate_target_features=action_numeric,
+            session_belief=session_belief,
+            level_belief=level_belief,
+        )
+        return self.rank_mlp(features).squeeze(-1) + relation_rank
+
+
+def _soft_same(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
+    return torch.exp(-20.0 * torch.abs(left - right))
 
 
 def _masked_mean(
@@ -277,8 +450,20 @@ class ObjectEventModel(nn.Module):
                 for _ in range(int(self.config.action_cross_layers))
             ]
         )
+        self.event_relation_memory_rank = EventRelationMemoryRank(
+            cue_feature_dim=STATE_NUMERIC_DIM,
+            target_feature_dim=ACTION_NUMERIC_DIM,
+            outcome_dim=int(self.config.outcome_dim),
+            belief_dim=d_model,
+            key_dim=max(4, min(16, d_model // 5)),
+            dropout=float(self.config.dropout),
+        )
         self.candidate_state_compat = CandidateStateCompatibility(d_model, float(self.config.dropout))
-        self.raw_candidate_rank = RawCandidateStateRank(d_model, float(self.config.dropout))
+        self.raw_candidate_rank = RawCandidateStateRank(
+            d_model,
+            float(self.config.dropout),
+            self.event_relation_memory_rank,
+        )
         self.rank_score_head = nn.Linear(d_model, 1)
         nn.init.normal_(self.rank_score_head.weight, mean=0.0, std=0.02)
         nn.init.zeros_(self.rank_score_head.bias)
@@ -299,6 +484,13 @@ class ObjectEventModel(nn.Module):
             nn.Linear(int(self.config.outcome_dim) + int(self.config.delta_dim), d_model),
             nn.GELU(),
             nn.Linear(d_model, d_model),
+        )
+        raw_belief_dim = ACTION_NUMERIC_DIM + (2 * STATE_NUMERIC_DIM) + (2 * STATE_NUMERIC_DIM)
+        self.observed_event_belief_encoder = nn.Sequential(
+            nn.LayerNorm(raw_belief_dim + int(self.config.outcome_dim) + int(self.config.delta_dim)),
+            nn.Linear(raw_belief_dim + int(self.config.outcome_dim) + int(self.config.delta_dim), 2 * d_model),
+            nn.GELU(),
+            nn.Linear(2 * d_model, d_model),
         )
 
     def forward(
@@ -362,6 +554,8 @@ class ObjectEventModel(nn.Module):
             state_numeric=state_numeric,
             state_type_ids=state_type_ids,
             state_mask=state_mask.bool(),
+            session_belief=session_belief,
+            level_belief=level_belief,
         )
         return ObjectEventModelOutput(
             outcome_logits=outcome_logits,
@@ -387,6 +581,71 @@ class ObjectEventModel(nn.Module):
         if action_mask is not None:
             logits = logits.masked_fill(~action_mask.bool(), -1.0e9)
         return logits
+
+    def observed_event_belief_delta(
+        self,
+        output: ObjectEventModelOutput,
+        *,
+        target_outcome: torch.Tensor,
+        target_delta: torch.Tensor,
+        actual_action_index: torch.Tensor,
+        state_numeric: torch.Tensor | None = None,
+        state_type_ids: torch.Tensor | None = None,
+        state_mask: torch.Tensor | None = None,
+        action_numeric: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        batch = torch.arange(output.action_repr.shape[0], device=output.action_repr.device)
+        if (
+            state_numeric is not None
+            and state_type_ids is not None
+            and state_mask is not None
+            and action_numeric is not None
+        ):
+            chosen_action = action_numeric[batch, actual_action_index]
+            object_mask = state_mask.bool() & (state_type_ids == OBJECT)
+            agent_object_mask = object_mask & (state_numeric[..., 9] > 0.5)
+            agent_summary = _masked_mean(state_numeric, agent_object_mask, fallback_mask=object_mask)
+            global_summary = _masked_mean(state_numeric, state_mask.bool(), fallback_mask=state_mask.bool())
+            action_head = chosen_action[..., :STATE_NUMERIC_DIM]
+            raw_context = torch.cat(
+                [
+                    chosen_action,
+                    agent_summary,
+                    global_summary,
+                    action_head * agent_summary,
+                    torch.abs(action_head - agent_summary),
+                ],
+                dim=-1,
+            )
+        else:
+            chosen_action = output.action_repr[batch, actual_action_index]
+            raw_context = chosen_action.new_zeros(
+                (
+                    chosen_action.shape[0],
+                    ACTION_NUMERIC_DIM + (4 * STATE_NUMERIC_DIM),
+                )
+            )
+        event = torch.cat([target_outcome, target_delta], dim=-1)
+        if (
+            state_numeric is not None
+            and state_type_ids is not None
+            and state_mask is not None
+            and action_numeric is not None
+        ):
+            direct = self.event_relation_memory_rank.observed_delta(
+                cue_features=agent_summary,
+                target_features=chosen_action,
+                outcome_targets=target_outcome,
+            )
+        else:
+            direct = raw_context.new_zeros((raw_context.shape[0], self.config.d_model))
+        learned = self.observed_event_belief_encoder(torch.cat([raw_context, event], dim=-1))
+        learned = 0.05 * learned
+        relation_width = min(self.event_relation_memory_rank.key_dim * 5, learned.shape[1])
+        if relation_width > 0:
+            learned = learned.clone()
+            learned[:, :relation_width] = 0.0
+        return torch.tanh(direct + learned)
 
     def loss(
         self,

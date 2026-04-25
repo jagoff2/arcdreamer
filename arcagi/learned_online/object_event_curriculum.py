@@ -36,6 +36,19 @@ class ObjectEventCurriculumConfig:
 
 
 @dataclass(frozen=True)
+class OnlineObjectEventCurriculumConfig:
+    seed: int = 0
+    train_sessions: int = 32
+    heldout_sessions: int = 32
+    levels_per_session: int = 3
+    max_objects: int = 6
+    grid_size: int = 8
+    include_distractors: bool = True
+    require_full_dense_actions: bool = True
+    curriculum: str = "latent_rule_color_click"
+
+
+@dataclass(frozen=True)
 class CandidateEventTargets:
     outcome: np.ndarray
     value: np.ndarray
@@ -74,6 +87,29 @@ class ObjectEventCurriculumSplit:
 
 
 @dataclass(frozen=True)
+class OnlineObjectEventLevel:
+    session_index: int
+    level_index: int
+    geometry_seed: int
+    cue_mode: int
+    latent_rule: int
+    example: ObjectEventExample
+
+
+@dataclass(frozen=True)
+class OnlineObjectEventSession:
+    session_index: int
+    latent_rule: int
+    levels: tuple[OnlineObjectEventLevel, ...]
+
+
+@dataclass(frozen=True)
+class OnlineObjectEventCurriculumSplit:
+    train: tuple[OnlineObjectEventSession, ...]
+    heldout: tuple[OnlineObjectEventSession, ...]
+
+
+@dataclass(frozen=True)
 class ObjectEventBatch:
     state_numeric: np.ndarray
     state_type_ids: np.ndarray
@@ -107,6 +143,103 @@ def build_paired_color_click_curriculum(
         split="heldout",
     )
     return ObjectEventCurriculumSplit(train=train, heldout=heldout)
+
+
+def build_online_object_event_curriculum(
+    config: OnlineObjectEventCurriculumConfig,
+) -> OnlineObjectEventCurriculumSplit:
+    if config.curriculum != "latent_rule_color_click":
+        raise ValueError(f"unknown online object-event curriculum: {config.curriculum!r}")
+    return OnlineObjectEventCurriculumSplit(
+        train=generate_online_object_event_sessions(config, split="train"),
+        heldout=generate_online_object_event_sessions(config, split="heldout"),
+    )
+
+
+def generate_online_object_event_sessions(
+    config: OnlineObjectEventCurriculumConfig,
+    *,
+    split: str,
+) -> tuple[OnlineObjectEventSession, ...]:
+    if int(config.levels_per_session) < 2:
+        raise ValueError("online object-event sessions require levels_per_session >= 2")
+    count = int(config.train_sessions if split == "train" else config.heldout_sessions)
+    base_seed = int(config.seed) * 1_000_000 + (101 if split == "train" else 701_101)
+    sessions: list[OnlineObjectEventSession] = []
+    for session_index in range(max(count, 0)):
+        session_rng = np.random.default_rng(int(base_seed + session_index * 9_973))
+        latent_rule = int(session_rng.integers(0, 2))
+        cue_modes = [int(session_rng.integers(0, 2)) for _ in range(int(config.levels_per_session))]
+        if len(set(cue_modes)) == 1:
+            cue_modes[-1] = 1 - cue_modes[0]
+        levels: list[OnlineObjectEventLevel] = []
+        for level_index in range(int(config.levels_per_session)):
+            cue_mode = int(cue_modes[level_index])
+            geometry_seed = int(base_seed + session_index * 10_000 + level_index)
+            example = make_latent_rule_color_click_example(
+                config=config,
+                geometry_seed=geometry_seed,
+                cue_mode=cue_mode,
+                latent_rule=latent_rule,
+                split=split,
+                session_index=session_index,
+                level_index=level_index,
+            )
+            levels.append(
+                OnlineObjectEventLevel(
+                    session_index=int(session_index),
+                    level_index=int(level_index),
+                    geometry_seed=geometry_seed,
+                    cue_mode=cue_mode,
+                    latent_rule=latent_rule,
+                    example=example,
+                )
+            )
+        sessions.append(
+            OnlineObjectEventSession(
+                session_index=int(session_index),
+                latent_rule=latent_rule,
+                levels=tuple(levels),
+            )
+        )
+    return tuple(sessions)
+
+
+def make_latent_rule_color_click_example(
+    *,
+    config: OnlineObjectEventCurriculumConfig,
+    geometry_seed: int,
+    cue_mode: int,
+    latent_rule: int,
+    split: str,
+    session_index: int = 0,
+    level_index: int = 0,
+) -> ObjectEventExample:
+    geometry = _sample_geometry(
+        geometry_seed=int(geometry_seed),
+        config=ObjectEventCurriculumConfig(
+            seed=int(config.seed),
+            train_geometries=0,
+            heldout_geometries=0,
+            max_objects=int(config.max_objects),
+            grid_size=int(config.grid_size),
+            include_distractors=bool(config.include_distractors),
+            require_full_dense_actions=bool(config.require_full_dense_actions),
+        ),
+    )
+    target_mode = int(cue_mode) if int(latent_rule) == 0 else 1 - int(cue_mode)
+    return _example_from_geometry(
+        geometry,
+        cue_mode=int(cue_mode),
+        split=split,
+        target_mode=target_mode,
+        metadata_extra={
+            "curriculum": "latent_rule_color_click",
+            "session_index": int(session_index),
+            "level_index": int(level_index),
+            "latent_rule": int(latent_rule),
+        },
+    )
 
 
 def collate_object_event_examples(examples: Sequence[ObjectEventExample]) -> ObjectEventBatch:
@@ -212,6 +345,8 @@ def _example_from_geometry(
     *,
     cue_mode: int,
     split: str,
+    target_mode: int | None = None,
+    metadata_extra: dict[str, Any] | None = None,
 ) -> ObjectEventExample:
     grid_size = int(geometry["grid_size"])
     cue_color = 1 if int(cue_mode) == 0 else 2
@@ -230,7 +365,8 @@ def _example_from_geometry(
         for row, col in obj.cells:
             grid[row, col] = int(obj.color)
     legal_actions = tuple(geometry["actions"])
-    correct_action = _click_action(red_pos) if int(cue_mode) == 0 else _click_action(blue_pos)
+    effective_target_mode = int(cue_mode) if target_mode is None else int(target_mode)
+    correct_action = _click_action(red_pos) if effective_target_mode == 0 else _click_action(blue_pos)
     state = StructuredState(
         task_id="synthetic_object_event",
         episode_id=f"{split}_{geometry['geometry_seed']}",
@@ -273,11 +409,14 @@ def _example_from_geometry(
         "split": str(split),
         "geometry_seed": int(geometry["geometry_seed"]),
         "cue_mode": int(cue_mode),
+        "target_mode": int(effective_target_mode),
         "red_action_index": int(legal_actions.index(_click_action(red_pos))),
         "blue_action_index": int(legal_actions.index(_click_action(blue_pos))),
         "correct_action_index": int(transition_targets.actual_action_index),
         "legal_action_count": int(len(legal_actions)),
     }
+    if metadata_extra:
+        metadata.update(dict(metadata_extra))
     return ObjectEventExample(
         state=state,
         next_state=next_state,

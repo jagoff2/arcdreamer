@@ -420,6 +420,7 @@ def _write_object_relative_action_features(
         float(x0) / max(float(width), 1.0),
         float(y1) / max(float(height), 1.0),
         float(x1) / max(float(width), 1.0),
+        *(1.0 if tag in set(obj.tags) else 0.0 for tag in ALLOWED_OBJECT_TAGS),
     ]
     features[offset : offset + len(values)] = np.asarray(values, dtype=np.float32)
     # Duplicate the clicked-object color in a stable low index for candidate-level
