@@ -10,6 +10,12 @@ from typing import Any
 from arcagi.agents.graph_agent import GraphExplorerAgent
 from arcagi.agents.random_agent import RandomHeuristicAgent
 from arcagi.core.progress_signals import action_family
+from arcagi.learned_online.object_event_bridge import (
+    SelectedActionObservation,
+    assert_no_forbidden_metadata_as_model_input,
+    build_object_event_observation,
+)
+from arcagi.perception.object_encoder import extract_structured_state
 from arcagi.envs.arc_adapter import (
     Arcade,
     ArcToolkitEnv,
@@ -218,6 +224,7 @@ def run_episode(
     stop_on_positive_reward: bool = False,
     progress_every: int = 0,
     trace_path: str | Path | None = None,
+    object_event_bridge_diagnostics: bool = False,
 ) -> dict[str, object]:
     observation = env.reset(seed=seed)
     _reset_agent_for_episode(agent)
@@ -237,6 +244,7 @@ def run_episode(
     max_same_action_streak = 0
     same_action_streak = 0
     previous_action = ""
+    last_bridge_diagnostics: dict[str, Any] = {}
     trace_handle = None
     try:
         if trace_path is not None:
@@ -280,6 +288,17 @@ def run_episode(
             if reset_action:
                 reset_steps += 1
             result = env.step(action)
+            bridge_diagnostics = (
+                _object_event_bridge_diagnostics(
+                    before=before,
+                    action=action_text,
+                    result=result,
+                )
+                if object_event_bridge_diagnostics
+                else {}
+            )
+            if bridge_diagnostics:
+                last_bridge_diagnostics = bridge_diagnostics
             _observe_step(agent, action=action_text, before=before, result=result)
             observation = result.observation
             after_levels = _levels_completed(observation)
@@ -337,6 +356,7 @@ def run_episode(
                         "after_game_state": after_game_state,
                         "latest_language": latest_language,
                         "last_plan_scores": _json_safe(getattr(agent, "last_plan_scores", {})),
+                        "object_event_bridge": bridge_diagnostics,
                         "diagnostics": _compact_diagnostics(getattr(agent, "diagnostics", lambda: {})()),
                     },
                 )
@@ -357,6 +377,7 @@ def run_episode(
                             "action_repeat_count": action_counts[action_text],
                             "family_counts": dict(family_counts),
                             "spotlight_feature_schema_version": spotlight_feature_schema_version,
+                            "object_event_bridge": bridge_diagnostics,
                             **_agent_claim_metadata(agent),
                         },
                         sort_keys=True,
@@ -379,6 +400,7 @@ def run_episode(
                     "action_histogram": dict(action_counts),
                     "family_histogram": dict(family_counts),
                     "max_same_action_streak": max_same_action_streak,
+                    "object_event_bridge": last_bridge_diagnostics,
                     "diagnostics": _compact_diagnostics(getattr(agent, "diagnostics", lambda: {})()),
                     **_agent_claim_metadata(agent),
                 },
@@ -401,6 +423,7 @@ def run_episode(
         "family_histogram": dict(family_counts),
         "max_same_action_streak": max_same_action_streak,
         "trace_path": str(trace_path) if trace_path is not None else "",
+        "object_event_bridge": last_bridge_diagnostics,
         "diagnostics": getattr(agent, "diagnostics", lambda: {})(),
     }
 
@@ -460,6 +483,7 @@ def evaluate_arc(
     progress_every: int = 0,
     trace_path: str | None = None,
     allow_sparse_click_smoke: bool = False,
+    object_event_bridge_diagnostics: bool = False,
 ) -> dict[str, object]:
     if not arc_toolkit_available():
         return {"agent": agent_name, "skipped": True, "reason": "ARC toolkit not installed"}
@@ -487,6 +511,7 @@ def evaluate_arc(
                 stop_on_positive_reward=False,
                 progress_every=progress_every,
                 trace_path=_trace_path_for_game(trace_path, game_id, index, len(games)) if trace_path else None,
+                object_event_bridge_diagnostics=bool(object_event_bridge_diagnostics),
             )
         finally:
             env.close()
@@ -511,6 +536,49 @@ def _trace_path_for_game(base_path: str, game_id: str, index: int, game_count: i
     return base / f"{index:02d}_{safe_game}.jsonl"
 
 
+def _object_event_bridge_diagnostics(*, before: Any, action: str, result: Any) -> dict[str, Any]:
+    try:
+        before_state = extract_structured_state(before)
+        after_state = extract_structured_state(result.observation)
+        legal_actions = tuple(str(item) for item in getattr(before, "available_actions", ()) or ())
+        event = build_object_event_observation(
+            SelectedActionObservation(
+                before=before_state,
+                selected_action=str(action),
+                after=after_state,
+                reward=float(result.reward),
+                terminated=bool(result.terminated or result.truncated),
+                legal_actions=legal_actions,
+                info=dict(getattr(result, "info", {}) or {}),
+            ),
+            metadata={
+                "object_event_bridge_enabled": True,
+                "diagnostic_only": True,
+            },
+        )
+        metadata_forbidden_count = 0
+        try:
+            assert_no_forbidden_metadata_as_model_input(event.model_input_metadata())
+        except AssertionError:
+            metadata_forbidden_count = 1
+        return {
+            "object_event_bridge_enabled": True,
+            "object_event_legal_action_count": int(event.legal_action_count),
+            "object_event_scored_action_count": int(event.legal_action_count),
+            "object_event_selected_action_index": int(event.selected_action_index),
+            "object_event_metadata_input_forbidden_count": int(metadata_forbidden_count),
+            "object_event_action_surface_capped": False,
+            "object_event_oracle_support_used": False,
+            "object_event_trace_replay_used": False,
+            "object_event_graph_controller_used": False,
+        }
+    except Exception as exc:
+        return {
+            "object_event_bridge_enabled": False,
+            "object_event_bridge_error": repr(exc),
+        }
+
+
 def _write_trace_row(handle: Any, row: dict[str, Any]) -> None:
     handle.write(json.dumps(_json_safe(row), sort_keys=True) + "\n")
     handle.flush()
@@ -529,6 +597,19 @@ def _compact_diagnostics(diagnostics: Any) -> dict[str, Any]:
         "legal_action_count",
         "last_scored_action_count",
         "last_legal_action_count",
+        "full_dense_surface_scored",
+        "object_event_bridge_enabled",
+        "object_event_legal_action_count",
+        "object_event_scored_action_count",
+        "object_event_selected_action_index",
+        "object_event_online_update_count",
+        "object_event_session_belief_norm",
+        "object_event_level_belief_norm",
+        "object_event_metadata_input_forbidden_count",
+        "object_event_action_surface_capped",
+        "object_event_oracle_support_used",
+        "object_event_trace_replay_used",
+        "object_event_graph_controller_used",
         "runtime_controller_active",
         "objective_stall_steps",
         "level_stall_steps",
@@ -677,6 +758,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="allow ARCAGI_SPARSE_CLICKS_BASELINE=1 for explicitly invalid smoke/debug runs",
     )
+    arc_parser.add_argument(
+        "--object-event-bridge-diagnostics",
+        action="store_true",
+        help="emit passive selected-action object-event bridge diagnostics without changing control",
+    )
     return parser
 
 
@@ -704,6 +790,7 @@ def main() -> int:
             mode=args.mode,
             trace_path=args.trace_path or None,
             allow_sparse_click_smoke=bool(args.allow_sparse_click_smoke),
+            object_event_bridge_diagnostics=bool(args.object_event_bridge_diagnostics),
         )
         print(json.dumps(result, indent=2))
         return 0

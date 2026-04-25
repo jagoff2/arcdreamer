@@ -304,7 +304,7 @@ class EventRelationMemoryRank(nn.Module):
         different_relation = neg_cue_scalar * (1.0 - neg_target_scalar) + (1.0 - neg_cue_scalar) * neg_target_scalar
         candidate_contains = candidate_target_features[..., 11] * (1.0 - candidate_target_features[..., 24])
         object_target_prior = 12.0 * candidate_contains
-        repeat_penalty = 80.0 * candidate_contains * level_neg_strength * level_neg_target_scalar
+        repeat_penalty = 120.0 * candidate_contains * level_neg_strength * level_neg_target_scalar
         relation_prior = object_target_prior + 40.0 * candidate_contains * (
             pos_strength * same_relation + neg_strength * different_relation
         ) - repeat_penalty

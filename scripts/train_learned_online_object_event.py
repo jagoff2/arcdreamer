@@ -16,6 +16,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from arcagi.agents.learned_online_object_event_agent import LearnedOnlineObjectEventAgent
+from arcagi.learned_online.object_event_bridge import (
+    SelectedActionObservation,
+    assert_no_forbidden_metadata_as_model_input,
+    build_object_event_observation,
+)
 from arcagi.learned_online.object_event_curriculum import (
     ActiveOnlineObjectEventConfig,
     OnlineObjectEventCurriculumConfig,
@@ -51,7 +56,11 @@ def main() -> None:
         default="synthetic_object_event",
     )
     parser.add_argument("--source", choices=("synthetic_object_event", "trace_jsonl"), default=None)
-    parser.add_argument("--curriculum", choices=("paired_color_click", "latent_rule_color_click"), default="paired_color_click")
+    parser.add_argument(
+        "--curriculum",
+        choices=("paired_color_click", "latent_rule_color_click", "latent_rule_variable_palette"),
+        default="paired_color_click",
+    )
     parser.add_argument("--trace-path", type=Path, default=None)
     parser.add_argument("--steps", type=int, default=300)
     parser.add_argument("--batch-size", type=int, default=16)
@@ -62,6 +71,9 @@ def main() -> None:
     parser.add_argument("--levels-per-session", type=int, default=3)
     parser.add_argument("--support-updates", type=int, default=1)
     parser.add_argument("--max-distractors", type=int, default=1)
+    parser.add_argument("--palette-size", type=int, default=8)
+    parser.add_argument("--require-role-balanced-colors", action="store_true")
+    parser.add_argument("--active-eval-level0-stratified", action="store_true")
     parser.add_argument("--eval-every", type=int, default=100)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -179,21 +191,23 @@ def _run_synthetic_online_object_event(
                 include_distractors=True,
                 grid_size=8,
                 max_steps_per_level=3,
-                curriculum="latent_rule_color_click",
+                curriculum=str(args.curriculum),
+                palette_size=int(args.palette_size),
+                require_role_balanced_colors=bool(args.require_role_balanced_colors),
             )
         )
     else:
         curriculum = build_online_object_event_curriculum(
             OnlineObjectEventCurriculumConfig(
-            seed=int(args.seed),
-            train_sessions=int(args.train_sessions),
-            heldout_sessions=int(args.heldout_sessions),
-            levels_per_session=int(args.levels_per_session),
-            max_objects=3,
-            grid_size=8,
-            include_distractors=False,
-            require_full_dense_actions=True,
-            curriculum="latent_rule_color_click",
+                seed=int(args.seed),
+                train_sessions=int(args.train_sessions),
+                heldout_sessions=int(args.heldout_sessions),
+                levels_per_session=int(args.levels_per_session),
+                max_objects=3,
+                grid_size=8,
+                include_distractors=False,
+                require_full_dense_actions=True,
+                curriculum="latent_rule_color_click",
             )
         )
     model = ObjectEventModel(config).to(device)
@@ -217,10 +231,16 @@ def _run_synthetic_online_object_event(
         next_output = _forward_tensors(model, next_tensors, session_belief=session_belief)
         next_logits = policy_rank_logits_from_predictions(next_output, next_tensors["action_mask"])
         next_loss = F.cross_entropy(next_logits, next_tensors["actual_action_index"])
+        wrong_indices = _wrong_candidate_indices(support_examples, device=device)
+        failure_support_tensors = _with_observed_candidate_targets(support_tensors, wrong_indices)
+        failure_belief = _observed_belief_delta(model, failure_support_tensors)
+        failure_query_output = _forward_tensors(model, query_tensors, session_belief=failure_belief)
+        failure_query_logits = policy_rank_logits_from_predictions(failure_query_output, query_tensors["action_mask"])
+        failure_loss = F.cross_entropy(failure_query_logits, query_tensors["actual_action_index"])
         support_output = _forward_tensors(model, support_tensors)
         support_logits = policy_rank_logits_from_predictions(support_output, support_tensors["action_mask"])
         plausible_loss = _plausible_red_blue_loss(support_logits, support_examples)
-        loss = query_loss + next_loss + 0.2 * plausible_loss
+        loss = query_loss + next_loss + 0.5 * failure_loss + 0.2 * plausible_loss
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -334,6 +354,19 @@ def _sample_red_blue_indices(
     return torch.as_tensor(indices, dtype=torch.long)
 
 
+def _wrong_candidate_indices(
+    examples: Sequence[ObjectEventExample],
+    *,
+    device: torch.device,
+) -> torch.Tensor:
+    indices: list[int] = []
+    for example in examples:
+        candidates = _candidate_action_indices(example)
+        wrong = [index for index in candidates if int(index) != int(example.correct_action_index)]
+        indices.append(int(wrong[0] if wrong else candidates[0]))
+    return torch.as_tensor(indices, dtype=torch.long, device=device)
+
+
 def _with_observed_candidate_targets(tensors: dict[str, Any], observed_indices: torch.Tensor) -> dict[str, Any]:
     device = tensors["actual_action_index"].device
     observed = observed_indices.to(device=device, dtype=torch.long)
@@ -438,11 +471,65 @@ def _online_training_metrics(
                 "agent_or_cue_click_rate": active_closed["agent_or_cue_click_rate"],
                 "distractor_first_click_rate": active_closed["distractor_first_click_rate"],
                 "target_first_click_rate": active_closed["target_first_click_rate"],
+                "actual_target_first_click_rate": active_closed["actual_target_first_click_rate"],
                 "level_negative_memory_norm": active_closed["level_negative_memory_norm"],
                 "session_relation_memory_norm": heldout_metrics["session_belief_norm"],
+                "object_event_bridge_legal_action_count_mean": active_closed["object_event_bridge_legal_action_count_mean"],
+                "object_event_bridge_selected_action_match_rate": active_closed["object_event_bridge_selected_action_match_rate"],
+                "metadata_model_input_forbidden_count": active_closed["metadata_model_input_forbidden_count"],
+                "observed_distractor_failure_count": active_closed["observed_distractor_failure_count"],
+                "post_failure_candidate_switch_rate": active_closed["post_failure_candidate_switch_rate"],
+                "post_failure_repeat_top1_rate": active_closed["post_failure_repeat_top1_rate"],
+                "level0_target_first_click_rate": active_closed["level0_target_first_click_rate"],
+                "level0_distractor_first_click_rate": active_closed["level0_distractor_first_click_rate"],
+                "level0_success_within_2": active_closed["level0_success_within_2"],
+                "level0_success_within_3": active_closed["level0_success_within_3"],
+                "post_session_target_first_click_rate": active_closed["post_session_target_first_click_rate"],
+                "post_session_distractor_first_click_rate": active_closed["post_session_distractor_first_click_rate"],
+                "post_session_next_level_first_try_acc": active_closed["post_session_next_level_first_try_acc"],
             }
         )
+        metrics.update(_color_role_balance_metrics(train=train, heldout=heldout))
     return metrics
+
+
+def _color_role_balance_metrics(
+    *,
+    train: Sequence[OnlineObjectEventSession],
+    heldout: Sequence[OnlineObjectEventSession],
+) -> dict[str, Any]:
+    train_target, train_distractor = _color_role_counts(train)
+    heldout_target, heldout_distractor = _color_role_counts(heldout)
+    colors = set(train_target) | set(train_distractor) | set(heldout_target) | set(heldout_distractor)
+    target_min = min((heldout_target.get(color, 0) for color in colors), default=0)
+    distractor_min = min((heldout_distractor.get(color, 0) for color in colors), default=0)
+    return {
+        "train_target_color_count_by_color": {str(color): int(train_target.get(color, 0)) for color in sorted(colors)},
+        "train_distractor_color_count_by_color": {str(color): int(train_distractor.get(color, 0)) for color in sorted(colors)},
+        "heldout_target_color_count_by_color": {str(color): int(heldout_target.get(color, 0)) for color in sorted(colors)},
+        "heldout_distractor_color_count_by_color": {str(color): int(heldout_distractor.get(color, 0)) for color in sorted(colors)},
+        "target_color_role_balance_min": float(target_min),
+        "distractor_color_role_balance_min": float(distractor_min),
+    }
+
+
+def _color_role_counts(
+    sessions: Sequence[OnlineObjectEventSession],
+) -> tuple[dict[int, int], dict[int, int]]:
+    target: dict[int, int] = {}
+    distractor: dict[int, int] = {}
+    for session in sessions:
+        for level in session.levels:
+            metadata = level.example.metadata
+            if "target_color" in metadata:
+                color = int(metadata["target_color"])
+                target[color] = target.get(color, 0) + 1
+            raw_distractors = metadata.get("distractor_colors", ())
+            if isinstance(raw_distractors, (list, tuple)):
+                for raw_color in raw_distractors:
+                    color = int(raw_color)
+                    distractor[color] = distractor.get(color, 0) + 1
+    return target, distractor
 
 
 def _evaluate_online_sessions(
@@ -582,16 +669,38 @@ def _active_rollout_metrics(
             "distractor_first_click_rate": 0.0,
             "target_first_click_rate": 0.0,
             "level_negative_memory_norm": 0.0,
+            "object_event_bridge_legal_action_count_mean": 0.0,
+            "object_event_bridge_selected_action_match_rate": 0.0,
+            "metadata_model_input_forbidden_count": 0.0,
+            "observed_distractor_failure_count": 0.0,
+            "post_failure_candidate_switch_rate": 0.0,
+            "post_failure_repeat_top1_rate": 0.0,
+            "level0_target_first_click_rate": 0.0,
+            "level0_distractor_first_click_rate": 0.0,
+            "level0_success_within_2": 0.0,
+            "level0_success_within_3": 0.0,
+            "post_session_target_first_click_rate": 0.0,
+            "post_session_distractor_first_click_rate": 0.0,
+            "post_session_next_level_first_try_acc": 0.0,
         }
     success_steps: list[int] = []
     post_update_hits: list[float] = []
     repeat_hits: list[float] = []
     failed_deltas: list[float] = []
+    bridge_legal_counts: list[float] = []
+    bridge_selected_matches: list[float] = []
+    model_input_forbidden_count = 0
+    observed_distractor_failures = 0
     ordinary_clicks = 0
     agent_clicks = 0
-    target_first = 0
+    target_set_first = 0
+    actual_target_first = 0
     distractor_first = 0
     first_clicks = 0
+    post_session_target_first = 0
+    post_session_distractor_first = 0
+    post_session_first_clicks = 0
+    post_session_hits: list[float] = []
     total_actions = 0
     level_norms: list[float] = []
     for session in sessions:
@@ -615,10 +724,18 @@ def _active_rollout_metrics(
                     agent_clicks += int(is_agent)
                     if step == 1:
                         first_clicks += 1
-                        target_indices = {int(level.example.metadata["red_action_index"]), int(level.example.metadata["blue_action_index"])}
-                        target_first += int(selected in target_indices)
-                        distractor_first += int(is_ordinary and selected not in target_indices)
+                        target_indices = set(_candidate_action_indices(level.example))
+                        target_set_first += int(selected in target_indices)
+                        actual_target_first += int(selected == int(level.example.correct_action_index))
+                        distractor_first += int(_is_distractor_action(level.example, selected, action_row=action_row))
                     result = apply_synthetic_object_event_action(level, selected)
+                    bridge = _synthetic_bridge_observation(level.example, selected, result)
+                    bridge_legal_counts.append(float(bridge.legal_action_count))
+                    bridge_selected_matches.append(float(int(bridge.selected_action_index) == int(result.selected_action_index)))
+                    try:
+                        assert_no_forbidden_metadata_as_model_input(bridge.model_input_metadata())
+                    except AssertionError:
+                        model_input_forbidden_count += 1
                     observed = _with_observed_candidate_targets(tensors, torch.as_tensor([selected], dtype=torch.long, device=device))
                     deltas = _observed_belief_deltas(model, observed)
                     if result.success:
@@ -635,9 +752,49 @@ def _active_rollout_metrics(
                         retry_output = _forward_tensors(model, tensors, session_belief=session_belief, level_belief=level_belief)
                         retry_logits = policy_rank_logits_from_predictions(retry_output, tensors["action_mask"])
                         post_update_hits.append(float(int(torch.argmax(retry_logits[0]).detach().cpu()) == int(level.example.correct_action_index)))
-                        repeat_hits.append(float(int(torch.argmax(retry_logits[0]).detach().cpu()) == selected))
+                        repeat = float(int(torch.argmax(retry_logits[0]).detach().cpu()) == selected)
+                        repeat_hits.append(repeat)
                         failed_deltas.append(float(retry_logits[0, selected].detach().cpu()) - failed_score_before)
+                        if _is_distractor_action(level.example, selected, action_row=action_row):
+                            observed_distractor_failures += 1
             success_steps.append(step_success)
+        if len(session.levels) > 1:
+            query_level = session.levels[1]
+            query = query_level.example
+            query_tensors = _batch_to_tensors(collate_object_event_examples((query,)), device=device)
+            with torch.no_grad():
+                query_output = _forward_tensors(model, query_tensors, session_belief=session_belief)
+                query_logits = policy_rank_logits_from_predictions(query_output, query_tensors["action_mask"])
+                query_selected = int(torch.argmax(query_logits[0]).detach().cpu())
+                query_action_row = query_tensors["inputs"]["action_numeric"][0, query_selected]
+            post_session_first_clicks += 1
+            post_session_target_first += int(query_selected == int(query.correct_action_index))
+            post_session_distractor_first += int(_is_distractor_action(query, query_selected, action_row=query_action_row))
+            post_session_hits.append(float(query_selected == int(query.correct_action_index)))
+            if query_selected != int(query.correct_action_index):
+                with torch.no_grad():
+                    query_result = apply_synthetic_object_event_action(query_level, query_selected)
+                    query_observed = _with_observed_candidate_targets(
+                        query_tensors,
+                        torch.as_tensor([query_selected], dtype=torch.long, device=device),
+                    )
+                    query_deltas = _observed_belief_deltas(model, query_observed)
+                    query_level_belief = query_deltas.level_delta if not query_result.success else query_deltas.session_delta
+                    query_retry_output = _forward_tensors(
+                        model,
+                        query_tensors,
+                        session_belief=session_belief,
+                        level_belief=query_level_belief,
+                    )
+                    query_retry_logits = policy_rank_logits_from_predictions(query_retry_output, query_tensors["action_mask"])
+                    query_retry_selected = int(torch.argmax(query_retry_logits[0]).detach().cpu())
+                    post_update_hits.append(float(query_retry_selected == int(query.correct_action_index)))
+                    repeat = float(query_retry_selected == query_selected)
+                    repeat_hits.append(repeat)
+                    failed_deltas.append(
+                        float(query_retry_logits[0, query_selected].detach().cpu())
+                        - float(query_logits[0, query_selected].detach().cpu())
+                    )
     values = np.asarray(success_steps, dtype=np.float32)
     total_clicks = max(total_actions, 1)
     return {
@@ -650,9 +807,57 @@ def _active_rollout_metrics(
         "ordinary_object_click_rate": float(ordinary_clicks / total_clicks),
         "agent_or_cue_click_rate": float(agent_clicks / total_clicks),
         "distractor_first_click_rate": float(distractor_first / max(first_clicks, 1)),
-        "target_first_click_rate": float(target_first / max(first_clicks, 1)),
+        "target_first_click_rate": float(target_set_first / max(first_clicks, 1)),
+        "actual_target_first_click_rate": float(actual_target_first / max(first_clicks, 1)),
         "level_negative_memory_norm": float(np.mean(level_norms)) if level_norms else 0.0,
+        "object_event_bridge_legal_action_count_mean": float(np.mean(bridge_legal_counts)) if bridge_legal_counts else 0.0,
+        "object_event_bridge_selected_action_match_rate": float(np.mean(bridge_selected_matches)) if bridge_selected_matches else 0.0,
+        "metadata_model_input_forbidden_count": float(model_input_forbidden_count),
+        "observed_distractor_failure_count": float(observed_distractor_failures),
+        "post_failure_candidate_switch_rate": float(1.0 - np.mean(repeat_hits)) if repeat_hits else 0.0,
+        "post_failure_repeat_top1_rate": float(np.mean(repeat_hits)) if repeat_hits else 0.0,
+        "level0_target_first_click_rate": float(actual_target_first / max(first_clicks, 1)),
+        "level0_distractor_first_click_rate": float(distractor_first / max(first_clicks, 1)),
+        "level0_success_within_2": float(np.mean(values <= 2.0)),
+        "level0_success_within_3": float(np.mean(values <= 3.0)),
+        "post_session_target_first_click_rate": float(post_session_target_first / max(post_session_first_clicks, 1)),
+        "post_session_distractor_first_click_rate": float(post_session_distractor_first / max(post_session_first_clicks, 1)),
+        "post_session_next_level_first_try_acc": float(np.mean(post_session_hits)) if post_session_hits else 0.0,
     }
+
+
+def _candidate_action_indices(example: ObjectEventExample) -> tuple[int, ...]:
+    raw = example.metadata.get("candidate_action_indices")
+    if isinstance(raw, (list, tuple)):
+        return tuple(int(item) for item in raw)
+    return (int(example.metadata["red_action_index"]), int(example.metadata["blue_action_index"]))
+
+
+def _is_distractor_action(
+    example: ObjectEventExample,
+    selected: int,
+    *,
+    action_row: torch.Tensor,
+) -> bool:
+    is_ordinary = float(action_row[11].detach().cpu()) > 0.5 and float(action_row[24].detach().cpu()) < 0.5
+    return bool(is_ordinary and int(selected) not in set(_candidate_action_indices(example)))
+
+
+def _synthetic_bridge_observation(example: ObjectEventExample, selected: int, result: Any):
+    after = example.next_state if bool(result.success) else example.state
+    bridge = build_object_event_observation(
+        SelectedActionObservation(
+            before=example.state,
+            selected_action=example.legal_actions[int(selected)],
+            after=after,
+            reward=float(result.reward),
+            terminated=False,
+            legal_actions=example.legal_actions,
+            info={"score_delta": float(result.reward)},
+        ),
+        metadata=result.metadata,
+    )
+    return bridge
 
 
 def _top1(logits: torch.Tensor, actual: torch.Tensor) -> float:

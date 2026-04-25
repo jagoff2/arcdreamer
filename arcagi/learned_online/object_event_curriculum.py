@@ -46,6 +46,8 @@ class OnlineObjectEventCurriculumConfig:
     include_distractors: bool = True
     require_full_dense_actions: bool = True
     curriculum: str = "latent_rule_color_click"
+    palette_size: int = 8
+    require_role_balanced_colors: bool = False
 
 
 @dataclass(frozen=True)
@@ -59,6 +61,8 @@ class ActiveOnlineObjectEventConfig:
     include_distractors: bool = True
     max_steps_per_level: int = 3
     curriculum: str = "latent_rule_color_click"
+    palette_size: int = 8
+    require_role_balanced_colors: bool = False
 
 
 @dataclass(frozen=True)
@@ -172,7 +176,7 @@ def build_paired_color_click_curriculum(
 def build_online_object_event_curriculum(
     config: OnlineObjectEventCurriculumConfig,
 ) -> OnlineObjectEventCurriculumSplit:
-    if config.curriculum != "latent_rule_color_click":
+    if config.curriculum not in {"latent_rule_color_click", "latent_rule_variable_palette"}:
         raise ValueError(f"unknown online object-event curriculum: {config.curriculum!r}")
     return OnlineObjectEventCurriculumSplit(
         train=generate_online_object_event_sessions(config, split="train"),
@@ -194,6 +198,8 @@ def build_active_online_object_event_curriculum(
             include_distractors=bool(config.include_distractors and int(config.max_distractors) > 0),
             require_full_dense_actions=True,
             curriculum=str(config.curriculum),
+            palette_size=int(config.palette_size),
+            require_role_balanced_colors=bool(config.require_role_balanced_colors),
         )
     )
 
@@ -225,7 +231,7 @@ def apply_synthetic_object_event_action(
         no_effect=not bool(success),
         levels_completed=1 if success else 0,
         metadata={
-            "curriculum": "latent_rule_color_click",
+            "curriculum": str(example.metadata.get("curriculum", "latent_rule_color_click")),
             "session_index": int(level.session_index),
             "level_index": int(level.level_index),
             "latent_rule": int(level.latent_rule),
@@ -257,15 +263,26 @@ def generate_online_object_event_sessions(
         for level_index in range(int(config.levels_per_session)):
             cue_mode = int(cue_modes[level_index])
             geometry_seed = int(base_seed + session_index * 10_000 + level_index)
-            example = make_latent_rule_color_click_example(
-                config=config,
-                geometry_seed=geometry_seed,
-                cue_mode=cue_mode,
-                latent_rule=latent_rule,
-                split=split,
-                session_index=session_index,
-                level_index=level_index,
-            )
+            if config.curriculum == "latent_rule_variable_palette":
+                example = make_latent_rule_variable_palette_example(
+                    config=config,
+                    geometry_seed=geometry_seed,
+                    cue_mode=cue_mode,
+                    latent_rule=latent_rule,
+                    split=split,
+                    session_index=session_index,
+                    level_index=level_index,
+                )
+            else:
+                example = make_latent_rule_color_click_example(
+                    config=config,
+                    geometry_seed=geometry_seed,
+                    cue_mode=cue_mode,
+                    latent_rule=latent_rule,
+                    split=split,
+                    session_index=session_index,
+                    level_index=level_index,
+                )
             levels.append(
                 OnlineObjectEventLevel(
                     session_index=int(session_index),
@@ -323,6 +340,62 @@ def make_latent_rule_color_click_example(
     )
 
 
+def make_latent_rule_variable_palette_example(
+    *,
+    config: OnlineObjectEventCurriculumConfig,
+    geometry_seed: int,
+    cue_mode: int,
+    latent_rule: int,
+    split: str,
+    session_index: int = 0,
+    level_index: int = 0,
+) -> ObjectEventExample:
+    palette = _variable_palette_colors(int(config.palette_size))
+    target_mode = int(cue_mode) if int(latent_rule) == 0 else 1 - int(cue_mode)
+    target_colors = _variable_palette_slot_colors(
+        palette=palette,
+        session_index=int(session_index),
+        level_index=int(level_index),
+        split=split,
+    )
+    distractor_colors = _variable_palette_distractor_colors(
+        palette=palette,
+        used_colors=set(target_colors),
+        session_index=int(session_index),
+        level_index=int(level_index),
+        count=max(int(config.max_objects) - 3, 0),
+    )
+    geometry = _sample_geometry_with_colors(
+        geometry_seed=int(geometry_seed),
+        config=ObjectEventCurriculumConfig(
+            seed=int(config.seed),
+            train_geometries=0,
+            heldout_geometries=0,
+            max_objects=int(config.max_objects),
+            grid_size=int(config.grid_size),
+            include_distractors=bool(config.include_distractors),
+            require_full_dense_actions=bool(config.require_full_dense_actions),
+        ),
+        slot_colors=target_colors,
+        distractor_colors=distractor_colors,
+        generic_object_ids=True,
+    )
+    return _example_from_geometry(
+        geometry,
+        cue_mode=int(cue_mode),
+        split=split,
+        target_mode=target_mode,
+        metadata_extra={
+            "curriculum": "latent_rule_variable_palette",
+            "session_index": int(session_index),
+            "level_index": int(level_index),
+            "latent_rule": int(latent_rule),
+            "palette_colors": tuple(int(color) for color in palette),
+            "slot0_color": int(target_colors[0]),
+            "slot1_color": int(target_colors[1]),
+            "distractor_colors": tuple(int(color) for color in distractor_colors),
+        },
+    )
 def collate_object_event_examples(examples: Sequence[ObjectEventExample]) -> ObjectEventBatch:
     if not examples:
         raise ValueError("cannot collate an empty object-event example sequence")
@@ -389,36 +462,129 @@ def _paired_examples_for_geometry(
 
 
 def _sample_geometry(*, geometry_seed: int, config: ObjectEventCurriculumConfig) -> dict[str, Any]:
+    distractor_count = max(int(config.max_objects) - 3, 0) if config.include_distractors else 0
+    return _sample_geometry_with_colors(
+        geometry_seed=geometry_seed,
+        config=config,
+        slot_colors=(2, 5),
+        distractor_colors=tuple(_default_distractor_color(index) for index in range(distractor_count)),
+        generic_object_ids=False,
+    )
+
+
+def _sample_geometry_with_colors(
+    *,
+    geometry_seed: int,
+    config: ObjectEventCurriculumConfig,
+    slot_colors: tuple[int, int],
+    distractor_colors: tuple[int, ...],
+    generic_object_ids: bool,
+) -> dict[str, Any]:
     rng = np.random.default_rng(int(geometry_seed))
     grid_size = int(config.grid_size)
     if grid_size < 4:
         raise ValueError("object-event curriculum requires grid_size >= 4")
     occupied: set[tuple[int, int]] = {(0, 0)}
-    red_pos = _random_free_cell(rng, grid_size=grid_size, occupied=occupied)
+    use_spatial_hint = bool(generic_object_ids and int(geometry_seed) % 3 != 0)
+    red_pos = (
+        _random_free_cell_near_origin(rng, grid_size=grid_size, occupied=occupied)
+        if use_spatial_hint
+        else _random_free_cell(rng, grid_size=grid_size, occupied=occupied)
+    )
     occupied.add(red_pos)
-    blue_pos = _random_free_cell(rng, grid_size=grid_size, occupied=occupied)
+    blue_pos = (
+        _random_free_cell_near_origin(rng, grid_size=grid_size, occupied=occupied)
+        if use_spatial_hint
+        else _random_free_cell(rng, grid_size=grid_size, occupied=occupied)
+    )
     occupied.add(blue_pos)
     distractors: list[tuple[int, int, int]] = []
     if config.include_distractors:
-        for index in range(max(int(config.max_objects) - 3, 0)):
-            cell = _random_free_cell(rng, grid_size=grid_size, occupied=occupied)
+        for index, color in enumerate(tuple(distractor_colors)[: max(int(config.max_objects) - 3, 0)]):
+            cell = (
+                _random_free_cell_far_from_origin(rng, grid_size=grid_size, occupied=occupied)
+                if use_spatial_hint
+                else _random_free_cell(rng, grid_size=grid_size, occupied=occupied)
+            )
             occupied.add(cell)
-            color = (6 + index) % 12
-            if color in {1, 2, 5}:
-                color = 9
             distractors.append((int(cell[0]), int(cell[1]), int(color)))
     actions = _dense_actions(grid_size=grid_size) if config.require_full_dense_actions else _sparse_actions(red_pos, blue_pos, grid_size)
     roles = {action: "click" for action in actions if action.startswith("click:")}
     roles.update({"0": "reset_level", "undo": "undo", "up": "move_up", "down": "move_down"})
+    slot0_id = "object_0" if generic_object_ids else "red"
+    slot1_id = "object_1" if generic_object_ids else "blue"
+    distractor_ids = tuple(f"object_{index + 2}" if generic_object_ids else f"distractor_{index}" for index in range(len(distractors)))
     return {
         "geometry_seed": int(geometry_seed),
         "grid_size": int(grid_size),
         "red_pos": red_pos,
         "blue_pos": blue_pos,
+        "slot0_color": int(slot_colors[0]),
+        "slot1_color": int(slot_colors[1]),
+        "slot0_object_id": slot0_id,
+        "slot1_object_id": slot1_id,
         "distractors": tuple(distractors),
+        "distractor_object_ids": distractor_ids,
         "actions": tuple(actions),
         "action_roles": tuple(sorted(roles.items())),
     }
+
+
+def _default_distractor_color(index: int) -> int:
+    color = (6 + int(index)) % 12
+    if color in {1, 2, 5}:
+        color = 9
+    return int(color)
+
+
+def _variable_palette_colors(palette_size: int) -> tuple[int, ...]:
+    size = max(min(int(palette_size), 9), 3)
+    colors: list[int] = []
+    cursor = 3
+    while len(colors) < size:
+        color = int(cursor % 12)
+        cursor += 1
+        if color in {0, 1, 2} or color in colors:
+            continue
+        colors.append(color)
+    return tuple(colors)
+
+
+def _variable_palette_slot_colors(
+    *,
+    palette: tuple[int, ...],
+    session_index: int,
+    level_index: int,
+    split: str,
+) -> tuple[int, int]:
+    offset = 0 if split == "train" else max(len(palette) // 2, 1)
+    del level_index
+    base = int(session_index) + offset
+    first = int(palette[base % len(palette)])
+    second_cursor = base + max(len(palette) // 2, 1)
+    second = int(palette[second_cursor % len(palette)])
+    if second == first:
+        second = int(palette[(second_cursor + 1) % len(palette)])
+    return first, second
+
+
+def _variable_palette_distractor_colors(
+    *,
+    palette: tuple[int, ...],
+    used_colors: set[int],
+    session_index: int,
+    level_index: int,
+    count: int,
+) -> tuple[int, ...]:
+    colors: list[int] = []
+    cursor = int(session_index) * 3 + int(level_index) * 5 + 1
+    while len(colors) < max(int(count), 0):
+        color = int(palette[cursor % len(palette)])
+        cursor += 1
+        if color in used_colors or color in colors:
+            continue
+        colors.append(color)
+    return tuple(colors)
 
 
 def _example_from_geometry(
@@ -434,10 +600,19 @@ def _example_from_geometry(
     cue = _object("cue", cue_color, (0, 0), tags=("agent", "clickable"))
     red_pos = tuple(geometry["red_pos"])
     blue_pos = tuple(geometry["blue_pos"])
-    red = _object("red", 2, red_pos)
-    blue = _object("blue", 5, blue_pos)
+    slot0_color = int(geometry.get("slot0_color", 2))
+    slot1_color = int(geometry.get("slot1_color", 5))
+    slot0_id = str(geometry.get("slot0_object_id", "red"))
+    slot1_id = str(geometry.get("slot1_object_id", "blue"))
+    red = _object(slot0_id, slot0_color, red_pos)
+    blue = _object(slot1_id, slot1_color, blue_pos)
+    distractor_ids = tuple(str(item) for item in geometry.get("distractor_object_ids", ()))
     distractors = tuple(
-        _object(f"distractor_{index}", int(color), (int(row), int(col)))
+        _object(
+            distractor_ids[index] if index < len(distractor_ids) else f"distractor_{index}",
+            int(color),
+            (int(row), int(col)),
+        )
         for index, (row, col, color) in enumerate(geometry["distractors"])
     )
     objects = (cue, red, blue, *distractors)
@@ -493,6 +668,13 @@ def _example_from_geometry(
         "target_mode": int(effective_target_mode),
         "red_action_index": int(legal_actions.index(_click_action(red_pos))),
         "blue_action_index": int(legal_actions.index(_click_action(blue_pos))),
+        "slot0_action_index": int(legal_actions.index(_click_action(red_pos))),
+        "slot1_action_index": int(legal_actions.index(_click_action(blue_pos))),
+        "candidate_action_indices": (
+            int(legal_actions.index(_click_action(red_pos))),
+            int(legal_actions.index(_click_action(blue_pos))),
+        ),
+        "target_color": int(slot0_color if int(effective_target_mode) == 0 else slot1_color),
         "correct_action_index": int(transition_targets.actual_action_index),
         "legal_action_count": int(len(legal_actions)),
     }
@@ -582,3 +764,31 @@ def _random_free_cell(
         cell = (int(rng.integers(1, int(grid_size))), int(rng.integers(0, int(grid_size))))
         if cell not in occupied:
             return cell
+
+
+def _random_free_cell_near_origin(
+    rng: np.random.Generator,
+    *,
+    grid_size: int,
+    occupied: set[tuple[int, int]],
+) -> tuple[int, int]:
+    threshold = max(int(grid_size) - 1, 2)
+    for _ in range(512):
+        cell = _random_free_cell(rng, grid_size=grid_size, occupied=occupied)
+        if cell[0] + cell[1] <= threshold:
+            return cell
+    return _random_free_cell(rng, grid_size=grid_size, occupied=occupied)
+
+
+def _random_free_cell_far_from_origin(
+    rng: np.random.Generator,
+    *,
+    grid_size: int,
+    occupied: set[tuple[int, int]],
+) -> tuple[int, int]:
+    threshold = max(int(grid_size), 3)
+    for _ in range(512):
+        cell = _random_free_cell(rng, grid_size=grid_size, occupied=occupied)
+        if cell[0] + cell[1] >= threshold:
+            return cell
+    return _random_free_cell(rng, grid_size=grid_size, occupied=occupied)
