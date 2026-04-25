@@ -11,6 +11,7 @@ from arcagi.learned_online.event_tokens import (
     ACTION_NUMERIC_DIM,
     ACTION_OTHER,
     DIR_RIGHT,
+    OBJECT,
     OUT_MECHANIC_CHANGE,
     OUT_OBJECTIVE_PROGRESS,
     OUT_NO_EFFECT_NONPROGRESS,
@@ -57,18 +58,23 @@ class ObjectEventModelOutput:
     value_logits: torch.Tensor
     action_repr: torch.Tensor
     encoded_state: torch.Tensor
+    rank_logits: torch.Tensor | None = None
+    candidate_state_attn: torch.Tensor | None = None
 
 
 def policy_rank_logits_from_predictions(
     predictions: ObjectEventModelOutput,
     action_mask: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    logits = (
+    semantic_logits = (
         predictions.outcome_logits[..., OUT_OBJECTIVE_PROGRESS]
         + predictions.outcome_logits[..., OUT_REWARD_PROGRESS]
         - predictions.outcome_logits[..., OUT_NO_EFFECT_NONPROGRESS]
         + predictions.value_logits
     )
+    logits = semantic_logits
+    if predictions.rank_logits is not None:
+        logits = predictions.rank_logits + 0.25 * semantic_logits
     if action_mask is not None:
         logits = logits.masked_fill(~action_mask.bool(), -1.0e9)
     return logits
@@ -113,6 +119,122 @@ class _CrossBlock(nn.Module):
         return actions
 
 
+class CandidateStateCompatibility(nn.Module):
+    def __init__(self, d_model: int, dropout: float) -> None:
+        super().__init__()
+        self.query = nn.Linear(d_model, d_model)
+        self.key = nn.Linear(d_model, d_model)
+        self.value = nn.Linear(d_model, d_model)
+        self.pair_norm = nn.LayerNorm(8 * d_model)
+        self.pair_mlp = nn.Sequential(
+            nn.Linear(8 * d_model, 2 * d_model),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(2 * d_model, d_model),
+        )
+        self.out_norm = nn.LayerNorm(d_model)
+        nn.init.normal_(self.pair_mlp[-1].weight, mean=0.0, std=0.02)
+        nn.init.zeros_(self.pair_mlp[-1].bias)
+
+    def forward(
+        self,
+        *,
+        action_hidden: torch.Tensor,
+        state_hidden: torch.Tensor,
+        state_mask: torch.Tensor,
+        state_type_ids: torch.Tensor,
+        state_numeric: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        query = self.query(action_hidden)
+        key = self.key(state_hidden)
+        value = self.value(state_hidden)
+        scale = max(float(query.shape[-1]) ** 0.5, 1.0)
+        attention_logits = torch.matmul(query, key.transpose(-1, -2)) / scale
+        attention_logits = attention_logits.masked_fill(~state_mask.bool().unsqueeze(1), -1.0e9)
+        attention = torch.softmax(attention_logits, dim=-1)
+        context = torch.matmul(attention, value)
+        object_mask = state_mask.bool() & (state_type_ids == OBJECT)
+        agent_object_mask = object_mask & (state_numeric[..., 9] > 0.5)
+        object_summary = _masked_mean(state_hidden, object_mask, fallback_mask=state_mask.bool())
+        agent_summary = _masked_mean(state_hidden, agent_object_mask, fallback_mask=object_mask)
+        object_summary = object_summary.unsqueeze(1).expand_as(action_hidden)
+        agent_summary = agent_summary.unsqueeze(1).expand_as(action_hidden)
+        pair_features = torch.cat(
+            [
+                action_hidden,
+                context,
+                object_summary,
+                agent_summary,
+                action_hidden * context,
+                action_hidden * agent_summary,
+                torch.abs(action_hidden - context),
+                torch.abs(action_hidden - agent_summary),
+            ],
+            dim=-1,
+        )
+        delta = self.pair_mlp(self.pair_norm(pair_features))
+        return self.out_norm(action_hidden + delta), attention
+
+
+class RawCandidateStateRank(nn.Module):
+    def __init__(self, d_model: int, dropout: float) -> None:
+        super().__init__()
+        input_dim = ACTION_NUMERIC_DIM + (4 * STATE_NUMERIC_DIM) + (2 * STATE_NUMERIC_DIM)
+        self.rank_mlp = nn.Sequential(
+            nn.LayerNorm(input_dim),
+            nn.Linear(input_dim, 2 * d_model),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(2 * d_model, d_model),
+            nn.GELU(),
+            nn.Linear(d_model, 1),
+        )
+
+    def forward(
+        self,
+        *,
+        action_numeric: torch.Tensor,
+        state_numeric: torch.Tensor,
+        state_type_ids: torch.Tensor,
+        state_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        object_mask = state_mask.bool() & (state_type_ids == OBJECT)
+        agent_object_mask = object_mask & (state_numeric[..., 9] > 0.5)
+        meta_mask = state_mask.bool() & (state_type_ids == 1)
+        object_summary = _masked_mean(state_numeric, object_mask, fallback_mask=state_mask.bool())
+        agent_summary = _masked_mean(state_numeric, agent_object_mask, fallback_mask=object_mask)
+        meta_summary = _masked_mean(state_numeric, meta_mask, fallback_mask=state_mask.bool())
+        global_summary = _masked_mean(state_numeric, state_mask.bool(), fallback_mask=state_mask.bool())
+        action_head = action_numeric[..., :STATE_NUMERIC_DIM]
+        expanded_agent = agent_summary.unsqueeze(1).expand(-1, action_numeric.shape[1], -1)
+        features = torch.cat(
+            [
+                action_numeric,
+                object_summary.unsqueeze(1).expand(-1, action_numeric.shape[1], -1),
+                agent_summary.unsqueeze(1).expand(-1, action_numeric.shape[1], -1),
+                meta_summary.unsqueeze(1).expand(-1, action_numeric.shape[1], -1),
+                global_summary.unsqueeze(1).expand(-1, action_numeric.shape[1], -1),
+                action_head * expanded_agent,
+                torch.abs(action_head - expanded_agent),
+            ],
+            dim=-1,
+        )
+        return self.rank_mlp(features).squeeze(-1)
+
+
+def _masked_mean(
+    values: torch.Tensor,
+    mask: torch.Tensor,
+    *,
+    fallback_mask: torch.Tensor,
+) -> torch.Tensor:
+    mask = mask.bool()
+    fallback_mask = fallback_mask.bool()
+    active = torch.where(mask.any(dim=1, keepdim=True), mask, fallback_mask)
+    weights = active.unsqueeze(-1).to(dtype=values.dtype)
+    return (values * weights).sum(dim=1) / weights.sum(dim=1).clamp_min(1.0)
+
+
 class ObjectEventModel(nn.Module):
     def __init__(self, config: ObjectEventModelConfig | None = None) -> None:
         super().__init__()
@@ -155,6 +277,11 @@ class ObjectEventModel(nn.Module):
                 for _ in range(int(self.config.action_cross_layers))
             ]
         )
+        self.candidate_state_compat = CandidateStateCompatibility(d_model, float(self.config.dropout))
+        self.raw_candidate_rank = RawCandidateStateRank(d_model, float(self.config.dropout))
+        self.rank_score_head = nn.Linear(d_model, 1)
+        nn.init.normal_(self.rank_score_head.weight, mean=0.0, std=0.02)
+        nn.init.zeros_(self.rank_score_head.bias)
         self.online_adapter = LowRankOnlineAdapter(d_model, int(self.config.online_rank))
         self.outcome_head = nn.Linear(d_model, int(self.config.outcome_dim))
         self.delta_head = nn.Linear(d_model, int(self.config.delta_dim))
@@ -219,16 +346,31 @@ class ObjectEventModel(nn.Module):
         action_repr = action_repr + 0.1 * self.state_action_pair_residual(pair_input)
         for block in self.cross_blocks:
             action_repr = block(action_repr, context, context_mask)
+        action_repr, candidate_state_attn = self.candidate_state_compat(
+            action_hidden=action_repr,
+            state_hidden=encoded_state,
+            state_mask=state_mask.bool(),
+            state_type_ids=state_type_ids,
+            state_numeric=state_numeric,
+        )
         adapted = action_repr + self.online_adapter(action_repr)
         outcome_logits = self.outcome_head(adapted) + self.fast_outcome_head(adapted)
         delta_pred = self.delta_head(adapted) + self.fast_delta_head(adapted)
         value_logits = (self.value_head(adapted) + self.fast_value_head(adapted)).squeeze(-1)
+        rank_logits = self.rank_score_head(adapted).squeeze(-1) + self.raw_candidate_rank(
+            action_numeric=action_numeric,
+            state_numeric=state_numeric,
+            state_type_ids=state_type_ids,
+            state_mask=state_mask.bool(),
+        )
         return ObjectEventModelOutput(
             outcome_logits=outcome_logits,
             delta_pred=delta_pred,
             value_logits=value_logits,
             action_repr=adapted,
             encoded_state=encoded_state,
+            rank_logits=rank_logits,
+            candidate_state_attn=candidate_state_attn,
         )
 
     def inverse_logits(

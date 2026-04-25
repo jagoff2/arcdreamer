@@ -19,6 +19,12 @@ from arcagi.learned_online.event_tokens import (
     stack_action_tokens,
     stack_state_tokens,
 )
+from arcagi.learned_online.object_event_curriculum import (
+    ObjectEventCurriculumConfig,
+    ObjectEventExample,
+    build_paired_color_click_curriculum,
+    collate_object_event_examples,
+)
 from arcagi.learned_online.object_event_model import (
     ObjectEventModel,
     ObjectEventModelConfig,
@@ -280,6 +286,62 @@ def test_object_event_model_learns_state_conditioned_inverse_and_event_mapping()
     assert action_only["top1"] <= 0.60
 
 
+def test_object_event_model_dense_curriculum_rank_overfits_and_uses_state() -> None:
+    torch.manual_seed(9)
+    split = build_paired_color_click_curriculum(
+        ObjectEventCurriculumConfig(seed=4, train_geometries=8, heldout_geometries=0, grid_size=8)
+    )
+    cases = split.train
+    assert cases
+    assert {len(case.legal_actions) for case in cases} == {68}
+
+    first, second = cases[0], cases[1]
+    assert first.metadata["geometry_seed"] == second.metadata["geometry_seed"]
+    assert first.legal_actions == second.legal_actions
+    first_red = int(first.metadata["red_action_index"])
+    first_blue = int(first.metadata["blue_action_index"])
+    assert np.allclose(first.action_tokens.numeric[first_red], second.action_tokens.numeric[first_red])
+    assert np.allclose(first.action_tokens.numeric[first_blue], second.action_tokens.numeric[first_blue])
+
+    tensors = _curriculum_batch_tensors(cases)
+    model = ObjectEventModel(
+        ObjectEventModelConfig(
+            d_model=64,
+            n_heads=4,
+            state_layers=1,
+            action_cross_layers=1,
+            dropout=0.0,
+            online_rank=4,
+        )
+    )
+    optimizer = torch.optim.AdamW(model.parameters(), lr=3.0e-3, weight_decay=1.0e-4)
+    for _step in range(200):
+        output = model(**tensors["inputs"])
+        rank_logits = policy_rank_logits_from_predictions(output, tensors["action_mask"])
+        loss = F.cross_entropy(rank_logits, tensors["actual_action_index"])
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()
+
+    normal = _curriculum_rank_metrics(model, cases)
+    zero_state = _curriculum_rank_metrics(model, cases, zero_state=True)
+    shuffled_state = _curriculum_rank_metrics(model, cases, shuffle_state=True)
+    action_only = _curriculum_rank_metrics(model, cases, action_only=True)
+    assert normal["top1"] >= 0.875, {
+        "normal": normal,
+        "zero_state": zero_state,
+        "shuffled_state": shuffled_state,
+        "action_only": action_only,
+    }
+    assert zero_state["top1"] <= normal["top1"] - 0.25
+    assert shuffled_state["top1"] <= normal["top1"] - 0.25
+    assert action_only["top1"] <= normal["top1"] - 0.25
+    assert normal["combined_logits"][0, first_red] > normal["combined_logits"][0, first_blue]
+    assert normal["combined_logits"][1, first_blue] > normal["combined_logits"][1, first_red]
+    assert abs(float(normal["rank_logits"][0, first_red] - normal["rank_logits"][1, first_red])) > 1.0e-2
+
+
 def test_online_update_from_observed_transition_changes_future_action_scores() -> None:
     torch.manual_seed(1)
     case = _cue_click_case(np.random.default_rng(5), 5)
@@ -383,6 +445,53 @@ def _eval_metrics(
         "outcome_loss": float(outcome_loss),
         "score_margin": float(margin),
         "rank_loss": float(rank_loss),
+    }
+
+
+def _curriculum_rank_metrics(
+    model: ObjectEventModel,
+    cases: tuple[ObjectEventExample, ...],
+    *,
+    zero_state: bool = False,
+    shuffle_state: bool = False,
+    action_only: bool = False,
+) -> dict[str, float | torch.Tensor]:
+    model.eval()
+    tensors = _curriculum_batch_tensors(cases)
+    state_numeric = tensors["inputs"]["state_numeric"].clone()
+    state_type_ids = tensors["inputs"]["state_type_ids"].clone()
+    state_mask = tensors["inputs"]["state_mask"].clone()
+    if zero_state or action_only:
+        state_numeric.zero_()
+    if action_only:
+        state_type_ids.zero_()
+        state_mask.fill_(True)
+    if shuffle_state:
+        perm = torch.arange(state_numeric.shape[0] - 1, -1, -1)
+        state_numeric = state_numeric[perm]
+        state_type_ids = state_type_ids[perm]
+        state_mask = state_mask[perm]
+    with torch.no_grad():
+        output = model(
+            state_numeric=state_numeric,
+            state_type_ids=state_type_ids,
+            state_mask=state_mask,
+            action_numeric=tensors["inputs"]["action_numeric"],
+            action_type_ids=tensors["inputs"]["action_type_ids"],
+            direction_ids=tensors["inputs"]["direction_ids"],
+            action_mask=tensors["inputs"]["action_mask"],
+        )
+        combined_logits = policy_rank_logits_from_predictions(output, tensors["action_mask"])
+        actual = tensors["actual_action_index"]
+        top1 = torch.mean((combined_logits.argmax(dim=-1) == actual).float()).item()
+        rank_loss = F.cross_entropy(combined_logits, actual).item()
+        rank_logits = output.rank_logits if output.rank_logits is not None else combined_logits
+    model.train()
+    return {
+        "top1": float(top1),
+        "rank_loss": float(rank_loss),
+        "combined_logits": combined_logits.detach().cpu(),
+        "rank_logits": rank_logits.detach().cpu(),
     }
 
 
@@ -502,6 +611,27 @@ def _batch_tensors(cases: tuple[CueClickCase, ...]) -> dict[str, torch.Tensor | 
         "action_mask": torch.as_tensor(action_mask, dtype=torch.bool),
         "candidate_value_targets": _value_targets(targets, action_mask.shape[1]),
         "candidate_outcome_targets": _candidate_outcome_targets(targets, action_mask.shape[1]),
+    }
+
+
+def _curriculum_batch_tensors(cases: tuple[ObjectEventExample, ...]) -> dict[str, torch.Tensor | dict[str, torch.Tensor]]:
+    batch = collate_object_event_examples(cases)
+    return {
+        "inputs": {
+            "state_numeric": torch.as_tensor(batch.state_numeric, dtype=torch.float32),
+            "state_type_ids": torch.as_tensor(batch.state_type_ids, dtype=torch.long),
+            "state_mask": torch.as_tensor(batch.state_mask, dtype=torch.bool),
+            "action_numeric": torch.as_tensor(batch.action_numeric, dtype=torch.float32),
+            "action_type_ids": torch.as_tensor(batch.action_type_ids, dtype=torch.long),
+            "direction_ids": torch.as_tensor(batch.direction_ids, dtype=torch.long),
+            "action_mask": torch.as_tensor(batch.action_mask, dtype=torch.bool),
+        },
+        "target_outcome": torch.as_tensor(batch.target_outcome, dtype=torch.float32),
+        "target_delta": torch.as_tensor(batch.target_delta, dtype=torch.float32),
+        "actual_action_index": torch.as_tensor(batch.actual_action_index, dtype=torch.long),
+        "action_mask": torch.as_tensor(batch.action_mask, dtype=torch.bool),
+        "candidate_value_targets": torch.as_tensor(batch.candidate_value_targets, dtype=torch.float32),
+        "candidate_outcome_targets": torch.as_tensor(batch.candidate_outcome_targets, dtype=torch.float32),
     }
 
 

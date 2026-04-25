@@ -2,6 +2,7 @@
 
 ## Active
 
+- [x] Add the object-event synthetic curriculum and dense candidate-state rank fix: paired-color-click now preserves the 68-action surface, the model overfits dense state-conditioned ranking with state ablations, and the 200-step trainer smoke reaches `train_top1_acc=1.0` without scripted ARC control.
 - [x] Verify that the old AR25 level-0 trace is real environment progress, not same-level replay. Diagnostic replay with level-boundary reset disabled reproduces `return=1.0`, `levels_completed=1`.
 - [x] Confirm that current clean learned recurrent checkpoints fail to reproduce the trace: long-credit, old checkpoint under current runtime, greedy, and exact-action diagnostic variants all fail AR25 level 0 at 320 steps.
 - [x] Add long-horizon value credit, value-only return targets, observed-transition ranking, long/carryover synthetic tasks, trace fine-tuning, and an imitation/action-prior head.
