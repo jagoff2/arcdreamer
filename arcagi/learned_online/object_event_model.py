@@ -62,6 +62,12 @@ class ObjectEventModelOutput:
     candidate_state_attn: torch.Tensor | None = None
 
 
+@dataclass(frozen=True)
+class ObservedEventBeliefDelta:
+    session_delta: torch.Tensor
+    level_delta: torch.Tensor
+
+
 def policy_rank_logits_from_predictions(
     predictions: ObjectEventModelOutput,
     action_mask: torch.Tensor | None = None,
@@ -270,6 +276,8 @@ class EventRelationMemoryRank(nn.Module):
         neg_cue = belief[:, 2 * key_dim : 3 * key_dim]
         neg_target = belief[:, 3 * key_dim : 4 * key_dim]
         outcome = belief[:, 4 * key_dim : 5 * key_dim]
+        level_neg_cue = level_belief[:, 2 * key_dim : 3 * key_dim]
+        level_neg_target = level_belief[:, 3 * key_dim : 4 * key_dim]
         query_cue = self.cue_key_features(query_cue_features)
         candidate_target = self.target_key_features(candidate_target_features)
         query_cue_expanded = query_cue.unsqueeze(1).expand_as(candidate_target)
@@ -278,23 +286,28 @@ class EventRelationMemoryRank(nn.Module):
         neg_cue_expanded = neg_cue.unsqueeze(1).expand_as(candidate_target)
         neg_target_expanded = neg_target.unsqueeze(1).expand_as(candidate_target)
         outcome_expanded = outcome.unsqueeze(1).expand_as(candidate_target)
+        level_neg_target_expanded = level_neg_target.unsqueeze(1).expand_as(candidate_target)
         pos_same_cue = _soft_same(query_cue_expanded, pos_cue_expanded)
         pos_same_target = _soft_same(candidate_target, pos_target_expanded)
         neg_same_cue = _soft_same(query_cue_expanded, neg_cue_expanded)
         neg_same_target = _soft_same(candidate_target, neg_target_expanded)
+        level_neg_same_target = _soft_same(candidate_target, level_neg_target_expanded)
         pos_cue_scalar = pos_same_cue[..., 0]
         pos_target_scalar = pos_same_target[..., 0]
         neg_cue_scalar = neg_same_cue[..., 0]
         neg_target_scalar = neg_same_target[..., 0]
+        level_neg_target_scalar = level_neg_same_target[..., 0]
         pos_strength = torch.clamp(pos_cue[:, :1].abs(), 0.0, 1.0)
         neg_strength = torch.clamp(neg_cue[:, :1].abs(), 0.0, 1.0)
+        level_neg_strength = torch.clamp(level_neg_cue[:, :1].abs(), 0.0, 1.0)
         same_relation = pos_cue_scalar * pos_target_scalar + (1.0 - pos_cue_scalar) * (1.0 - pos_target_scalar)
         different_relation = neg_cue_scalar * (1.0 - neg_target_scalar) + (1.0 - neg_cue_scalar) * neg_target_scalar
         candidate_contains = candidate_target_features[..., 11] * (1.0 - candidate_target_features[..., 24])
         object_target_prior = 12.0 * candidate_contains
+        repeat_penalty = 80.0 * candidate_contains * level_neg_strength * level_neg_target_scalar
         relation_prior = object_target_prior + 40.0 * candidate_contains * (
             pos_strength * same_relation + neg_strength * different_relation
-        )
+        ) - repeat_penalty
         features = torch.cat(
             [
                 query_cue_expanded,
@@ -594,6 +607,29 @@ class ObjectEventModel(nn.Module):
         state_mask: torch.Tensor | None = None,
         action_numeric: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        return self.observed_event_belief_deltas(
+            output,
+            target_outcome=target_outcome,
+            target_delta=target_delta,
+            actual_action_index=actual_action_index,
+            state_numeric=state_numeric,
+            state_type_ids=state_type_ids,
+            state_mask=state_mask,
+            action_numeric=action_numeric,
+        ).session_delta
+
+    def observed_event_belief_deltas(
+        self,
+        output: ObjectEventModelOutput,
+        *,
+        target_outcome: torch.Tensor,
+        target_delta: torch.Tensor,
+        actual_action_index: torch.Tensor,
+        state_numeric: torch.Tensor | None = None,
+        state_type_ids: torch.Tensor | None = None,
+        state_mask: torch.Tensor | None = None,
+        action_numeric: torch.Tensor | None = None,
+    ) -> ObservedEventBeliefDelta:
         batch = torch.arange(output.action_repr.shape[0], device=output.action_repr.device)
         if (
             state_numeric is not None
@@ -645,7 +681,10 @@ class ObjectEventModel(nn.Module):
         if relation_width > 0:
             learned = learned.clone()
             learned[:, :relation_width] = 0.0
-        return torch.tanh(direct + learned)
+        session_delta = torch.tanh(direct + learned)
+        no_effect_gate = target_outcome[:, OUT_NO_EFFECT_NONPROGRESS].reshape(-1, 1)
+        level_delta = torch.tanh(direct + learned * (0.5 + no_effect_gate))
+        return ObservedEventBeliefDelta(session_delta=session_delta, level_delta=level_delta)
 
     def loss(
         self,

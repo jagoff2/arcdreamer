@@ -17,11 +17,14 @@ if str(REPO_ROOT) not in sys.path:
 
 from arcagi.agents.learned_online_object_event_agent import LearnedOnlineObjectEventAgent
 from arcagi.learned_online.object_event_curriculum import (
+    ActiveOnlineObjectEventConfig,
     OnlineObjectEventCurriculumConfig,
     OnlineObjectEventSession,
     ObjectEventBatch,
     ObjectEventCurriculumConfig,
     ObjectEventExample,
+    apply_synthetic_object_event_action,
+    build_active_online_object_event_curriculum,
     build_online_object_event_curriculum,
     build_paired_color_click_curriculum,
     collate_object_event_examples,
@@ -44,7 +47,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Train and evaluate the learned online object-event scaffold.")
     parser.add_argument(
         "--mode",
-        choices=("synthetic_object_event", "synthetic_online_object_event", "trace_jsonl"),
+        choices=("synthetic_object_event", "synthetic_online_object_event", "synthetic_active_online_object_event", "trace_jsonl"),
         default="synthetic_object_event",
     )
     parser.add_argument("--source", choices=("synthetic_object_event", "trace_jsonl"), default=None)
@@ -58,6 +61,7 @@ def main() -> None:
     parser.add_argument("--heldout-sessions", type=int, default=32)
     parser.add_argument("--levels-per-session", type=int, default=3)
     parser.add_argument("--support-updates", type=int, default=1)
+    parser.add_argument("--max-distractors", type=int, default=1)
     parser.add_argument("--eval-every", type=int, default=100)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -84,8 +88,8 @@ def main() -> None:
     device = torch.device(args.device)
     torch.manual_seed(int(args.seed))
     rng = np.random.default_rng(int(args.seed))
-    if mode == "synthetic_online_object_event":
-        _run_synthetic_online_object_event(args=args, config=config, device=device, rng=rng)
+    if mode in {"synthetic_online_object_event", "synthetic_active_online_object_event"}:
+        _run_synthetic_online_object_event(args=args, config=config, device=device, rng=rng, active=mode == "synthetic_active_online_object_event")
         return
 
     curriculum = build_paired_color_click_curriculum(
@@ -162,9 +166,25 @@ def _run_synthetic_online_object_event(
     config: ObjectEventModelConfig,
     device: torch.device,
     rng: np.random.Generator,
+    active: bool,
 ) -> None:
-    curriculum = build_online_object_event_curriculum(
-        OnlineObjectEventCurriculumConfig(
+    if active:
+        curriculum = build_active_online_object_event_curriculum(
+            ActiveOnlineObjectEventConfig(
+                seed=int(args.seed),
+                train_sessions=int(args.train_sessions),
+                heldout_sessions=int(args.heldout_sessions),
+                levels_per_session=int(args.levels_per_session),
+                max_distractors=int(args.max_distractors),
+                include_distractors=True,
+                grid_size=8,
+                max_steps_per_level=3,
+                curriculum="latent_rule_color_click",
+            )
+        )
+    else:
+        curriculum = build_online_object_event_curriculum(
+            OnlineObjectEventCurriculumConfig(
             seed=int(args.seed),
             train_sessions=int(args.train_sessions),
             heldout_sessions=int(args.heldout_sessions),
@@ -174,8 +194,8 @@ def _run_synthetic_online_object_event(
             include_distractors=False,
             require_full_dense_actions=True,
             curriculum="latent_rule_color_click",
+            )
         )
-    )
     model = ObjectEventModel(config).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=3.0e-3, weight_decay=1.0e-4)
     last_loss = 0.0
@@ -216,6 +236,7 @@ def _run_synthetic_online_object_event(
                         device=device,
                         step=step,
                         train_loss=last_loss,
+                        active=active,
                     ),
                     sort_keys=True,
                 ),
@@ -236,6 +257,7 @@ def _run_synthetic_online_object_event(
                 device=device,
                 step=max(int(args.steps), 1),
                 train_loss=last_loss,
+                active=active,
             ),
         }
         save_path.parent.mkdir(parents=True, exist_ok=True)
@@ -283,8 +305,12 @@ def _forward_tensors(
 
 
 def _observed_belief_delta(model: ObjectEventModel, tensors: dict[str, Any]) -> torch.Tensor:
+    return _observed_belief_deltas(model, tensors).session_delta
+
+
+def _observed_belief_deltas(model: ObjectEventModel, tensors: dict[str, Any]):
     output = _forward_tensors(model, tensors)
-    return model.observed_event_belief_delta(
+    return model.observed_event_belief_deltas(
         output,
         target_outcome=tensors["target_outcome"],
         target_delta=tensors["target_delta"],
@@ -342,6 +368,7 @@ def _online_training_metrics(
     device: torch.device,
     step: int,
     train_loss: float,
+    active: bool = False,
 ) -> dict[str, Any]:
     train_metrics = _evaluate_online_sessions(model, train, device=device)
     heldout_metrics = _evaluate_online_sessions(model, heldout, device=device)
@@ -355,7 +382,8 @@ def _online_training_metrics(
     same_cue_metrics = _evaluate_online_sessions(model, same_cue, device=device)
     different_cue_metrics = _evaluate_online_sessions(model, different_cue, device=device)
     closed = _closed_loop_online_metrics(model, heldout, device=device)
-    return {
+    active_closed = _active_rollout_metrics(model, heldout, device=device) if active else {}
+    metrics = {
         "step": int(step),
         "train_loss": float(train_loss),
         "train_pre_update_top1_acc": train_metrics["pre_top1"],
@@ -389,6 +417,32 @@ def _online_training_metrics(
         "level_belief_norm_pre": 0.0,
         "level_belief_norm_post": 0.0,
     }
+    if active:
+        metrics.update(
+            {
+                "oracle_support_used": 0,
+                "heldout_active_success_within_1": active_closed["success_within_1"],
+                "heldout_active_success_within_2": active_closed["success_within_2"],
+                "heldout_active_success_within_3": active_closed["success_within_3"],
+                "heldout_active_next_level_first_try_acc": heldout_metrics["next_level_top1"],
+                "heldout_active_next_level_with_session_reset_acc": reset_metrics["next_level_top1"],
+                "heldout_active_pre_update_top1_acc": heldout_metrics["pre_top1"],
+                "heldout_active_post_self_update_top1_acc": active_closed["post_self_update_top1_acc"],
+                "heldout_active_no_update_top1_acc": heldout_metrics["pre_top1"],
+                "heldout_active_wrong_session_update_top1_acc": wrong_metrics["post_top1"],
+                "heldout_active_zero_state_update_top1_acc": zero_metrics["post_top1"],
+                "heldout_active_shuffled_state_update_top1_acc": shuffled_metrics["post_top1"],
+                "failed_candidate_repeat_top1_rate": active_closed["failed_candidate_repeat_top1_rate"],
+                "failed_candidate_score_delta": active_closed["failed_candidate_score_delta"],
+                "ordinary_object_click_rate": active_closed["ordinary_object_click_rate"],
+                "agent_or_cue_click_rate": active_closed["agent_or_cue_click_rate"],
+                "distractor_first_click_rate": active_closed["distractor_first_click_rate"],
+                "target_first_click_rate": active_closed["target_first_click_rate"],
+                "level_negative_memory_norm": active_closed["level_negative_memory_norm"],
+                "session_relation_memory_norm": heldout_metrics["session_belief_norm"],
+            }
+        )
+    return metrics
 
 
 def _evaluate_online_sessions(
@@ -505,6 +559,99 @@ def _closed_loop_online_metrics(
         "success_within_1": float(np.mean(values <= 1.0)),
         "success_within_2": float(np.mean(values <= 2.0)),
         "success_within_3": float(np.mean(values <= 3.0)),
+    }
+
+
+def _active_rollout_metrics(
+    model: ObjectEventModel,
+    sessions: Sequence[OnlineObjectEventSession],
+    *,
+    device: torch.device,
+    max_steps_per_level: int = 3,
+) -> dict[str, float]:
+    if not sessions:
+        return {
+            "success_within_1": 0.0,
+            "success_within_2": 0.0,
+            "success_within_3": 0.0,
+            "post_self_update_top1_acc": 0.0,
+            "failed_candidate_repeat_top1_rate": 0.0,
+            "failed_candidate_score_delta": 0.0,
+            "ordinary_object_click_rate": 0.0,
+            "agent_or_cue_click_rate": 0.0,
+            "distractor_first_click_rate": 0.0,
+            "target_first_click_rate": 0.0,
+            "level_negative_memory_norm": 0.0,
+        }
+    success_steps: list[int] = []
+    post_update_hits: list[float] = []
+    repeat_hits: list[float] = []
+    failed_deltas: list[float] = []
+    ordinary_clicks = 0
+    agent_clicks = 0
+    target_first = 0
+    distractor_first = 0
+    first_clicks = 0
+    total_actions = 0
+    level_norms: list[float] = []
+    for session in sessions:
+        session_belief = torch.zeros((1, model.config.d_model), dtype=torch.float32, device=device)
+        for level in session.levels[:1]:
+            level_belief = torch.zeros_like(session_belief)
+            step_success = max_steps_per_level + 1
+            failed_index: int | None = None
+            failed_score_before = 0.0
+            for step in range(1, max_steps_per_level + 1):
+                tensors = _batch_to_tensors(collate_object_event_examples((level.example,)), device=device)
+                with torch.no_grad():
+                    output = _forward_tensors(model, tensors, session_belief=session_belief, level_belief=level_belief)
+                    logits = policy_rank_logits_from_predictions(output, tensors["action_mask"])
+                    selected = int(torch.argmax(logits[0]).detach().cpu())
+                    action_row = tensors["inputs"]["action_numeric"][0, selected]
+                    is_ordinary = float(action_row[11].detach().cpu()) > 0.5 and float(action_row[24].detach().cpu()) < 0.5
+                    is_agent = float(action_row[24].detach().cpu()) > 0.5
+                    total_actions += 1
+                    ordinary_clicks += int(is_ordinary)
+                    agent_clicks += int(is_agent)
+                    if step == 1:
+                        first_clicks += 1
+                        target_indices = {int(level.example.metadata["red_action_index"]), int(level.example.metadata["blue_action_index"])}
+                        target_first += int(selected in target_indices)
+                        distractor_first += int(is_ordinary and selected not in target_indices)
+                    result = apply_synthetic_object_event_action(level, selected)
+                    observed = _with_observed_candidate_targets(tensors, torch.as_tensor([selected], dtype=torch.long, device=device))
+                    deltas = _observed_belief_deltas(model, observed)
+                    if result.success:
+                        session_belief = session_belief + deltas.session_delta
+                        level_belief = level_belief + deltas.level_delta
+                        level_norms.append(float(torch.linalg.vector_norm(level_belief).detach().cpu()))
+                        step_success = step
+                        break
+                    level_belief = level_belief + deltas.level_delta
+                    level_norms.append(float(torch.linalg.vector_norm(level_belief).detach().cpu()))
+                    if failed_index is None:
+                        failed_index = selected
+                        failed_score_before = float(logits[0, selected].detach().cpu())
+                        retry_output = _forward_tensors(model, tensors, session_belief=session_belief, level_belief=level_belief)
+                        retry_logits = policy_rank_logits_from_predictions(retry_output, tensors["action_mask"])
+                        post_update_hits.append(float(int(torch.argmax(retry_logits[0]).detach().cpu()) == int(level.example.correct_action_index)))
+                        repeat_hits.append(float(int(torch.argmax(retry_logits[0]).detach().cpu()) == selected))
+                        failed_deltas.append(float(retry_logits[0, selected].detach().cpu()) - failed_score_before)
+            success_steps.append(step_success)
+    values = np.asarray(success_steps, dtype=np.float32)
+    total_clicks = max(total_actions, 1)
+    return {
+        "success_within_1": float(np.mean(values <= 1.0)),
+        "success_within_2": float(np.mean(values <= 2.0)),
+        "success_within_3": float(np.mean(values <= 3.0)),
+        "post_self_update_top1_acc": float(np.mean(post_update_hits)) if post_update_hits else 1.0,
+        "failed_candidate_repeat_top1_rate": float(np.mean(repeat_hits)) if repeat_hits else 0.0,
+        "failed_candidate_score_delta": float(np.mean(failed_deltas)) if failed_deltas else 0.0,
+        "ordinary_object_click_rate": float(ordinary_clicks / total_clicks),
+        "agent_or_cue_click_rate": float(agent_clicks / total_clicks),
+        "distractor_first_click_rate": float(distractor_first / max(first_clicks, 1)),
+        "target_first_click_rate": float(target_first / max(first_clicks, 1)),
+        "level_negative_memory_norm": float(np.mean(level_norms)) if level_norms else 0.0,
     }
 
 

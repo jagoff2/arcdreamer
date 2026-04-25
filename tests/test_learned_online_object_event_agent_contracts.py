@@ -116,6 +116,54 @@ def test_object_event_agent_relation_memory_carries_across_level_transition() ->
     assert final["runtime_per_game_behavior"] is False
 
 
+def test_object_event_agent_active_update_splits_session_and_level_belief() -> None:
+    split = build_online_object_event_curriculum(
+        OnlineObjectEventCurriculumConfig(
+            seed=32,
+            train_sessions=1,
+            heldout_sessions=0,
+            levels_per_session=2,
+            max_objects=3,
+            include_distractors=False,
+        )
+    )
+    support = split.train[0].levels[0].example
+    wrong_index = (
+        int(support.metadata["blue_action_index"])
+        if int(support.correct_action_index) == int(support.metadata["red_action_index"])
+        else int(support.metadata["red_action_index"])
+    )
+    failed_action = support.legal_actions[wrong_index]
+    agent = LearnedOnlineObjectEventAgent(seed=5, device="cpu", temperature=0.1, epsilon_floor=0.0)
+
+    before_scores = agent.score_actions_for_state(support.state, support.legal_actions)
+    agent.on_transition(
+        Transition(
+            state=support.state,
+            action=failed_action,
+            reward=0.0,
+            next_state=support.state,
+            terminated=False,
+            info={"score_delta": 0.0},
+        )
+    )
+    after_scores = agent.score_actions_for_state(support.state, support.legal_actions)
+    after_diag = agent.diagnostics()
+    session_norm = float(after_diag["session_belief_norm"])
+
+    agent.reset_level()
+    reset_scores = agent.score_actions_for_state(support.state, support.legal_actions)
+    reset_diag = agent.diagnostics()
+
+    assert after_diag["online_update_count"] == 1
+    assert session_norm > 0.0
+    assert float(after_diag["level_belief_norm"]) > 0.0
+    assert after_scores[failed_action].score < before_scores[failed_action].score
+    assert reset_diag["level_belief_norm"] == 0.0
+    assert reset_diag["session_belief_norm"] == session_norm
+    assert reset_scores[failed_action].score > after_scores[failed_action].score
+
+
 def test_object_event_checkpoint_roundtrip_contains_anti_replay_metadata(tmp_path: Path) -> None:
     agent = LearnedOnlineObjectEventAgent(seed=7, device="cpu")
     path = tmp_path / "object_event.pkl"

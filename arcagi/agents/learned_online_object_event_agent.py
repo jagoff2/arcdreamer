@@ -212,7 +212,7 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         with torch.no_grad():
             event = torch.cat([target_outcome, target_delta], dim=-1)
             residual = torch.tanh(self.model.event_encoder(event)).squeeze(0)
-            belief_delta = self.model.observed_event_belief_delta(
+            belief_delta = self.model.observed_event_belief_deltas(
                 output,
                 target_outcome=target_outcome,
                 target_delta=target_delta,
@@ -221,9 +221,11 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
                 state_type_ids=state_type_ids,
                 state_mask=state_mask,
                 action_numeric=action_numeric,
-            ).squeeze(0)
-            self.session_belief = (session_param.detach() + 0.03 * residual + 0.25 * belief_delta).detach()
-            self.level_belief = (level_param.detach() + 0.05 * residual + 0.10 * belief_delta).detach()
+            )
+            session_delta = belief_delta.session_delta.squeeze(0)
+            level_delta = belief_delta.level_delta.squeeze(0)
+            self.session_belief = (session_param.detach() + 0.03 * residual + session_delta).detach()
+            self.level_belief = (level_param.detach() + 0.05 * residual + level_delta).detach()
         self.online_update_count += 1
         self.last_online_loss = float(losses["loss"].detach().cpu())
         self.last_prediction_error = float(

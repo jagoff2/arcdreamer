@@ -49,6 +49,19 @@ class OnlineObjectEventCurriculumConfig:
 
 
 @dataclass(frozen=True)
+class ActiveOnlineObjectEventConfig:
+    seed: int = 0
+    train_sessions: int = 32
+    heldout_sessions: int = 32
+    levels_per_session: int = 3
+    grid_size: int = 8
+    max_distractors: int = 1
+    include_distractors: bool = True
+    max_steps_per_level: int = 3
+    curriculum: str = "latent_rule_color_click"
+
+
+@dataclass(frozen=True)
 class CandidateEventTargets:
     outcome: np.ndarray
     value: np.ndarray
@@ -110,6 +123,17 @@ class OnlineObjectEventCurriculumSplit:
 
 
 @dataclass(frozen=True)
+class ActiveStepResult:
+    transition_targets: TransitionEventTargets
+    selected_action_index: int
+    reward: float
+    success: bool
+    no_effect: bool
+    levels_completed: int
+    metadata: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class ObjectEventBatch:
     state_numeric: np.ndarray
     state_type_ids: np.ndarray
@@ -153,6 +177,63 @@ def build_online_object_event_curriculum(
     return OnlineObjectEventCurriculumSplit(
         train=generate_online_object_event_sessions(config, split="train"),
         heldout=generate_online_object_event_sessions(config, split="heldout"),
+    )
+
+
+def build_active_online_object_event_curriculum(
+    config: ActiveOnlineObjectEventConfig,
+) -> OnlineObjectEventCurriculumSplit:
+    return build_online_object_event_curriculum(
+        OnlineObjectEventCurriculumConfig(
+            seed=int(config.seed),
+            train_sessions=int(config.train_sessions),
+            heldout_sessions=int(config.heldout_sessions),
+            levels_per_session=int(config.levels_per_session),
+            max_objects=3 + max(int(config.max_distractors), 0),
+            grid_size=int(config.grid_size),
+            include_distractors=bool(config.include_distractors and int(config.max_distractors) > 0),
+            require_full_dense_actions=True,
+            curriculum=str(config.curriculum),
+        )
+    )
+
+
+def apply_synthetic_object_event_action(
+    level: OnlineObjectEventLevel,
+    selected_action_index: int,
+) -> ActiveStepResult:
+    example = level.example
+    index = int(selected_action_index)
+    if index < 0 or index >= len(example.legal_actions):
+        raise IndexError(f"selected action index {index} outside legal surface of {len(example.legal_actions)} actions")
+    success = index == int(example.correct_action_index)
+    outcome = np.asarray(example.candidate_targets.outcome[index], dtype=np.float32)
+    delta = np.asarray(example.candidate_targets.delta[index], dtype=np.float32)
+    reward = float(example.candidate_targets.value[index])
+    targets = TransitionEventTargets(
+        outcome=outcome,
+        delta=delta,
+        actual_action_index=index,
+        reward=reward,
+        terminated=False,
+    )
+    return ActiveStepResult(
+        transition_targets=targets,
+        selected_action_index=index,
+        reward=reward,
+        success=bool(success),
+        no_effect=not bool(success),
+        levels_completed=1 if success else 0,
+        metadata={
+            "curriculum": "latent_rule_color_click",
+            "session_index": int(level.session_index),
+            "level_index": int(level.level_index),
+            "latent_rule": int(level.latent_rule),
+            "cue_mode": int(level.cue_mode),
+            "selected_action_index": index,
+            "correct_action_index": int(example.correct_action_index),
+            "oracle_support_used": False,
+        },
     )
 
 

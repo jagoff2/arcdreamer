@@ -20,8 +20,10 @@ from arcagi.learned_online.event_tokens import (
     stack_state_tokens,
 )
 from arcagi.learned_online.object_event_curriculum import (
+    ActiveOnlineObjectEventConfig,
     ObjectEventCurriculumConfig,
     ObjectEventExample,
+    build_active_online_object_event_curriculum,
     build_paired_color_click_curriculum,
     collate_object_event_examples,
 )
@@ -29,6 +31,11 @@ from arcagi.learned_online.object_event_model import (
     ObjectEventModel,
     ObjectEventModelConfig,
     policy_rank_logits_from_predictions,
+)
+from scripts.train_learned_online_object_event import (
+    _batch_to_tensors,
+    _forward_tensors,
+    _with_observed_candidate_targets,
 )
 
 
@@ -342,6 +349,54 @@ def test_online_update_from_observed_transition_changes_future_action_scores() -
         after = model(**tensors["inputs"]).value_logits[0].detach()
 
     assert not torch.allclose(before, after)
+
+
+def test_object_event_level_negative_memory_discourages_repeated_failed_candidate() -> None:
+    model = ObjectEventModel(
+        ObjectEventModelConfig(
+            d_model=64,
+            n_heads=4,
+            state_layers=1,
+            action_cross_layers=1,
+            dropout=0.0,
+            online_rank=4,
+        )
+    )
+    level = build_active_online_object_event_curriculum(
+        ActiveOnlineObjectEventConfig(seed=61, train_sessions=1, heldout_sessions=0, levels_per_session=2, max_distractors=1)
+    ).train[0].levels[0]
+    example = level.example
+    failed_index = (
+        int(example.metadata["blue_action_index"])
+        if int(example.correct_action_index) == int(example.metadata["red_action_index"])
+        else int(example.metadata["red_action_index"])
+    )
+    tensors = _batch_to_tensors(collate_object_event_examples((example,)), device=torch.device("cpu"))
+    observed = _with_observed_candidate_targets(tensors, torch.as_tensor([failed_index], dtype=torch.long))
+
+    with torch.no_grad():
+        before = policy_rank_logits_from_predictions(_forward_tensors(model, tensors), tensors["action_mask"])
+        deltas = model.observed_event_belief_deltas(
+            _forward_tensors(model, observed),
+            target_outcome=observed["target_outcome"],
+            target_delta=observed["target_delta"],
+            actual_action_index=observed["actual_action_index"],
+            state_numeric=observed["inputs"]["state_numeric"],
+            state_type_ids=observed["inputs"]["state_type_ids"],
+            state_mask=observed["inputs"]["state_mask"],
+            action_numeric=observed["inputs"]["action_numeric"],
+        )
+        session_only = policy_rank_logits_from_predictions(
+            _forward_tensors(model, tensors, session_belief=deltas.session_delta),
+            tensors["action_mask"],
+        )
+        level_only = policy_rank_logits_from_predictions(
+            _forward_tensors(model, tensors, level_belief=deltas.level_delta),
+            tensors["action_mask"],
+        )
+
+    assert float(level_only[0, failed_index] - before[0, failed_index]) < -8.0
+    assert float(session_only[0, failed_index] - level_only[0, failed_index]) > 8.0
 
 
 def _eval_metrics(
