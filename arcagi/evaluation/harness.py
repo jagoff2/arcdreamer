@@ -39,6 +39,12 @@ def build_agent(agent_name: str, checkpoint_path: str | None = None, device: Any
         if checkpoint_path and Path(checkpoint_path).exists():
             return LearnedOnlineRecurrentAgent.from_checkpoint(checkpoint_path)
         return LearnedOnlineRecurrentAgent()
+    if normalized in {"learned_online_object_event", "learned_online_object_event_v1", "online_object_event", "object_event"}:
+        from arcagi.agents.learned_online_object_event_agent import LearnedOnlineObjectEventAgent
+
+        if checkpoint_path and Path(checkpoint_path).exists():
+            return LearnedOnlineObjectEventAgent.from_checkpoint(checkpoint_path)
+        return LearnedOnlineObjectEventAgent(device=device)
     if normalized in {"scientist", "hyper_scientist", "hyper-generalizing-scientist", "spotlight", "spotlight_scientist"}:
         from arcagi.agents.scientist_agent import (
             HyperGeneralizingScientistAgent,
