@@ -5037,3 +5037,118 @@ Operator-facing doc cleanup landed:
 - `README.md` now documents schema `v3` and uses `*_v3.pkl` artifact names in the main scientist commands
 - `docs/ARC_COMPETITION_RUNTIME.md` now points the uncapped operator command at `artifacts/spotlight_exec_curriculum_best_v3.pkl`
 - `docs/CHECKPOINT_LINEAGE.md` now documents schema `v3`
+
+## Entry 079: 2026-04-25 / Crash Recovery And Object-Event Runtime Rank Alignment
+
+Crash recovery state:
+
+- resumed after a PC crash during or after the runtime-rank alignment work
+- current branch had uncommitted source changes in:
+  - `arcagi/agents/learned_online_object_event_agent.py`
+  - `arcagi/evaluation/harness.py`
+  - `scripts/train_learned_online_object_event.py`
+  - `tests/test_learned_online_object_event_agent_contracts.py`
+- `artifacts/object_event_variable_palette_runtime_probe.pkl` is generated locally and ignored by git through `artifacts/`
+
+Problem fixed:
+
+- GPT-Pro found that the deployed `LearnedOnlineObjectEventAgent` runtime policy was bypassing the trained rank objective
+- training optimized `policy_rank_logits_from_predictions(...)`, but `_calibrated_distribution(...)` used semantic outcome/value/entropy scoring directly
+- this made the previous synthetic training results insufficient evidence that the deployed ARC-facing runtime used the learned rank policy
+
+Edits landed:
+
+- `arcagi/agents/learned_online_object_event_agent.py`
+  - runtime action scoring now starts from `policy_rank_logits_from_predictions(...)`
+  - valid rank logits are standardized over the current legal action surface
+  - generic diagnostic utility is added as a small uncertainty/effect term
+  - diagnostics now report:
+    - `runtime_rank_logits_used`
+    - `runtime_rank_score_mean`
+    - `runtime_rank_score_std`
+    - `runtime_diagnostic_utility_mean`
+  - checkpoint metadata now declares:
+    - `runtime_uses_policy_rank_logits = true`
+    - `runtime_uncertainty_diagnostic_utility = true`
+- `arcagi/evaluation/harness.py`
+  - compact diagnostics preserve the new runtime-rank fields
+- `scripts/train_learned_online_object_event.py`
+  - added `--eval-runtime-agent`
+  - added `--save-best`
+  - added `--selection-metric`
+  - added runtime-agent active metrics that instantiate the deployed agent, load the trained model state, and run selected-action heldout sessions through `act(...)` plus `update_after_step(...)`
+  - fixed online-mode curriculum defaults so legacy `paired_color_click` remaps to `latent_rule_color_click` instead of crashing active/online default runs
+  - fixed save-best metric extraction so a legitimate `0.0` metric is not treated as missing
+  - split default best-checkpoint metrics between active and non-active online modes
+- `tests/test_learned_online_object_event_agent_contracts.py`
+  - added tests proving flat outcome/value predictions still select by rank logits
+  - added checkpoint round-trip coverage for runtime-rank metadata and diagnostics
+  - added diagnostics checks for anti-search/API flags
+
+Synthetic runtime gate:
+
+- command:
+  - `python scripts/train_learned_online_object_event.py --mode synthetic_active_online_object_event --curriculum latent_rule_variable_palette --seed 0 --steps 100 --batch-size 16 --train-sessions 48 --heldout-sessions 48 --levels-per-session 3 --max-distractors 1 --palette-size 8 --require-role-balanced-colors --eval-every 100 --eval-runtime-agent --save-best --save-path artifacts/object_event_variable_palette_runtime_probe.pkl`
+- key result:
+  - `runtime_agent_rank_logits_used = 1.0`
+  - `runtime_agent_num_legal_actions_mean = 68.0`
+  - `runtime_agent_top1_matches_model_policy_top1_rate = 1.0`
+  - `runtime_agent_bridge_selected_action_match_rate = 1.0`
+  - `runtime_agent_metadata_model_input_forbidden_count = 0.0`
+  - `runtime_agent_active_success_within_1 = 0.375`
+  - `runtime_agent_active_success_within_2 = 0.8958333333333334`
+  - `runtime_agent_active_success_within_3 = 0.8958333333333334`
+  - `runtime_agent_next_level_first_try_acc = 0.8125`
+  - `runtime_agent_next_level_with_session_reset_acc = 0.5208333333333334`
+  - `runtime_agent_post_failure_repeat_top1_rate = 0.0`
+- true `act(...) -> update_after_step(...)` result:
+  - `runtime_agent_act_path_rank_logits_used = 1.0`
+  - `runtime_agent_act_path_num_legal_actions_mean = 68.0`
+  - `runtime_agent_act_path_active_success_within_1 = 0.3125`
+  - `runtime_agent_act_path_active_success_within_2 = 0.3333333333333333`
+  - `runtime_agent_act_path_active_success_within_3 = 0.3333333333333333`
+  - `runtime_agent_act_path_next_level_first_try_acc = 0.4375`
+  - `runtime_agent_act_path_next_level_with_session_reset_acc = 0.2708333333333333`
+  - `runtime_agent_act_path_bridge_selected_action_match_rate = 1.0`
+  - `runtime_agent_act_path_metadata_model_input_forbidden_count = 0.0`
+  - `runtime_agent_act_path_online_update_count_mean = 2.3541666666666665`
+
+Regression verification:
+
+- `python -m pytest tests/test_object_event_tokens.py tests/test_object_event_curriculum.py tests/test_object_event_online_adaptation.py tests/test_object_event_model_learning.py tests/test_learned_online_object_event_agent_contracts.py tests/test_object_event_bridge_contracts.py tests/test_object_event_active_variable_palette.py -q`
+  - `51 passed`
+- `python -m pytest tests/test_learned_online_recurrent_gates.py tests/test_learned_online_sequence_curriculum.py -q`
+  - `31 passed`
+
+Real ARC diagnostic:
+
+- command:
+  - `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent learned_online_object_event --checkpoint-path artifacts/object_event_variable_palette_runtime_probe.pkl --mode offline --game-limit 1 --max-steps 32 --progress-every 8 --object-event-bridge-diagnostics`
+- result:
+  - no ARC success
+  - `success = false`
+  - `won = false`
+  - `levels_completed = 0`
+  - `return = 0.0`
+  - `legal_action_count = 447`
+  - `scored_action_count = 447`
+  - `object_event_action_surface_capped = false`
+  - `object_event_oracle_support_used = false`
+  - `object_event_trace_replay_used = false`
+  - `object_event_graph_controller_used = false`
+  - `object_event_metadata_input_forbidden_count = 0`
+  - `object_event_online_update_count = 32`
+  - `runtime_rank_logits_used = true`
+  - `runtime_rank_score_std = 1.0`
+  - `runtime_graph_search_solver = false`
+  - `runtime_action_pattern_enumerator = false`
+  - `runtime_external_api_or_knowledge = false`
+  - `session_belief_norm = 52.26506042480469`
+  - `level_belief_norm = 52.38650894165039`
+
+Current interpretation:
+
+- this is a valid runtime-contract milestone, not ARC competence
+- the deployed object-event agent now uses its trained rank head on the full legal ARC action surface and updates online from selected transitions
+- the real ARC failure is now more informative: the next blocker is missing real ARC state/action semantics and training coverage, not a silent train/runtime rank bypass
+- the new true-runtime synthetic metric is deliberately lower than the structured-state score-path metric, which exposes a real remaining representation gap between training examples with synthetic structured tags and raw-observation runtime extraction

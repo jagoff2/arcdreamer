@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import pickle
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
+import torch
 
 from arcagi.agents.learned_online_object_event_agent import LearnedOnlineObjectEventAgent
 from arcagi.core.types import GridObservation, ObjectState, StructuredState, Transition
@@ -12,6 +14,7 @@ from arcagi.learned_online.object_event_curriculum import (
     OnlineObjectEventCurriculumConfig,
     build_online_object_event_curriculum,
 )
+from arcagi.learned_online.object_event_model import ObjectEventModelOutput
 
 
 def test_object_event_agent_scores_all_legal_actions_and_reports_contract_diagnostics() -> None:
@@ -31,6 +34,10 @@ def test_object_event_agent_scores_all_legal_actions_and_reports_contract_diagno
     assert diagnostics["runtime_action_sequence_replay"] is False
     assert diagnostics["runtime_state_hash_to_action"] is False
     assert diagnostics["runtime_per_game_behavior"] is False
+    assert diagnostics["runtime_graph_search_solver"] is False
+    assert diagnostics["runtime_action_pattern_enumerator"] is False
+    assert diagnostics["runtime_external_api_or_knowledge"] is False
+    assert diagnostics["runtime_rank_logits_used"] is True
 
 
 def test_object_event_online_update_count_and_level_belief_boundary_semantics() -> None:
@@ -162,6 +169,54 @@ def test_object_event_agent_active_update_splits_session_and_level_belief() -> N
     assert reset_diag["level_belief_norm"] == 0.0
     assert reset_diag["session_belief_norm"] == session_norm
     assert reset_scores[failed_action].score > after_scores[failed_action].score
+
+
+def test_object_event_agent_runtime_uses_model_rank_logits_when_outcomes_are_flat() -> None:
+    agent = LearnedOnlineObjectEventAgent(seed=6, device="cpu", temperature=0.1, epsilon_floor=0.0)
+    state = _state(levels_completed=0)
+    actions = state.affordances
+    action_count = len(actions)
+
+    def fake_forward(_state_arg, _actions_arg):
+        output = ObjectEventModelOutput(
+            outcome_logits=torch.zeros((1, action_count, 10), dtype=torch.float32),
+            delta_pred=torch.zeros((1, action_count, 25), dtype=torch.float32),
+            value_logits=torch.zeros((1, action_count), dtype=torch.float32),
+            action_repr=torch.zeros((1, action_count, agent.config.d_model), dtype=torch.float32),
+            encoded_state=torch.zeros((1, 1, agent.config.d_model), dtype=torch.float32),
+            rank_logits=torch.as_tensor([[0.0, 9.0, -4.0]], dtype=torch.float32),
+        )
+        return output, SimpleNamespace(mask=np.ones((action_count,), dtype=bool))
+
+    agent._forward_state_actions = fake_forward  # type: ignore[method-assign]
+    scores = agent.score_actions_for_state(state, actions)
+    diagnostics = agent.diagnostics()
+
+    assert max(scores.values(), key=lambda decision: decision.score).action == actions[1]
+    assert diagnostics["runtime_rank_logits_used"] is True
+    assert diagnostics["runtime_rank_score_std"] > 0.0
+
+
+def test_object_event_checkpoint_roundtrip_preserves_runtime_rank_policy(tmp_path: Path) -> None:
+    agent = LearnedOnlineObjectEventAgent(seed=8, device="cpu")
+    path = tmp_path / "rank_policy.pkl"
+
+    agent.save_checkpoint(path)
+    restored = LearnedOnlineObjectEventAgent.from_checkpoint(path, device="cpu")
+    observation = _observation(actions=tuple(f"click:{x}:{y}" for y in range(8) for x in range(8)) + ("0", "undo", "up"))
+    restored.act(observation)
+    diagnostics = restored.diagnostics()
+
+    assert restored.metadata["runtime_uses_policy_rank_logits"] is True
+    assert diagnostics["runtime_rank_logits_used"] is True
+    assert diagnostics["full_dense_surface_scored"] is True
+    assert diagnostics["runtime_trace_cursor"] is False
+    assert diagnostics["runtime_action_sequence_replay"] is False
+    assert diagnostics["runtime_state_hash_to_action"] is False
+    assert diagnostics["runtime_per_game_behavior"] is False
+    assert diagnostics["runtime_graph_search_solver"] is False
+    assert diagnostics["runtime_action_pattern_enumerator"] is False
+    assert diagnostics["runtime_external_api_or_knowledge"] is False
 
 
 def test_object_event_checkpoint_roundtrip_contains_anti_replay_metadata(tmp_path: Path) -> None:

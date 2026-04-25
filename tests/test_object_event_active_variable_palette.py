@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import torch
 
@@ -15,6 +17,8 @@ from arcagi.learned_online.object_event_model import ObjectEventModel, ObjectEve
 from scripts.train_learned_online_object_event import (
     _active_rollout_metrics,
     _batch_to_tensors,
+    _online_selection_metric,
+    _runtime_agent_active_metrics,
     _with_observed_candidate_targets,
 )
 
@@ -116,6 +120,28 @@ def test_variable_palette_level0_can_include_distractor_first_actions_under_poli
     assert metrics["object_event_bridge_selected_action_match_rate"] == 1.0
     assert metrics["metadata_model_input_forbidden_count"] == 0.0
     assert metrics["level0_distractor_first_click_rate"] > 0.0 or metrics["level0_target_first_click_rate"] < 1.0
+
+
+def test_runtime_agent_metric_exercises_true_act_update_path() -> None:
+    torch.manual_seed(116)
+    split = build_active_online_object_event_curriculum(_config(seed=116, train_sessions=0, heldout_sessions=1))
+    model = ObjectEventModel(
+        ObjectEventModelConfig(d_model=32, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0, online_rank=4)
+    )
+    metrics = _runtime_agent_active_metrics(model, split.heldout, device=torch.device("cpu"), max_steps_per_level=1)
+
+    assert metrics["runtime_agent_rank_logits_used"] == 1.0
+    assert metrics["runtime_agent_act_path_rank_logits_used"] == 1.0
+    assert metrics["runtime_agent_act_path_num_legal_actions_mean"] == 68.0
+    assert metrics["runtime_agent_act_path_bridge_selected_action_match_rate"] == 1.0
+    assert metrics["runtime_agent_act_path_metadata_model_input_forbidden_count"] == 0.0
+    assert metrics["runtime_agent_act_path_online_update_count_mean"] >= 1.0
+
+
+def test_online_selection_metric_defaults_follow_active_mode() -> None:
+    assert _online_selection_metric(SimpleNamespace(selection_metric=None), active=True) == "heldout_active_post_self_update_top1_acc"
+    assert _online_selection_metric(SimpleNamespace(selection_metric=None), active=False) == "heldout_post_update_top1_acc"
+    assert _online_selection_metric(SimpleNamespace(selection_metric="runtime_agent_rank_logits_used"), active=True) == "runtime_agent_rank_logits_used"
 
 
 def _config(*, seed: int, train_sessions: int, heldout_sessions: int) -> ActiveOnlineObjectEventConfig:

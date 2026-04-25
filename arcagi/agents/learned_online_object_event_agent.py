@@ -26,7 +26,11 @@ from arcagi.learned_online.event_tokens import (
     encode_action_tokens,
     encode_state_tokens,
 )
-from arcagi.learned_online.object_event_model import ObjectEventModel, ObjectEventModelConfig
+from arcagi.learned_online.object_event_model import (
+    ObjectEventModel,
+    ObjectEventModelConfig,
+    policy_rank_logits_from_predictions,
+)
 
 
 @dataclass(frozen=True)
@@ -90,6 +94,10 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         self.last_selected_probability = 0.0
         self.last_predicted_outcome: tuple[float, ...] = tuple([0.0] * 10)
         self.last_observed_outcome: tuple[float, ...] = tuple([0.0] * 10)
+        self.last_runtime_rank_logits_used = False
+        self.last_runtime_rank_score_mean = 0.0
+        self.last_runtime_rank_score_std = 0.0
+        self.last_runtime_diagnostic_utility_mean = 0.0
         self.metadata = self.checkpoint_metadata()
 
     def reset_episode(self) -> None:
@@ -116,6 +124,10 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         self.last_selected_probability = 0.0
         self.last_predicted_outcome = tuple([0.0] * 10)
         self.last_observed_outcome = tuple([0.0] * 10)
+        self.last_runtime_rank_logits_used = False
+        self.last_runtime_rank_score_mean = 0.0
+        self.last_runtime_rank_score_std = 0.0
+        self.last_runtime_diagnostic_utility_mean = 0.0
 
     def reset_level(self) -> None:
         BaseAgent.reset_level(self)
@@ -284,10 +296,17 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             "level_step": int(self.level_step),
             "last_predicted_outcome": tuple(self.last_predicted_outcome),
             "last_observed_outcome": tuple(self.last_observed_outcome),
+            "runtime_rank_logits_used": bool(self.last_runtime_rank_logits_used),
+            "runtime_rank_score_mean": float(self.last_runtime_rank_score_mean),
+            "runtime_rank_score_std": float(self.last_runtime_rank_score_std),
+            "runtime_diagnostic_utility_mean": float(self.last_runtime_diagnostic_utility_mean),
             "runtime_trace_cursor": False,
             "runtime_action_sequence_replay": False,
             "runtime_state_hash_to_action": False,
             "runtime_per_game_behavior": False,
+            "runtime_graph_search_solver": False,
+            "runtime_action_pattern_enumerator": False,
+            "runtime_external_api_or_knowledge": False,
             "last_top_scores": self._last_top_scores(limit=12),
         }
 
@@ -356,6 +375,8 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             "runtime_graph_search_solver": False,
             "runtime_action_pattern_enumerator": False,
             "runtime_external_api_or_knowledge": False,
+            "runtime_uses_policy_rank_logits": True,
+            "runtime_uncertainty_diagnostic_utility": True,
             "trace_bootstrap_used": bool(trace_bootstrap_used),
             "trace_bootstrap_transition_count": int(trace_bootstrap_transition_count),
             "trace_bootstrap_runtime_replay": False,
@@ -402,19 +423,22 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
     def _calibrated_distribution(self, output, action_mask: np.ndarray):
         outcome_probs = torch.sigmoid(output.outcome_logits[0]).detach().cpu().numpy()
         value = torch.sigmoid(output.value_logits[0]).detach().cpu().numpy()
+        valid = np.asarray(action_mask, dtype=bool)
+        mask_tensor = torch.as_tensor(action_mask[None, :], dtype=torch.bool, device=output.outcome_logits.device)
+        with torch.no_grad():
+            rank_logits = policy_rank_logits_from_predictions(output, mask_tensor)[0].detach().cpu().numpy()
+        rank_scores = _standardize_valid(rank_logits, valid)
         entropy = _binary_entropy(outcome_probs)
-        scores = (
-            2.0 * outcome_probs[:, OUT_OBJECTIVE_PROGRESS]
-            + 1.0 * outcome_probs[:, OUT_REWARD_PROGRESS]
-            + 0.8 * outcome_probs[:, OUT_MECHANIC_CHANGE]
+        diagnostic_utility = (
+            0.12 * entropy
             + 0.4 * outcome_probs[:, OUT_VISIBLE_CHANGE]
             + 0.5 * value
-            + 0.12 * entropy
+            + 0.8 * outcome_probs[:, OUT_MECHANIC_CHANGE]
             - 1.2 * outcome_probs[:, OUT_NO_EFFECT_NONPROGRESS]
             - 2.0 * outcome_probs[:, OUT_HARM]
         )
+        scores = rank_scores + diagnostic_utility
         scores = np.asarray(scores, dtype=np.float64)
-        valid = np.asarray(action_mask, dtype=bool)
         logits = np.full_like(scores, -1.0e9, dtype=np.float64)
         logits[valid] = scores[valid] / max(self.temperature, 1.0e-6)
         logits -= np.max(logits[valid])
@@ -426,6 +450,10 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             floor = np.zeros_like(probs)
             floor[valid] = 1.0 / float(np.count_nonzero(valid))
             probs = (1.0 - eps) * probs + eps * floor
+        self.last_runtime_rank_logits_used = True
+        self.last_runtime_rank_score_mean = float(np.mean(rank_scores[valid])) if valid.any() else 0.0
+        self.last_runtime_rank_score_std = float(np.std(rank_scores[valid])) if valid.any() else 0.0
+        self.last_runtime_diagnostic_utility_mean = float(np.mean(diagnostic_utility[valid])) if valid.any() else 0.0
         return probs, scores, outcome_probs, value
 
     def _start_new_level(self) -> None:
@@ -457,6 +485,17 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
 def _binary_entropy(probs: np.ndarray) -> np.ndarray:
     clipped = np.clip(probs, 1.0e-6, 1.0 - 1.0e-6)
     return -np.mean(clipped * np.log(clipped) + (1.0 - clipped) * np.log(1.0 - clipped), axis=-1)
+
+
+def _standardize_valid(values: np.ndarray, valid: np.ndarray) -> np.ndarray:
+    out = np.asarray(values, dtype=np.float64).copy()
+    active_mask = np.asarray(valid, dtype=bool)
+    if not np.any(active_mask):
+        return out
+    active = out[active_mask]
+    out[active_mask] = (active - float(np.mean(active))) / max(float(np.std(active)), 1.0e-6)
+    out[~active_mask] = -1.0e9
+    return out
 
 
 def _entropy(probs: Sequence[float]) -> float:

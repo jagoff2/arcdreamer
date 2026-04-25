@@ -16,6 +16,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from arcagi.agents.learned_online_object_event_agent import LearnedOnlineObjectEventAgent
+from arcagi.core.types import GridObservation, StructuredState, Transition
 from arcagi.learned_online.object_event_bridge import (
     SelectedActionObservation,
     assert_no_forbidden_metadata_as_model_input,
@@ -83,6 +84,9 @@ def main() -> None:
     parser.add_argument("--save-path", type=Path, default=None)
     parser.add_argument("--output", type=Path, default=None, help="Legacy alias for --save-path.")
     parser.add_argument("--no-save", action="store_true")
+    parser.add_argument("--eval-runtime-agent", action="store_true")
+    parser.add_argument("--save-best", action="store_true")
+    parser.add_argument("--selection-metric", default=None)
     args = parser.parse_args()
 
     mode = args.source or args.mode
@@ -101,6 +105,8 @@ def main() -> None:
     torch.manual_seed(int(args.seed))
     rng = np.random.default_rng(int(args.seed))
     if mode in {"synthetic_online_object_event", "synthetic_active_online_object_event"}:
+        if str(args.curriculum) == "paired_color_click":
+            args.curriculum = "latent_rule_color_click"
         _run_synthetic_online_object_event(args=args, config=config, device=device, rng=rng, active=mode == "synthetic_active_online_object_event")
         return
 
@@ -213,6 +219,11 @@ def _run_synthetic_online_object_event(
     model = ObjectEventModel(config).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=3.0e-3, weight_decay=1.0e-4)
     last_loss = 0.0
+    best_metric_value = float("-inf")
+    best_step = 0
+    best_state: dict[str, torch.Tensor] | None = None
+    best_summary: dict[str, Any] | None = None
+    selection_metric = _online_selection_metric(args, active=active)
     eval_steps = {max(int(args.steps), 1)}
     eval_every = max(int(args.eval_every), 1)
     eval_steps.update(step for step in range(eval_every, max(int(args.steps), 1) + 1, eval_every))
@@ -247,17 +258,31 @@ def _run_synthetic_online_object_event(
         optimizer.step()
         last_loss = float(loss.detach().cpu())
         if step in eval_steps:
+            metrics = _online_training_metrics(
+                model,
+                train=curriculum.train,
+                heldout=curriculum.heldout,
+                device=device,
+                step=step,
+                train_loss=last_loss,
+                active=active,
+                eval_runtime_agent=bool(args.eval_runtime_agent),
+            )
+            if bool(args.save_best):
+                if selection_metric not in metrics:
+                    available = ", ".join(sorted(str(key) for key in metrics))
+                    raise KeyError(f"--selection-metric {selection_metric!r} is not present in metrics; available: {available}")
+                metric_value = float(metrics[selection_metric])
+            else:
+                metric_value = float("-inf")
+            if bool(args.save_best) and metric_value >= best_metric_value:
+                best_metric_value = metric_value
+                best_step = int(step)
+                best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
+                best_summary = dict(metrics)
             print(
                 json.dumps(
-                    _online_training_metrics(
-                        model,
-                        train=curriculum.train,
-                        heldout=curriculum.heldout,
-                        device=device,
-                        step=step,
-                        train_loss=last_loss,
-                        active=active,
-                    ),
+                    metrics,
                     sort_keys=True,
                 ),
                 flush=True,
@@ -265,20 +290,30 @@ def _run_synthetic_online_object_event(
 
     save_path = args.save_path or args.output
     if save_path is not None and not bool(args.no_save):
+        save_state = best_state if bool(args.save_best) and best_state is not None else model.state_dict()
+        summary = best_summary if bool(args.save_best) and best_summary is not None else _online_training_metrics(
+            model,
+            train=curriculum.train,
+            heldout=curriculum.heldout,
+            device=device,
+            step=max(int(args.steps), 1),
+            train_loss=last_loss,
+            active=active,
+            eval_runtime_agent=bool(args.eval_runtime_agent),
+        )
+        if bool(args.save_best):
+            summary = {
+                **dict(summary),
+                "checkpoint_best_step": int(best_step),
+                "checkpoint_selection_metric": str(selection_metric),
+                "checkpoint_selection_metric_value": float(best_metric_value),
+            }
         checkpoint = {
             "seed": int(args.seed),
             "config": config.to_dict(),
-            "model_state": model.state_dict(),
+            "model_state": save_state,
             "metadata": LearnedOnlineObjectEventAgent.checkpoint_metadata(),
-            "training_summary": _online_training_metrics(
-                model,
-                train=curriculum.train,
-                heldout=curriculum.heldout,
-                device=device,
-                step=max(int(args.steps), 1),
-                train_loss=last_loss,
-                active=active,
-            ),
+            "training_summary": summary,
         }
         save_path.parent.mkdir(parents=True, exist_ok=True)
         with save_path.open("wb") as handle:
@@ -307,6 +342,12 @@ def _sample_sessions(
         raise ValueError("cannot train on an empty online object-event session split")
     indices = rng.integers(0, len(sessions), size=int(batch_size))
     return tuple(sessions[int(index)] for index in indices)
+
+
+def _online_selection_metric(args: argparse.Namespace, *, active: bool) -> str:
+    if args.selection_metric:
+        return str(args.selection_metric)
+    return "heldout_active_post_self_update_top1_acc" if active else "heldout_post_update_top1_acc"
 
 
 def _forward_tensors(
@@ -402,6 +443,7 @@ def _online_training_metrics(
     step: int,
     train_loss: float,
     active: bool = False,
+    eval_runtime_agent: bool = False,
 ) -> dict[str, Any]:
     train_metrics = _evaluate_online_sessions(model, train, device=device)
     heldout_metrics = _evaluate_online_sessions(model, heldout, device=device)
@@ -490,6 +532,8 @@ def _online_training_metrics(
             }
         )
         metrics.update(_color_role_balance_metrics(train=train, heldout=heldout))
+        if eval_runtime_agent:
+            metrics.update(_runtime_agent_active_metrics(model, heldout, device=device))
     return metrics
 
 
@@ -858,6 +902,251 @@ def _synthetic_bridge_observation(example: ObjectEventExample, selected: int, re
         metadata=result.metadata,
     )
     return bridge
+
+
+def _runtime_agent_active_metrics(
+    model: ObjectEventModel,
+    sessions: Sequence[OnlineObjectEventSession],
+    *,
+    device: torch.device,
+    max_steps_per_level: int = 3,
+) -> dict[str, float]:
+    if not sessions:
+        return {
+            "runtime_agent_rank_logits_used": 0.0,
+            "runtime_agent_num_legal_actions_mean": 0.0,
+            "runtime_agent_top1_matches_model_policy_top1_rate": 0.0,
+            "runtime_agent_active_success_within_1": 0.0,
+            "runtime_agent_active_success_within_2": 0.0,
+            "runtime_agent_active_success_within_3": 0.0,
+            "runtime_agent_next_level_first_try_acc": 0.0,
+            "runtime_agent_next_level_with_session_reset_acc": 0.0,
+            "runtime_agent_post_failure_repeat_top1_rate": 0.0,
+            "runtime_agent_bridge_selected_action_match_rate": 0.0,
+            "runtime_agent_metadata_model_input_forbidden_count": 0.0,
+            "runtime_agent_act_path_rank_logits_used": 0.0,
+            "runtime_agent_act_path_num_legal_actions_mean": 0.0,
+            "runtime_agent_act_path_active_success_within_1": 0.0,
+            "runtime_agent_act_path_active_success_within_2": 0.0,
+            "runtime_agent_act_path_active_success_within_3": 0.0,
+            "runtime_agent_act_path_next_level_first_try_acc": 0.0,
+            "runtime_agent_act_path_next_level_with_session_reset_acc": 0.0,
+            "runtime_agent_act_path_bridge_selected_action_match_rate": 0.0,
+            "runtime_agent_act_path_metadata_model_input_forbidden_count": 0.0,
+            "runtime_agent_act_path_online_update_count_mean": 0.0,
+        }
+    base_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
+    success_steps: list[int] = []
+    next_hits: list[float] = []
+    reset_hits: list[float] = []
+    rank_used: list[float] = []
+    legal_counts: list[float] = []
+    match_hits: list[float] = []
+    repeat_hits: list[float] = []
+    bridge_matches: list[float] = []
+    forbidden_count = 0
+    for session in sessions:
+        agent = LearnedOnlineObjectEventAgent(
+            seed=0,
+            config=model.config,
+            device=device,
+            temperature=0.01,
+            epsilon_floor=0.0,
+        )
+        agent.model.load_state_dict(base_state)
+        agent.reset_episode()
+        first_level = session.levels[0]
+        first_example = first_level.example
+        step_success = max_steps_per_level + 1
+        first_failed_action: str | None = None
+        for step in range(1, max_steps_per_level + 1):
+            decisions = agent.score_actions_for_state(first_example.state, first_example.legal_actions)
+            selected_action = max(decisions.values(), key=lambda decision: decision.score).action
+            selected = int(first_example.legal_actions.index(selected_action))
+            diagnostics = agent.diagnostics()
+            rank_used.append(float(bool(diagnostics.get("runtime_rank_logits_used", False))))
+            legal_counts.append(float(diagnostics.get("legal_action_count", 0) or 0))
+            if step == 1:
+                model_top1 = _model_policy_top1(model, first_example, device=device)
+                match_hits.append(float(selected == model_top1))
+            result = apply_synthetic_object_event_action(first_level, selected)
+            bridge = _synthetic_bridge_observation(first_example, selected, result)
+            bridge_matches.append(float(int(bridge.selected_action_index) == selected))
+            try:
+                assert_no_forbidden_metadata_as_model_input(bridge.model_input_metadata())
+            except AssertionError:
+                forbidden_count += 1
+            transition = _synthetic_transition(first_example, selected_action, result)
+            agent.on_transition(transition)
+            if result.success:
+                step_success = step
+                break
+            if first_failed_action is None:
+                first_failed_action = selected_action
+                retry_scores = agent.score_actions_for_state(first_example.state, first_example.legal_actions)
+                retry_selected = max(retry_scores.values(), key=lambda decision: decision.score).action
+                repeat_hits.append(float(retry_selected == first_failed_action))
+        success_steps.append(step_success)
+        if len(session.levels) > 1:
+            query = session.levels[1].example
+            decisions = agent.score_actions_for_state(query.state, query.legal_actions)
+            selected_action = max(decisions.values(), key=lambda decision: decision.score).action
+            next_hits.append(float(query.legal_actions.index(selected_action) == int(query.correct_action_index)))
+            reset_agent = LearnedOnlineObjectEventAgent(
+                seed=0,
+                config=model.config,
+                device=device,
+                temperature=0.01,
+                epsilon_floor=0.0,
+            )
+            reset_agent.model.load_state_dict(base_state)
+            reset_decisions = reset_agent.score_actions_for_state(query.state, query.legal_actions)
+            reset_action = max(reset_decisions.values(), key=lambda decision: decision.score).action
+            reset_hits.append(float(query.legal_actions.index(reset_action) == int(query.correct_action_index)))
+    values = np.asarray(success_steps, dtype=np.float32)
+    metrics = {
+        "runtime_agent_rank_logits_used": float(np.mean(rank_used)) if rank_used else 0.0,
+        "runtime_agent_num_legal_actions_mean": float(np.mean(legal_counts)) if legal_counts else 0.0,
+        "runtime_agent_top1_matches_model_policy_top1_rate": float(np.mean(match_hits)) if match_hits else 0.0,
+        "runtime_agent_active_success_within_1": float(np.mean(values <= 1.0)),
+        "runtime_agent_active_success_within_2": float(np.mean(values <= 2.0)),
+        "runtime_agent_active_success_within_3": float(np.mean(values <= 3.0)),
+        "runtime_agent_next_level_first_try_acc": float(np.mean(next_hits)) if next_hits else 0.0,
+        "runtime_agent_next_level_with_session_reset_acc": float(np.mean(reset_hits)) if reset_hits else 0.0,
+        "runtime_agent_post_failure_repeat_top1_rate": float(np.mean(repeat_hits)) if repeat_hits else 0.0,
+        "runtime_agent_bridge_selected_action_match_rate": float(np.mean(bridge_matches)) if bridge_matches else 0.0,
+        "runtime_agent_metadata_model_input_forbidden_count": float(forbidden_count),
+    }
+    metrics.update(
+        _runtime_agent_act_path_metrics(
+            model_state=base_state,
+            config=model.config,
+            sessions=sessions,
+            device=device,
+            max_steps_per_level=max_steps_per_level,
+        )
+    )
+    return metrics
+
+
+def _runtime_agent_act_path_metrics(
+    *,
+    model_state: dict[str, torch.Tensor],
+    config: ObjectEventModelConfig,
+    sessions: Sequence[OnlineObjectEventSession],
+    device: torch.device,
+    max_steps_per_level: int,
+) -> dict[str, float]:
+    success_steps: list[int] = []
+    next_hits: list[float] = []
+    reset_hits: list[float] = []
+    rank_used: list[float] = []
+    legal_counts: list[float] = []
+    bridge_matches: list[float] = []
+    online_counts: list[float] = []
+    forbidden_count = 0
+    for session_index, session in enumerate(sessions):
+        agent = LearnedOnlineObjectEventAgent(
+            seed=session_index,
+            config=config,
+            device=device,
+            temperature=0.01,
+            epsilon_floor=0.0,
+        )
+        agent.model.load_state_dict(model_state)
+        agent.reset_episode()
+        first_level = session.levels[0]
+        first_example = first_level.example
+        step_success = max_steps_per_level + 1
+        for step in range(1, max_steps_per_level + 1):
+            observation = _grid_observation_from_state(first_example.state, first_example.legal_actions, step_index=step - 1)
+            selected_action = agent.act(observation)
+            selected = int(first_example.legal_actions.index(selected_action))
+            diagnostics = agent.diagnostics()
+            rank_used.append(float(bool(diagnostics.get("runtime_rank_logits_used", False))))
+            legal_counts.append(float(diagnostics.get("legal_action_count", 0) or 0))
+            result = apply_synthetic_object_event_action(first_level, selected)
+            bridge = _synthetic_bridge_observation(first_example, selected, result)
+            bridge_matches.append(float(int(bridge.selected_action_index) == selected))
+            try:
+                assert_no_forbidden_metadata_as_model_input(bridge.model_input_metadata())
+            except AssertionError:
+                forbidden_count += 1
+            next_state = first_example.next_state if bool(result.success) else first_example.state
+            next_observation = _grid_observation_from_state(next_state, first_example.legal_actions, step_index=step)
+            agent.update_after_step(
+                next_observation,
+                reward=float(result.reward),
+                terminated=False,
+                info={"score_delta": float(result.reward), "level_boundary": bool(result.success)},
+            )
+            if result.success:
+                step_success = step
+                break
+        success_steps.append(step_success)
+        online_counts.append(float(agent.online_update_count))
+        if len(session.levels) > 1:
+            query = session.levels[1].example
+            query_observation = _grid_observation_from_state(query.state, query.legal_actions, step_index=0)
+            selected_action = agent.act(query_observation)
+            next_hits.append(float(query.legal_actions.index(selected_action) == int(query.correct_action_index)))
+            reset_agent = LearnedOnlineObjectEventAgent(
+                seed=session_index,
+                config=config,
+                device=device,
+                temperature=0.01,
+                epsilon_floor=0.0,
+            )
+            reset_agent.model.load_state_dict(model_state)
+            reset_action = reset_agent.act(query_observation)
+            reset_hits.append(float(query.legal_actions.index(reset_action) == int(query.correct_action_index)))
+    values = np.asarray(success_steps, dtype=np.float32)
+    return {
+        "runtime_agent_act_path_rank_logits_used": float(np.mean(rank_used)) if rank_used else 0.0,
+        "runtime_agent_act_path_num_legal_actions_mean": float(np.mean(legal_counts)) if legal_counts else 0.0,
+        "runtime_agent_act_path_active_success_within_1": float(np.mean(values <= 1.0)),
+        "runtime_agent_act_path_active_success_within_2": float(np.mean(values <= 2.0)),
+        "runtime_agent_act_path_active_success_within_3": float(np.mean(values <= 3.0)),
+        "runtime_agent_act_path_next_level_first_try_acc": float(np.mean(next_hits)) if next_hits else 0.0,
+        "runtime_agent_act_path_next_level_with_session_reset_acc": float(np.mean(reset_hits)) if reset_hits else 0.0,
+        "runtime_agent_act_path_bridge_selected_action_match_rate": float(np.mean(bridge_matches)) if bridge_matches else 0.0,
+        "runtime_agent_act_path_metadata_model_input_forbidden_count": float(forbidden_count),
+        "runtime_agent_act_path_online_update_count_mean": float(np.mean(online_counts)) if online_counts else 0.0,
+    }
+
+
+def _grid_observation_from_state(
+    state: StructuredState,
+    actions: Sequence[str],
+    *,
+    step_index: int,
+) -> GridObservation:
+    return GridObservation(
+        task_id=state.task_id,
+        episode_id=state.episode_id,
+        step_index=int(step_index),
+        grid=state.as_grid(),
+        available_actions=tuple(actions),
+        extras={"action_roles": dict(state.action_roles)},
+    )
+
+
+def _model_policy_top1(model: ObjectEventModel, example: ObjectEventExample, *, device: torch.device) -> int:
+    tensors = _batch_to_tensors(collate_object_event_examples((example,)), device=device)
+    with torch.no_grad():
+        logits = policy_rank_logits_from_predictions(_forward_tensors(model, tensors), tensors["action_mask"])
+    return int(torch.argmax(logits[0]).detach().cpu())
+
+
+def _synthetic_transition(example: ObjectEventExample, action: str, result: Any) -> Transition:
+    return Transition(
+        state=example.state,
+        action=action,
+        reward=float(result.reward),
+        next_state=example.next_state if bool(result.success) else example.state,
+        terminated=False,
+        info={"score_delta": float(result.reward), "level_boundary": bool(result.success)},
+    )
 
 
 def _top1(logits: torch.Tensor, actual: torch.Tensor) -> float:
