@@ -6062,3 +6062,48 @@ Basis-recovery gate result:
   - the remaining blocker is low learned action diversity / residual mapped-column concentration
   - this artifact is not ARC-ready because it fails the diversity/concentration gate
   - next change should be made after GPT-Pro review of the pushed code and artifact; it must not become a hard diversity controller or scripted probe schedule
+
+GPT-Pro follow-up consensus after pushed `8d63014`:
+
+- do not make another model/mechanism patch yet
+- the current artifact is blocked from 320-step ARC acquisition, but allowed for one labeled 48-step hygiene probe after adding better diagnostics
+- the aggregate synthetic diversity metrics are confounded by fast success: low `unique_action_count_mean` can mean quick solve rather than collapse
+- next patch title: `Add failure-contingent action diversity diagnostics`
+- add failed-level diversity and post-no-effect-window metrics in synthetic runtime act-path evaluation
+- add compact real-ARC hygiene summaries: unique actions, unique click x/y, unique mapped row/col, max same-action/click-x/mapped-col streaks, post-no-effect same-x/column rates, top-score same-column, effective diagnostic mix, and rank weight
+- this is allowed because it measures behavior only; it must not alter action selection, scores, masks, learned state, action availability, or checkpoint weights
+- rerun the same 447-action synthetic gate after the metrics patch; if competence remains high and conditional failed/post-no-effect diversity is non-collapsed, then run a labeled 48-step ARC hygiene probe, not a 320-step acquisition run
+
+Diagnostics-patch gate result:
+
+- artifact: `artifacts/object_event_basis_recovery_runtime_probe.pkl`
+- best step: `200`
+- selection metric: `runtime_agent_act_path_balanced_score = 1.0363095238095237`
+- compliance:
+  - full `447` legal actions scored
+  - `metadata_model_input_forbidden_count = 0.0`
+  - `object_event_action_surface_capped = false`
+  - no graph controller / trace replay / oracle support
+- competence passed:
+  - `runtime_agent_act_path_active_success_within_5 = 0.8541666666666666`
+  - `runtime_agent_act_path_active_success_within_3 = 0.8125`
+  - `runtime_agent_act_path_next_level_first_try_acc = 0.7708333333333334`
+  - `runtime_agent_act_path_runtime_diagnostic_mix_effective = 0.07729096081164942`
+  - `runtime_agent_act_path_runtime_rank_weight_effective = 0.9227090391883506`
+- failed-level conditional diversity passed:
+  - `runtime_agent_act_path_failed_level_count = 7.0`
+  - `runtime_agent_act_path_failed_level_unique_action_count_mean = 3.0`
+  - `runtime_agent_act_path_failed_level_selected_unique_x_count = 2.857142857142857`
+  - `runtime_agent_act_path_failed_level_selected_unique_mapped_col_count = 2.142857142857143`
+  - `runtime_agent_act_path_failed_level_max_same_action_streak_max = 3.0`
+- post-no-effect concentration rates passed:
+  - `runtime_agent_act_path_post_noeffect_window_count = 56.0`
+  - `runtime_agent_act_path_post_noeffect_next_action_same_mapped_col_rate = 0.35714285714285715`
+  - `runtime_agent_act_path_post_noeffect_next_action_same_x_rate = 0.21428571428571427`
+- full gate still failed:
+  - `runtime_agent_act_path_post_noeffect_unique_action_count_mean = 1.2678571428571428`
+  - target was `>= 2.0`
+- interpretation:
+  - the old aggregate diversity failure is mostly explained away; failed-level behavior is non-collapsed under the conditional metric
+  - the remaining issue is specifically the post-no-effect window uniqueness target
+  - this target may itself be confounded because a one-action recovery window has maximum uniqueness `1`; ask GPT-Pro before changing model or running ARC

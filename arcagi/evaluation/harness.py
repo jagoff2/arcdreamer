@@ -9,6 +9,7 @@ from typing import Any
 
 from arcagi.agents.graph_agent import GraphExplorerAgent
 from arcagi.agents.random_agent import RandomHeuristicAgent
+from arcagi.core.action_schema import click_action_to_grid_cell, parse_click_action
 from arcagi.core.progress_signals import action_family
 from arcagi.learned_online.object_event_bridge import (
     SelectedActionObservation,
@@ -216,6 +217,16 @@ def _agent_claim_metadata(agent: Any) -> dict[str, Any]:
     }
 
 
+def _action_grid_cell(action: str, observation: Any) -> tuple[int, int] | None:
+    if parse_click_action(action) is None:
+        return None
+    try:
+        state = extract_structured_state(observation)
+        return click_action_to_grid_cell(action, grid_shape=state.grid_shape, inventory=state.inventory_dict())
+    except Exception:
+        return None
+
+
 def run_episode(
     agent: Any,
     env: Any,
@@ -244,6 +255,23 @@ def run_episode(
     max_same_action_streak = 0
     same_action_streak = 0
     previous_action = ""
+    click_x_values: set[int] = set()
+    click_y_values: set[int] = set()
+    mapped_col_values: set[int] = set()
+    mapped_row_values: set[int] = set()
+    max_same_click_x_streak = 0
+    same_click_x_streak = 0
+    previous_click_x: int | None = None
+    max_same_mapped_col_streak = 0
+    same_mapped_col_streak = 0
+    previous_mapped_col: int | None = None
+    pending_noeffect_click_x: int | None = None
+    pending_noeffect_mapped_col: int | None = None
+    post_noeffect_same_x: list[float] = []
+    post_noeffect_same_mapped_col: list[float] = []
+    top_same_mapped_col_values: list[float] = []
+    runtime_diagnostic_mix_values: list[float] = []
+    runtime_rank_weight_values: list[float] = []
     last_bridge_diagnostics: dict[str, Any] = {}
     trace_handle = None
     try:
@@ -282,6 +310,55 @@ def run_episode(
                 same_action_streak = 1
                 previous_action = action_text
             max_same_action_streak = max(max_same_action_streak, same_action_streak)
+            click = parse_click_action(action_text)
+            click_x = int(click[0]) if click is not None else None
+            click_y = int(click[1]) if click is not None else None
+            if click_x is not None:
+                click_x_values.add(click_x)
+                click_y_values.add(int(click_y))
+                if click_x == previous_click_x:
+                    same_click_x_streak += 1
+                else:
+                    same_click_x_streak = 1
+                    previous_click_x = click_x
+                max_same_click_x_streak = max(max_same_click_x_streak, same_click_x_streak)
+            else:
+                same_click_x_streak = 0
+                previous_click_x = None
+            grid_cell = _action_grid_cell(action_text, before)
+            mapped_col = int(grid_cell[1]) if grid_cell is not None else None
+            mapped_row = int(grid_cell[0]) if grid_cell is not None else None
+            if mapped_col is not None:
+                mapped_col_values.add(mapped_col)
+                mapped_row_values.add(int(mapped_row))
+                if mapped_col == previous_mapped_col:
+                    same_mapped_col_streak += 1
+                else:
+                    same_mapped_col_streak = 1
+                    previous_mapped_col = mapped_col
+                max_same_mapped_col_streak = max(max_same_mapped_col_streak, same_mapped_col_streak)
+            else:
+                same_mapped_col_streak = 0
+                previous_mapped_col = None
+            if pending_noeffect_click_x is not None and click_x is not None:
+                post_noeffect_same_x.append(float(click_x == pending_noeffect_click_x))
+            if pending_noeffect_mapped_col is not None and mapped_col is not None:
+                post_noeffect_same_mapped_col.append(float(mapped_col == pending_noeffect_mapped_col))
+            pending_noeffect_click_x = None
+            pending_noeffect_mapped_col = None
+            step_diagnostics = getattr(agent, "diagnostics", lambda: {})()
+            if isinstance(step_diagnostics, dict):
+                top_same_mapped_col_values.append(float(step_diagnostics.get("top_score_same_mapped_col_fraction", 0.0) or 0.0))
+                runtime_diagnostic_mix_values.append(
+                    float(
+                        step_diagnostics.get(
+                            "runtime_diagnostic_mix_effective",
+                            step_diagnostics.get("runtime_diagnostic_mix", 0.0),
+                        )
+                        or 0.0
+                    )
+                )
+                runtime_rank_weight_values.append(float(step_diagnostics.get("runtime_rank_weight_effective", 0.0) or 0.0))
             if _is_interaction_action(action_text, before):
                 interaction_steps += 1
             reset_action = _is_reset_action(action_text, before)
@@ -309,6 +386,9 @@ def run_episode(
             levels_completed = max(levels_completed, after_levels)
             won = won or _is_win_state(observation)
             level_boundary = bool(reset_action or after_levels > before_levels)
+            if float(result.reward) <= 0.0 and not level_boundary:
+                pending_noeffect_click_x = click_x
+                pending_noeffect_mapped_col = mapped_col
             if level_boundary and not won and not _agent_handles_level_boundaries(agent):
                 _reset_agent_for_level(agent)
             if result.reward > 0.9:
@@ -357,7 +437,7 @@ def run_episode(
                         "latest_language": latest_language,
                         "last_plan_scores": _json_safe(getattr(agent, "last_plan_scores", {})),
                         "object_event_bridge": bridge_diagnostics,
-                        "diagnostics": _compact_diagnostics(getattr(agent, "diagnostics", lambda: {})()),
+                        "diagnostics": _compact_diagnostics(step_diagnostics),
                     },
                 )
             if progress_every > 0 and steps % progress_every == 0:
@@ -399,7 +479,22 @@ def run_episode(
                     "game_state": _game_state(observation),
                     "action_histogram": dict(action_counts),
                     "family_histogram": dict(family_counts),
+                    "executed_step_count": int(steps),
                     "max_same_action_streak": max_same_action_streak,
+                    "max_same_click_x_streak": int(max_same_click_x_streak),
+                    "max_same_mapped_col_streak": int(max_same_mapped_col_streak),
+                    "unique_action_count": int(len(action_counts)),
+                    "unique_click_x_count": int(len(click_x_values)),
+                    "unique_click_y_count": int(len(click_y_values)),
+                    "unique_mapped_col_count": int(len(mapped_col_values)),
+                    "unique_mapped_row_count": int(len(mapped_row_values)),
+                    "post_noeffect_next_action_same_x_rate": mean(post_noeffect_same_x) if post_noeffect_same_x else 0.0,
+                    "post_noeffect_next_action_same_mapped_col_rate": mean(post_noeffect_same_mapped_col)
+                    if post_noeffect_same_mapped_col
+                    else 0.0,
+                    "top_score_same_mapped_col_fraction": mean(top_same_mapped_col_values) if top_same_mapped_col_values else 0.0,
+                    "runtime_diagnostic_mix_effective": mean(runtime_diagnostic_mix_values) if runtime_diagnostic_mix_values else 0.0,
+                    "runtime_rank_weight_effective": mean(runtime_rank_weight_values) if runtime_rank_weight_values else 0.0,
                     "object_event_bridge": last_bridge_diagnostics,
                     "diagnostics": _compact_diagnostics(getattr(agent, "diagnostics", lambda: {})()),
                     **_agent_claim_metadata(agent),
@@ -421,7 +516,23 @@ def run_episode(
         **_agent_claim_metadata(agent),
         "action_histogram": dict(action_counts),
         "family_histogram": dict(family_counts),
+        "executed_step_count": int(steps),
         "max_same_action_streak": max_same_action_streak,
+        "max_same_click_x_streak": int(max_same_click_x_streak),
+        "max_same_mapped_col_streak": int(max_same_mapped_col_streak),
+        "unique_action_count": int(len(action_counts)),
+        "unique_click_x_count": int(len(click_x_values)),
+        "unique_click_y_count": int(len(click_y_values)),
+        "unique_mapped_col_count": int(len(mapped_col_values)),
+        "unique_mapped_row_count": int(len(mapped_row_values)),
+        "non_reset_action_rate": float((steps - reset_steps) / max(steps, 1)),
+        "post_noeffect_next_action_same_x_rate": mean(post_noeffect_same_x) if post_noeffect_same_x else 0.0,
+        "post_noeffect_next_action_same_mapped_col_rate": mean(post_noeffect_same_mapped_col)
+        if post_noeffect_same_mapped_col
+        else 0.0,
+        "top_score_same_mapped_col_fraction": mean(top_same_mapped_col_values) if top_same_mapped_col_values else 0.0,
+        "runtime_diagnostic_mix_effective": mean(runtime_diagnostic_mix_values) if runtime_diagnostic_mix_values else 0.0,
+        "runtime_rank_weight_effective": mean(runtime_rank_weight_values) if runtime_rank_weight_values else 0.0,
         "trace_path": str(trace_path) if trace_path is not None else "",
         "object_event_bridge": last_bridge_diagnostics,
         "diagnostics": getattr(agent, "diagnostics", lambda: {})(),
@@ -621,6 +732,9 @@ def _compact_diagnostics(diagnostics: Any) -> dict[str, Any]:
         "runtime_rank_score_mean",
         "runtime_rank_score_std",
         "runtime_diagnostic_utility_mean",
+        "runtime_diagnostic_mix_effective",
+        "runtime_diagnostic_mix_evidence_gate",
+        "runtime_rank_weight_effective",
         "runtime_greedy_rank_selection",
         "runtime_controller_active",
         "objective_stall_steps",

@@ -403,6 +403,8 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             "runtime_diagnostic_mix_evidence_gate": float(self.last_runtime_diagnostic_mix_evidence_gate),
             "runtime_diagnostic_mix_max": float(self.diagnostic_mix_max),
             "runtime_rank_weight_effective": float(self.last_runtime_rank_weight_effective),
+            "runtime_hygiene_diversity_diagnostics_only": True,
+            "runtime_diversity_controller_active": False,
             **self.last_rank_component_stats,
             "runtime_greedy_rank_selection": True,
             "runtime_trace_cursor": False,

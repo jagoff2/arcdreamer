@@ -9,7 +9,7 @@ import torch
 
 from arcagi.agents.learned_online_object_event_agent import LearnedOnlineObjectEventAgent
 from arcagi.core.types import GridObservation, ObjectState, StructuredState, Transition
-from arcagi.evaluation.harness import build_agent
+from arcagi.evaluation.harness import build_agent, run_episode
 from arcagi.learned_online.event_tokens import OUT_NO_EFFECT_NONPROGRESS, OUT_VISIBLE_CHANGE, OUT_VISIBLE_ONLY_NONPROGRESS
 from arcagi.learned_online.object_event_curriculum import (
     ActiveOnlineObjectEventConfig,
@@ -459,6 +459,79 @@ def test_object_event_agent_diagnostic_mix_is_bounded_by_evidence_gate() -> None
     assert float(after["runtime_rank_weight_effective"]) >= 1.0 - float(after["runtime_diagnostic_mix_max"])
     for forbidden in ("least_visited", "untried", "tried_basis", "basis_blacklist", "coverage_queue", "frontier", "sweep_index"):
         assert not hasattr(agent, forbidden)
+
+
+def test_agent_exposes_hygiene_diversity_diagnostics_without_controller_state() -> None:
+    level = _parametric_level()
+    agent = LearnedOnlineObjectEventAgent(seed=34, device="cpu", temperature=0.1, epsilon_floor=0.0)
+
+    agent.score_actions_for_state(level.example.state, level.example.legal_actions)
+    diagnostics = agent.diagnostics()
+
+    assert diagnostics["runtime_hygiene_diversity_diagnostics_only"] is True
+    assert diagnostics["runtime_diversity_controller_active"] is False
+    assert "top_score_same_mapped_col_fraction" in diagnostics
+    assert "runtime_diagnostic_mix_effective" in diagnostics
+    assert "runtime_rank_weight_effective" in diagnostics
+    for forbidden in (
+        "least_visited",
+        "untried",
+        "tried_actions",
+        "tried_basis",
+        "basis_blacklist",
+        "coverage_queue",
+        "frontier",
+        "sweep_index",
+        "probe_counter",
+        "action_pattern_enumerator",
+    ):
+        assert not hasattr(agent, forbidden)
+
+
+def test_harness_reports_hygiene_diversity_metrics_without_controller_state() -> None:
+    class ScriptedAgent:
+        def __init__(self) -> None:
+            self.actions = iter(("click:1:1", "click:1:2", "click:4:2"))
+
+        def reset_episode(self) -> None:
+            return None
+
+        def act(self, observation: GridObservation) -> str:
+            return next(self.actions)
+
+        def diagnostics(self) -> dict[str, object]:
+            return {
+                "runtime_diagnostic_mix_effective": 0.1,
+                "runtime_rank_weight_effective": 0.9,
+                "top_score_same_mapped_col_fraction": 0.8,
+            }
+
+    class Env:
+        def reset(self, seed: int = 0) -> GridObservation:
+            return _observation(actions=("click:1:1", "click:1:2", "click:4:2"))
+
+        def step(self, action: str) -> SimpleNamespace:
+            return SimpleNamespace(
+                observation=_observation(actions=("click:1:1", "click:1:2", "click:4:2")),
+                reward=0.0,
+                terminated=False,
+                truncated=False,
+                info={},
+            )
+
+    result = run_episode(ScriptedAgent(), Env(), seed=0, max_steps=3)
+
+    assert result["unique_action_count"] == 3
+    assert result["unique_click_x_count"] == 2
+    assert result["unique_mapped_col_count"] == 2
+    assert result["max_same_click_x_streak"] == 2
+    assert result["max_same_mapped_col_streak"] == 2
+    assert result["post_noeffect_next_action_same_x_rate"] == 0.5
+    assert result["post_noeffect_next_action_same_mapped_col_rate"] == 0.5
+    assert result["top_score_same_mapped_col_fraction"] == 0.8
+    assert result["runtime_diagnostic_mix_effective"] == 0.1
+    assert result["runtime_rank_weight_effective"] == 0.9
+    assert not hasattr(ScriptedAgent(), "coverage_queue")
 
 
 def test_harness_alias_loads_object_event_checkpoint(tmp_path: Path) -> None:

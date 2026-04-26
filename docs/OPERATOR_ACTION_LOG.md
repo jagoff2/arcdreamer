@@ -1252,3 +1252,55 @@ Operator actions recorded for continuity:
    - it is not ARC-ready because selected action diversity remains below the gate
    - commit and push the WIP plus artifact, then ask GPT-Pro for the next intervention
    - do not run real ARC from this artifact unless explicitly labeled as a smoke/hygiene diagnostic
+
+10. Pushed `8d63014` and asked GPT-Pro for the next intervention. Consensus:
+    - do not change model architecture or add another mechanism yet
+    - add failure-contingent and post-no-effect diagnostics because aggregate diversity is confounded by fast success
+    - add compact real-ARC hygiene diversity summaries
+    - keep this as metrics/evaluation only, with no runtime action-selection change
+    - rerun the same 447-action synthetic gate after the metric patch
+    - only if that passes, run one labeled 48-step ARC hygiene probe; do not run 320-step acquisition yet
+
+## 2026-04-26 Failure-Contingent Diversity Diagnostics
+
+Operator actions recorded for continuity:
+
+1. Implemented diagnostics-only patch:
+   - failed-level diversity metrics
+   - post-no-effect window metrics
+   - compact real-ARC hygiene diversity summaries
+   - agent diagnostics marker `runtime_hygiene_diversity_diagnostics_only=true`
+   - no runtime action-selection, scoring, mask, controller, or model-architecture change
+2. Verification:
+   - `py_compile` passed
+   - focused parametric/agent tests: `53 passed`
+   - full object-event suite: `107 passed`
+   - recurrent suite: `31 passed`
+   - 2-step smoke emitted the new metrics
+3. 447-action diagnostics gate:
+   - artifact: `artifacts/object_event_basis_recovery_runtime_probe.pkl`
+   - checkpoint best step: `200`
+   - balanced score: `1.0363095238095237`
+   - full `447` scoring and no metadata leakage or forbidden runtime flags
+4. Gate result:
+   - competence passed:
+     - within-5 `0.8541666666666666`
+     - within-3 `0.8125`
+     - next-level first try `0.7708333333333334`
+     - effective diagnostic mix `0.07729096081164942`
+     - effective rank weight `0.9227090391883506`
+   - failed-level diversity passed:
+     - failed-level count `7.0`
+     - failed-level unique actions `3.0`
+     - failed-level unique x `2.857142857142857`
+     - failed-level mapped columns `2.142857142857143`
+     - failed-level max same-action streak `3.0`
+   - post-no-effect concentration rates passed:
+     - next same mapped column `0.35714285714285715`
+     - next same x `0.21428571428571427`
+   - full gate still failed:
+     - post-no-effect unique action count `1.2678571428571428`, target `>= 2.0`
+5. Current conclusion:
+   - do not run real ARC yet under the agreed gate
+   - commit and push the diagnostics patch plus updated artifact
+   - ask GPT-Pro whether the post-no-effect uniqueness target is a genuine failure or still confounded by one-action recovery / horizon truncation

@@ -904,9 +904,16 @@ def _online_selection_metric(args: argparse.Namespace, *, active: bool) -> str:
 def _with_balanced_runtime_score(metrics: dict[str, Any]) -> dict[str, Any]:
     updated = dict(metrics)
     within5 = float(updated.get("runtime_agent_act_path_active_success_within_5", 0.0) or 0.0)
+    failed_level_count = float(updated.get("runtime_agent_act_path_failed_level_count", 0.0) or 0.0)
     unique_actions = float(updated.get("runtime_agent_act_path_unique_action_count_mean", 0.0) or 0.0)
     mapped_cols = float(updated.get("runtime_agent_act_path_selected_unique_mapped_col_count", 0.0) or 0.0)
     mapped_concentration = float(updated.get("runtime_agent_act_path_top_score_same_mapped_col_fraction", 0.0) or 0.0)
+    if failed_level_count > 0.0:
+        unique_actions = float(updated.get("runtime_agent_act_path_failed_level_unique_action_count_mean", unique_actions) or 0.0)
+        mapped_cols = float(updated.get("runtime_agent_act_path_failed_level_selected_unique_mapped_col_count", mapped_cols) or 0.0)
+        mapped_concentration = float(
+            updated.get("runtime_agent_act_path_failed_level_top_score_same_mapped_col_fraction", mapped_concentration) or 0.0
+        )
     mix = float(
         updated.get(
             "runtime_agent_act_path_runtime_diagnostic_mix_effective",
@@ -2251,6 +2258,97 @@ def _selected_action_diversity(
     }
 
 
+def _mapped_col_for_action(example: ObjectEventExample, action: str) -> float | None:
+    action_to_index = {str(item): index for index, item in enumerate(example.legal_actions)}
+    index = action_to_index.get(str(action))
+    if index is None:
+        return None
+    row = example.action_tokens.numeric[int(index)]
+    if float(row[ACTION_FEATURE_HAS_GRID_CELL]) <= 0.5:
+        return None
+    return round(float(row[ACTION_FEATURE_GRID_COL]), 4)
+
+
+def _is_same_mapped_col_action(first: str, second: str, example: ObjectEventExample) -> bool:
+    first_col = _mapped_col_for_action(example, first)
+    second_col = _mapped_col_for_action(example, second)
+    return first_col is not None and second_col is not None and abs(float(first_col) - float(second_col)) <= 1.0e-6
+
+
+def _failure_contingent_action_diversity_metrics(
+    *,
+    model: ObjectEventModel,
+    failed_level_records: Sequence[tuple[ObjectEventExample, Sequence[str], Sequence[float]]],
+    device: torch.device,
+    prefix: str,
+) -> dict[str, float]:
+    unique_counts: list[float] = []
+    unique_x_counts: list[float] = []
+    unique_mapped_col_counts: list[float] = []
+    unique_basis_counts: list[float] = []
+    max_streaks: list[float] = []
+    top_same_mapped_col: list[float] = []
+    for example, selected_actions, top_same_values in failed_level_records:
+        actions = tuple(str(action) for action in selected_actions)
+        diversity = _selected_action_diversity(model=model, example=example, selected_actions=actions, device=device)
+        unique_counts.append(float(len(set(actions))))
+        unique_x_counts.append(float(diversity["selected_unique_x_count"]))
+        unique_mapped_col_counts.append(float(diversity["selected_unique_mapped_col_count"]))
+        unique_basis_counts.append(float(diversity["selected_unique_basis_count"]))
+        max_streaks.append(float(_max_same_action_streak(actions)))
+        if top_same_values:
+            top_same_mapped_col.append(float(np.mean(np.asarray(top_same_values, dtype=np.float64))))
+    return {
+        f"{prefix}failed_level_count": float(len(failed_level_records)),
+        f"{prefix}failed_level_unique_action_count_mean": float(np.mean(unique_counts)) if unique_counts else 0.0,
+        f"{prefix}failed_level_selected_unique_x_count": float(np.mean(unique_x_counts)) if unique_x_counts else 0.0,
+        f"{prefix}failed_level_selected_unique_mapped_col_count": float(np.mean(unique_mapped_col_counts)) if unique_mapped_col_counts else 0.0,
+        f"{prefix}failed_level_selected_unique_basis_count": float(np.mean(unique_basis_counts)) if unique_basis_counts else 0.0,
+        f"{prefix}failed_level_max_same_action_streak_max": float(np.max(max_streaks)) if max_streaks else 0.0,
+        f"{prefix}failed_level_top_score_same_mapped_col_fraction": float(np.mean(top_same_mapped_col))
+        if top_same_mapped_col
+        else 0.0,
+    }
+
+
+def _post_noeffect_window_metrics(
+    *,
+    model: ObjectEventModel,
+    records: Sequence[tuple[ObjectEventExample, str, Sequence[str], Sequence[bool]]],
+    device: torch.device,
+    prefix: str,
+) -> dict[str, float]:
+    unique_counts: list[float] = []
+    unique_x_counts: list[float] = []
+    unique_mapped_col_counts: list[float] = []
+    basis_entropies: list[float] = []
+    same_col_hits: list[float] = []
+    same_x_hits: list[float] = []
+    recovery_hits: list[float] = []
+    for example, failed_action, followup_actions, followup_successes in records:
+        window = tuple(str(action) for action in followup_actions[:2])
+        if not window:
+            continue
+        diversity = _selected_action_diversity(model=model, example=example, selected_actions=window, device=device)
+        unique_counts.append(float(len(set(window))))
+        unique_x_counts.append(float(diversity["selected_unique_x_count"]))
+        unique_mapped_col_counts.append(float(diversity["selected_unique_mapped_col_count"]))
+        basis_entropies.append(float(diversity["selected_basis_entropy"]))
+        same_col_hits.append(float(_is_same_mapped_col_action(str(failed_action), window[0], example)))
+        same_x_hits.append(float(_is_same_click_x_action(str(failed_action), window[0])))
+        recovery_hits.append(float(any(bool(item) for item in followup_successes[:2])))
+    return {
+        f"{prefix}post_noeffect_window_count": float(len(unique_counts)),
+        f"{prefix}post_noeffect_unique_action_count_mean": float(np.mean(unique_counts)) if unique_counts else 0.0,
+        f"{prefix}post_noeffect_selected_unique_x_count": float(np.mean(unique_x_counts)) if unique_x_counts else 0.0,
+        f"{prefix}post_noeffect_selected_unique_mapped_col_count": float(np.mean(unique_mapped_col_counts)) if unique_mapped_col_counts else 0.0,
+        f"{prefix}post_noeffect_basis_entropy": float(np.mean(basis_entropies)) if basis_entropies else 0.0,
+        f"{prefix}post_noeffect_next_action_same_mapped_col_rate": float(np.mean(same_col_hits)) if same_col_hits else 0.0,
+        f"{prefix}post_noeffect_next_action_same_x_rate": float(np.mean(same_x_hits)) if same_x_hits else 0.0,
+        f"{prefix}post_noeffect_rank_recovery_success_rate": float(np.mean(recovery_hits)) if recovery_hits else 0.0,
+    }
+
+
 def _is_near_repeat_action(first: str, second: str, example: ObjectEventExample) -> bool:
     if first == second:
         return True
@@ -2483,6 +2581,21 @@ def _runtime_agent_active_metrics(
             "runtime_agent_act_path_selected_family_entropy": 0.0,
             "runtime_agent_act_path_selected_unique_basis_count": 0.0,
             "runtime_agent_act_path_selected_basis_entropy": 0.0,
+            "runtime_agent_act_path_failed_level_count": 0.0,
+            "runtime_agent_act_path_failed_level_unique_action_count_mean": 0.0,
+            "runtime_agent_act_path_failed_level_selected_unique_x_count": 0.0,
+            "runtime_agent_act_path_failed_level_selected_unique_mapped_col_count": 0.0,
+            "runtime_agent_act_path_failed_level_selected_unique_basis_count": 0.0,
+            "runtime_agent_act_path_failed_level_max_same_action_streak_max": 0.0,
+            "runtime_agent_act_path_failed_level_top_score_same_mapped_col_fraction": 0.0,
+            "runtime_agent_act_path_post_noeffect_window_count": 0.0,
+            "runtime_agent_act_path_post_noeffect_unique_action_count_mean": 0.0,
+            "runtime_agent_act_path_post_noeffect_selected_unique_x_count": 0.0,
+            "runtime_agent_act_path_post_noeffect_selected_unique_mapped_col_count": 0.0,
+            "runtime_agent_act_path_post_noeffect_basis_entropy": 0.0,
+            "runtime_agent_act_path_post_noeffect_next_action_same_mapped_col_rate": 0.0,
+            "runtime_agent_act_path_post_noeffect_next_action_same_x_rate": 0.0,
+            "runtime_agent_act_path_post_noeffect_rank_recovery_success_rate": 0.0,
         }
     base_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
     success_steps: list[int] = []
@@ -2633,6 +2746,8 @@ def _runtime_agent_act_path_metrics(
     family_entropies: list[float] = []
     unique_basis_counts: list[float] = []
     basis_entropies: list[float] = []
+    failed_level_records: list[tuple[ObjectEventExample, Sequence[str], Sequence[float]]] = []
+    post_noeffect_records: list[tuple[ObjectEventExample, str, Sequence[str], Sequence[bool]]] = []
     no_effect_count = 0
     forbidden_count = 0
     for session_index, session in enumerate(sessions):
@@ -2649,6 +2764,8 @@ def _runtime_agent_act_path_metrics(
         first_example = first_level.example
         step_success = max_steps_per_level + 1
         selected_actions_for_level: list[str] = []
+        selected_successes_for_level: list[bool] = []
+        top_same_mapped_col_for_level: list[float] = []
         first_failed_action: str | None = None
         first_failed_score = 0.0
         for step in range(1, max_steps_per_level + 1):
@@ -2662,8 +2779,10 @@ def _runtime_agent_act_path_metrics(
             legal_counts.append(float(diagnostics.get("legal_action_count", 0) or 0))
             axis_component_stds.append(float(diagnostics.get("rank_component_axis_noeffect_std", 0.0) or 0.0))
             relation_component_stds.append(float(diagnostics.get("rank_component_relation_std", 0.0) or 0.0))
+            top_same_mapped_col_for_level.append(float(diagnostics.get("top_score_same_mapped_col_fraction", 0.0) or 0.0))
             _append_rank_diagnostics(diag_series, diagnostics)
             result = apply_synthetic_object_event_action(first_level, selected)
+            selected_successes_for_level.append(bool(result.success))
             bridge = _synthetic_bridge_observation(first_example, selected, result)
             bridge_matches.append(float(int(bridge.selected_action_index) == selected))
             try:
@@ -2724,6 +2843,18 @@ def _runtime_agent_act_path_metrics(
                         float(np.mean([retry_scores[action].score - before_score_snapshot.get(action, 0.0) for action in same_y_actions]))
                     )
         success_steps.append(step_success)
+        if step_success > max_steps_per_level:
+            failed_level_records.append(
+                (first_example, tuple(selected_actions_for_level), tuple(top_same_mapped_col_for_level))
+            )
+        for index, succeeded in enumerate(selected_successes_for_level):
+            if not bool(succeeded):
+                followup_actions = tuple(selected_actions_for_level[index + 1 : index + 3])
+                followup_successes = tuple(selected_successes_for_level[index + 1 : index + 3])
+                if followup_actions:
+                    post_noeffect_records.append(
+                        (first_example, selected_actions_for_level[index], followup_actions, followup_successes)
+                    )
         same_streaks.append(float(_max_same_action_streak(selected_actions_for_level)))
         unique_counts.append(float(len(set(selected_actions_for_level))))
         diversity = _selected_action_diversity(
@@ -2797,6 +2928,22 @@ def _runtime_agent_act_path_metrics(
         "runtime_agent_act_path_selected_unique_basis_count": float(np.mean(unique_basis_counts)) if unique_basis_counts else 0.0,
         "runtime_agent_act_path_selected_basis_entropy": float(np.mean(basis_entropies)) if basis_entropies else 0.0,
     }
+    metrics.update(
+        _failure_contingent_action_diversity_metrics(
+            model=agent.model,
+            failed_level_records=failed_level_records,
+            device=device,
+            prefix="runtime_agent_act_path_",
+        )
+    )
+    metrics.update(
+        _post_noeffect_window_metrics(
+            model=agent.model,
+            records=post_noeffect_records,
+            device=device,
+            prefix="runtime_agent_act_path_",
+        )
+    )
     metrics.update(_mean_rank_diagnostic_metrics("runtime_agent_act_path_", diag_series))
     return metrics
 

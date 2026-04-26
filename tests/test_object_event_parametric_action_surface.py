@@ -29,8 +29,10 @@ from scripts.train_learned_online_object_event import (
     _family_assignment_regularization_losses,
     _family_known_noeffect_mask,
     _family_posterior_diagnostic_targets,
+    _failure_contingent_action_diversity_metrics,
     _information_gain_from_hypothesis_success,
     _near_action_indices,
+    _post_noeffect_window_metrics,
     _selected_basis_overlap,
     _with_balanced_runtime_score,
 )
@@ -712,6 +714,93 @@ def test_balanced_runtime_score_penalizes_diagnostic_mix_and_column_concentratio
     assert _with_balanced_runtime_score(base)["runtime_agent_act_path_balanced_score"] > _with_balanced_runtime_score(worse)[
         "runtime_agent_act_path_balanced_score"
     ]
+
+
+def test_failure_contingent_diversity_metrics_ignore_fast_success_levels() -> None:
+    level = _parametric_level(seed=228)
+    example = level.example
+    failed_a, failed_b = _two_failed_clicks_same_x(example)
+    model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
+    model.eval()
+
+    metrics = _failure_contingent_action_diversity_metrics(
+        model=model,
+        failed_level_records=[
+            (
+                example,
+                (example.legal_actions[failed_a], example.legal_actions[failed_b], example.legal_actions[failed_a]),
+                (0.8, 0.7, 0.6),
+            )
+        ],
+        device=torch.device("cpu"),
+        prefix="runtime_agent_act_path_",
+    )
+
+    assert metrics["runtime_agent_act_path_failed_level_count"] == 1.0
+    assert metrics["runtime_agent_act_path_failed_level_unique_action_count_mean"] == 2.0
+    assert metrics["runtime_agent_act_path_failed_level_max_same_action_streak_max"] == 1.0
+    assert metrics["runtime_agent_act_path_failed_level_top_score_same_mapped_col_fraction"] == np.mean([0.8, 0.7, 0.6])
+
+
+def test_post_noeffect_window_metrics_detect_same_column_repeats() -> None:
+    level = _parametric_level(seed=229)
+    example = level.example
+    failed_a, failed_b = _two_failed_clicks_same_x(example)
+    model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
+    model.eval()
+
+    metrics = _post_noeffect_window_metrics(
+        model=model,
+        records=[(example, example.legal_actions[failed_a], (example.legal_actions[failed_b],), (False,))],
+        device=torch.device("cpu"),
+        prefix="runtime_agent_act_path_",
+    )
+
+    assert metrics["runtime_agent_act_path_post_noeffect_window_count"] == 1.0
+    assert metrics["runtime_agent_act_path_post_noeffect_next_action_same_x_rate"] == 1.0
+    assert metrics["runtime_agent_act_path_post_noeffect_next_action_same_mapped_col_rate"] == 1.0
+    assert metrics["runtime_agent_act_path_post_noeffect_rank_recovery_success_rate"] == 0.0
+
+
+def test_post_noeffect_window_metrics_do_not_modify_actions_or_scores() -> None:
+    level = _parametric_level(seed=230)
+    example = level.example
+    failed = _failed_click_index(example)
+    positive = int(example.positive_action_indices[0])
+    model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
+    model.eval()
+    before = {key: value.detach().clone() for key, value in model.state_dict().items()}
+
+    metrics = _post_noeffect_window_metrics(
+        model=model,
+        records=[(example, example.legal_actions[failed], (example.legal_actions[positive],), (True,))],
+        device=torch.device("cpu"),
+        prefix="runtime_agent_act_path_",
+    )
+
+    assert metrics["runtime_agent_act_path_post_noeffect_rank_recovery_success_rate"] == 1.0
+    for key, value in model.state_dict().items():
+        assert torch.equal(value, before[key])
+
+
+def test_balanced_runtime_score_can_use_failed_level_diversity_when_present() -> None:
+    base = {
+        "runtime_agent_act_path_active_success_within_5": 0.8,
+        "runtime_agent_act_path_unique_action_count_mean": 1.0,
+        "runtime_agent_act_path_selected_unique_mapped_col_count": 1.0,
+        "runtime_agent_act_path_top_score_same_mapped_col_fraction": 0.90,
+        "runtime_agent_act_path_failed_level_count": 3.0,
+        "runtime_agent_act_path_failed_level_unique_action_count_mean": 3.0,
+        "runtime_agent_act_path_failed_level_selected_unique_mapped_col_count": 2.5,
+        "runtime_agent_act_path_failed_level_top_score_same_mapped_col_fraction": 0.50,
+        "runtime_agent_act_path_runtime_diagnostic_mix_effective": 0.10,
+    }
+    without_failed = dict(base)
+    without_failed["runtime_agent_act_path_failed_level_count"] = 0.0
+
+    assert _with_balanced_runtime_score(base)["runtime_agent_act_path_balanced_score"] > _with_balanced_runtime_score(
+        without_failed
+    )["runtime_agent_act_path_balanced_score"]
 
 
 def test_family_assignment_regularization_penalizes_single_family_collapse() -> None:
