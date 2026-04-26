@@ -112,6 +112,8 @@ def main() -> None:
     parser.add_argument("--max-steps-per-level", type=int, default=3)
     parser.add_argument("--axis-noeffect-cases", type=float, default=0.0)
     parser.add_argument("--relation-contradiction-cases", type=float, default=0.0)
+    parser.add_argument("--diagnostic-utility-cases", type=float, default=0.0)
+    parser.add_argument("--diagnostic-utility-weight", type=float, default=0.75)
     args = parser.parse_args()
 
     mode = args.source or args.mode
@@ -267,6 +269,13 @@ def _run_synthetic_online_object_event(
                 heldout=tuple(extracted_curriculum.heldout),
             )
     last_loss = 0.0
+    last_diagnostic_utility_loss = 0.0
+    last_diagnostic_margin_loss = 0.0
+    last_diagnostic_good_minus_failed_family = 0.0
+    last_diagnostic_failed_family_top1_rate = 0.0
+    last_diagnostic_ig_top1_rate = 0.0
+    last_diagnostic_mix_before_evidence = 0.0
+    last_diagnostic_mix_after_noeffect = 0.0
     best_metric_value = float("-inf")
     best_step = 0
     best_state: dict[str, torch.Tensor] | None = None
@@ -396,6 +405,56 @@ def _run_synthetic_online_object_event(
         else:
             contradiction_margin_loss = support_logits.new_tensor(0.0)
             component_balance_loss = support_logits.new_tensor(0.0)
+        diagnostic_scale = max(float(args.diagnostic_utility_cases), 0.0)
+        if self_retry_output.diagnostic_utility_logits is not None:
+            diag_logits = self_retry_output.diagnostic_utility_logits
+            diag_target = _diagnostic_information_gain_targets(support_examples, self_retry_tensors, self_selected).to(
+                dtype=diag_logits.dtype,
+                device=diag_logits.device,
+            )
+            valid_weight = self_retry_tensors["action_mask"].to(dtype=diag_logits.dtype)
+            diag_bce = F.binary_cross_entropy_with_logits(diag_logits, diag_target, reduction="none")
+            diagnostic_utility_loss = torch.sum(diag_bce * valid_weight) / torch.clamp(torch.sum(valid_weight), min=1.0)
+            info_good_mask = (diag_target >= 0.5) & self_retry_tensors["action_mask"].bool()
+            safe_info_good = torch.where(info_good_mask.any(dim=1, keepdim=True), info_good_mask, positive_mask)
+            diag_good = torch.logsumexp(diag_logits.masked_fill(~safe_info_good, -1.0e9), dim=-1)
+            diag_failed = torch.logsumexp(diag_logits.masked_fill(~relation_failed_mask, -1.0e9), dim=-1)
+            diagnostic_margin_loss = _masked_mean_loss(F.relu(diag_failed - diag_good + 0.5), coord_failure_mask)
+            diagnostic_good_minus_failed = _masked_mean_loss(diag_good - diag_failed, coord_failure_mask)
+            diag_selected = torch.argmax(diag_logits.masked_fill(~self_retry_tensors["action_mask"].bool(), -1.0e9), dim=-1)
+            diagnostic_failed_family_top1 = torch.mean(
+                relation_failed_mask.gather(1, diag_selected[:, None]).squeeze(1).to(dtype=diag_logits.dtype)
+            )
+            diagnostic_ig_top1 = torch.mean(
+                info_good_mask.gather(1, diag_selected[:, None]).squeeze(1).to(dtype=diag_logits.dtype)
+            )
+            if self_retry_output.diagnostic_mix_logit is not None and support_output.diagnostic_mix_logit is not None:
+                ig_available = (diag_target.max(dim=1).values > 0.5).to(dtype=diag_logits.dtype)
+                mix_target = (coord_failure_mask * ig_available).clamp(0.0, 1.0)
+                diagnostic_mix_after_loss = F.binary_cross_entropy_with_logits(
+                    self_retry_output.diagnostic_mix_logit,
+                    mix_target,
+                )
+                diagnostic_mix_before_loss = F.binary_cross_entropy_with_logits(
+                    support_output.diagnostic_mix_logit,
+                    torch.zeros_like(support_output.diagnostic_mix_logit),
+                )
+                diagnostic_mix_loss = diagnostic_mix_after_loss + 0.5 * diagnostic_mix_before_loss
+                diagnostic_mix_after = torch.sigmoid(self_retry_output.diagnostic_mix_logit)
+                diagnostic_mix_before = torch.sigmoid(support_output.diagnostic_mix_logit)
+            else:
+                diagnostic_mix_loss = support_logits.new_tensor(0.0)
+                diagnostic_mix_after = support_logits.new_zeros((support_logits.shape[0],))
+                diagnostic_mix_before = support_logits.new_zeros((support_logits.shape[0],))
+        else:
+            diagnostic_utility_loss = support_logits.new_tensor(0.0)
+            diagnostic_margin_loss = support_logits.new_tensor(0.0)
+            diagnostic_good_minus_failed = support_logits.new_tensor(0.0)
+            diagnostic_failed_family_top1 = support_logits.new_tensor(0.0)
+            diagnostic_ig_top1 = support_logits.new_tensor(0.0)
+            diagnostic_mix_loss = support_logits.new_tensor(0.0)
+            diagnostic_mix_after = support_logits.new_zeros((support_logits.shape[0],))
+            diagnostic_mix_before = support_logits.new_zeros((support_logits.shape[0],))
         plausible_loss = _plausible_red_blue_loss(support_logits, support_examples)
         loss = (
             query_loss
@@ -412,6 +471,9 @@ def _run_synthetic_online_object_event(
             + axis_loss_scale * 0.15 * axis_drop_loss
             + contradiction_scale * 0.25 * contradiction_margin_loss
             + contradiction_scale * 0.10 * component_balance_loss
+            + diagnostic_scale * max(float(args.diagnostic_utility_weight), 0.0) * 0.30 * diagnostic_utility_loss
+            + diagnostic_scale * 0.20 * diagnostic_margin_loss
+            + diagnostic_scale * 0.10 * diagnostic_mix_loss
             + 0.2 * plausible_loss
         )
         optimizer.zero_grad(set_to_none=True)
@@ -419,7 +481,26 @@ def _run_synthetic_online_object_event(
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
         last_loss = float(loss.detach().cpu())
+        last_diagnostic_utility_loss = float(diagnostic_utility_loss.detach().cpu())
+        last_diagnostic_margin_loss = float(diagnostic_margin_loss.detach().cpu())
+        last_diagnostic_good_minus_failed_family = float(diagnostic_good_minus_failed.detach().cpu())
+        last_diagnostic_failed_family_top1_rate = float(diagnostic_failed_family_top1.detach().cpu())
+        last_diagnostic_ig_top1_rate = float(diagnostic_ig_top1.detach().cpu())
+        last_diagnostic_mix_before_evidence = float(torch.mean(diagnostic_mix_before.detach()).cpu())
+        last_diagnostic_mix_after_noeffect = float(torch.mean(diagnostic_mix_after.detach()).cpu())
         if step in eval_steps:
+            eval_extra_metrics = dict(extraction_metrics)
+            eval_extra_metrics.update(
+                {
+                    "diagnostic_utility_loss": last_diagnostic_utility_loss,
+                    "diagnostic_margin_loss": last_diagnostic_margin_loss,
+                    "diagnostic_good_minus_failed_family_mean": last_diagnostic_good_minus_failed_family,
+                    "diagnostic_failed_family_top1_rate": last_diagnostic_failed_family_top1_rate,
+                    "diagnostic_ig_top1_rate": last_diagnostic_ig_top1_rate,
+                    "diagnostic_mix_before_evidence_mean": last_diagnostic_mix_before_evidence,
+                    "diagnostic_mix_after_noeffect_mean": last_diagnostic_mix_after_noeffect,
+                }
+            )
             metrics = _online_training_metrics(
                 model,
                 train=curriculum.train,
@@ -429,7 +510,7 @@ def _run_synthetic_online_object_event(
                 train_loss=last_loss,
                 active=active,
                 eval_runtime_agent=bool(args.eval_runtime_agent),
-                extra_metrics=extraction_metrics,
+                extra_metrics=eval_extra_metrics,
                 max_steps_per_level=int(args.max_steps_per_level),
             )
             if bool(args.save_best):
@@ -756,6 +837,69 @@ def _axis_failed_masks_from_tensors(tensors: dict[str, Any], selected_indices: t
         "same_mapped_col": base & has_grid & (torch.abs(mapped_rc[..., 1] - selected_rc[..., 1]) <= 0.15),
         "same_mapped_row": base & has_grid & (torch.abs(mapped_rc[..., 0] - selected_rc[..., 0]) <= 0.15),
     }
+
+
+def _information_gain_from_hypothesis_success(
+    success_by_hypothesis: torch.Tensor,
+    hypothesis_prior: torch.Tensor | None = None,
+) -> torch.Tensor:
+    success = success_by_hypothesis.to(dtype=torch.float32)
+    if success.ndim != 3:
+        raise ValueError("success_by_hypothesis must have shape [batch, hypotheses, actions]")
+    if hypothesis_prior is None:
+        prior = torch.full(
+            success.shape[:2],
+            1.0 / max(int(success.shape[1]), 1),
+            dtype=success.dtype,
+            device=success.device,
+        )
+    else:
+        prior = hypothesis_prior.to(dtype=success.dtype, device=success.device)
+        prior = prior / prior.sum(dim=1, keepdim=True).clamp_min(1.0e-6)
+    p_success = torch.sum(prior[:, :, None] * success, dim=1)
+    p_success = p_success.clamp(1.0e-6, 1.0 - 1.0e-6)
+    entropy = -(p_success * torch.log(p_success) + (1.0 - p_success) * torch.log(1.0 - p_success))
+    return entropy / torch.log(torch.as_tensor(2.0, dtype=success.dtype, device=success.device))
+
+
+def _diagnostic_information_gain_targets(
+    examples: Sequence[ObjectEventExample],
+    tensors: dict[str, Any],
+    selected_indices: torch.Tensor,
+) -> torch.Tensor:
+    action_mask = tensors["action_mask"].bool()
+    targets = torch.zeros_like(action_mask, dtype=torch.float32)
+    device = action_mask.device
+    for row, example in enumerate(examples):
+        hypothesis_masks: list[torch.Tensor] = []
+        for key in ("red_action_index", "blue_action_index"):
+            if key not in example.metadata:
+                continue
+            index = int(example.metadata[key])
+            if index < 0 or index >= len(example.legal_actions):
+                continue
+            mask = torch.zeros((action_mask.shape[1],), dtype=torch.float32, device=device)
+            indices = {index}
+            indices.update(int(value) for value in _near_action_indices(example, example.legal_actions[index]))
+            for candidate in indices:
+                if 0 <= int(candidate) < action_mask.shape[1] and bool(action_mask[row, int(candidate)]):
+                    mask[int(candidate)] = 1.0
+            if float(mask.sum().detach().cpu()) > 0.0:
+                hypothesis_masks.append(mask)
+        if len(hypothesis_masks) < 2:
+            positive = _positive_mask_from_tensors(tensors)[row].to(dtype=torch.float32)
+            if float(positive.sum().detach().cpu()) > 0.0:
+                targets[row] = positive
+            continue
+        success = torch.stack(hypothesis_masks, dim=0)[None, :, :]
+        prior = torch.ones((1, success.shape[1]), dtype=torch.float32, device=device)
+        selected = int(selected_indices[row].detach().cpu())
+        likelihood = 1.0 - success[0, :, selected].clamp(0.0, 1.0)
+        if float(likelihood.sum().detach().cpu()) > 1.0e-6:
+            prior = prior * likelihood[None, :]
+        prior = prior / prior.sum(dim=1, keepdim=True).clamp_min(1.0e-6)
+        targets[row] = _information_gain_from_hypothesis_success(success, prior)[0] * action_mask[row].to(dtype=torch.float32)
+    return targets
 
 
 def _masked_mean_loss(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -1616,6 +1760,13 @@ _RANK_DIAGNOSTIC_FLOAT_KEYS = (
     "rank_component_relation_minus_noeffect_failed_column_mean",
     "top_score_same_x_fraction",
     "top_score_same_mapped_col_fraction",
+    "runtime_learned_diagnostic_utility_std",
+    "runtime_entropy_tiebreak_std",
+    "runtime_diagnostic_mix",
+    "learned_diagnostic_utility_raw_std",
+    "learned_diagnostic_utility_std",
+    "diagnostic_mix_model_value",
+    "runtime_rank_diag_top_action_agreement",
 )
 
 
@@ -1706,6 +1857,7 @@ def _runtime_agent_active_metrics(
     next_hits: list[float] = []
     reset_hits: list[float] = []
     rank_used: list[float] = []
+    learned_diag_used: list[float] = []
     legal_counts: list[float] = []
     axis_component_stds: list[float] = []
     relation_component_stds: list[float] = []
@@ -1734,6 +1886,7 @@ def _runtime_agent_active_metrics(
             selected = int(first_example.legal_actions.index(selected_action))
             diagnostics = agent.diagnostics()
             rank_used.append(float(bool(diagnostics.get("runtime_rank_logits_used", False))))
+            learned_diag_used.append(float(bool(diagnostics.get("runtime_learned_diagnostic_utility_used", False))))
             legal_counts.append(float(diagnostics.get("legal_action_count", 0) or 0))
             axis_component_stds.append(float(diagnostics.get("rank_component_axis_noeffect_std", 0.0) or 0.0))
             relation_component_stds.append(float(diagnostics.get("rank_component_relation_std", 0.0) or 0.0))
@@ -1778,6 +1931,7 @@ def _runtime_agent_active_metrics(
     values = np.asarray(success_steps, dtype=np.float32)
     metrics = {
         "runtime_agent_rank_logits_used": float(np.mean(rank_used)) if rank_used else 0.0,
+        "runtime_agent_learned_diagnostic_utility_used": float(np.mean(learned_diag_used)) if learned_diag_used else 0.0,
         "runtime_agent_num_legal_actions_mean": float(np.mean(legal_counts)) if legal_counts else 0.0,
         "runtime_agent_top1_matches_model_policy_top1_rate": float(np.mean(match_hits)) if match_hits else 0.0,
         "runtime_agent_active_success_within_1": float(np.mean(values <= 1.0)),
@@ -1817,6 +1971,7 @@ def _runtime_agent_act_path_metrics(
     next_hits: list[float] = []
     reset_hits: list[float] = []
     rank_used: list[float] = []
+    learned_diag_used: list[float] = []
     legal_counts: list[float] = []
     bridge_matches: list[float] = []
     online_counts: list[float] = []
@@ -1865,6 +2020,7 @@ def _runtime_agent_act_path_metrics(
             selected_actions_for_level.append(selected_action)
             diagnostics = agent.diagnostics()
             rank_used.append(float(bool(diagnostics.get("runtime_rank_logits_used", False))))
+            learned_diag_used.append(float(bool(diagnostics.get("runtime_learned_diagnostic_utility_used", False))))
             legal_counts.append(float(diagnostics.get("legal_action_count", 0) or 0))
             axis_component_stds.append(float(diagnostics.get("rank_component_axis_noeffect_std", 0.0) or 0.0))
             relation_component_stds.append(float(diagnostics.get("rank_component_relation_std", 0.0) or 0.0))
@@ -1951,6 +2107,7 @@ def _runtime_agent_act_path_metrics(
     values = np.asarray(success_steps, dtype=np.float32)
     metrics = {
         "runtime_agent_act_path_rank_logits_used": float(np.mean(rank_used)) if rank_used else 0.0,
+        "runtime_agent_act_path_learned_diagnostic_utility_used": float(np.mean(learned_diag_used)) if learned_diag_used else 0.0,
         "runtime_agent_act_path_num_legal_actions_mean": float(np.mean(legal_counts)) if legal_counts else 0.0,
         "runtime_agent_act_path_active_success_within_1": float(np.mean(values <= 1.0)),
         "runtime_agent_act_path_active_success_within_2": float(np.mean(values <= 2.0)),

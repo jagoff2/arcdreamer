@@ -102,6 +102,8 @@ class ObjectEventModelOutput:
     action_repr: torch.Tensor
     encoded_state: torch.Tensor
     rank_logits: torch.Tensor | None = None
+    diagnostic_utility_logits: torch.Tensor | None = None
+    diagnostic_mix_logit: torch.Tensor | None = None
     candidate_state_attn: torch.Tensor | None = None
     rank_components: RankComponentOutput | None = None
 
@@ -765,6 +767,44 @@ class AxisNoEffectMemoryRank(nn.Module):
         return is_click.squeeze(-1) * self.rank_mlp(features).squeeze(-1)
 
 
+class ActionFamilyDiagnosticUtility(nn.Module):
+    def __init__(
+        self,
+        *,
+        action_feature_dim: int,
+        belief_dim: int,
+        d_model: int,
+        dropout: float,
+    ) -> None:
+        super().__init__()
+        input_dim = int(action_feature_dim) + (2 * int(belief_dim)) + 16
+        hidden = max(int(d_model), 16)
+        self.utility = nn.Sequential(
+            nn.LayerNorm(input_dim),
+            nn.Linear(input_dim, hidden),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden, max(hidden // 2, 8)),
+            nn.GELU(),
+            nn.Linear(max(hidden // 2, 8), 1),
+        )
+        nn.init.zeros_(self.utility[-1].weight)
+        nn.init.zeros_(self.utility[-1].bias)
+
+    def forward(
+        self,
+        *,
+        action_numeric: torch.Tensor,
+        session_belief: torch.Tensor,
+        level_belief: torch.Tensor,
+    ) -> torch.Tensor:
+        family_features = _action_family_features(action_numeric)
+        expanded_session = session_belief[:, None, :].expand(-1, action_numeric.shape[1], -1)
+        expanded_level = level_belief[:, None, :].expand(-1, action_numeric.shape[1], -1)
+        features = torch.cat([action_numeric, expanded_session, expanded_level, family_features], dim=-1)
+        return self.utility(features).squeeze(-1)
+
+
 class RawCandidateStateRank(nn.Module):
     def __init__(
         self,
@@ -981,6 +1021,45 @@ def _standardize_component(
     return standardized.masked_fill(~valid, -1.0e9)
 
 
+def _action_family_features(action_numeric: torch.Tensor) -> torch.Tensor:
+    is_click = action_numeric[..., ACTION_FEATURE_IS_CLICK : ACTION_FEATURE_IS_CLICK + 1].clamp(0.0, 1.0)
+    screen_xy = action_numeric[..., ACTION_FEATURE_CLICK_X : ACTION_FEATURE_CLICK_Y + 1].clamp(0.0, 1.0)
+    has_grid = action_numeric[..., ACTION_FEATURE_HAS_GRID_CELL : ACTION_FEATURE_HAS_GRID_CELL + 1].clamp(0.0, 1.0)
+    mapped_rc = action_numeric[..., ACTION_FEATURE_GRID_ROW : ACTION_FEATURE_GRID_COL + 1].clamp(0.0, 1.0) * has_grid
+    contains_object = action_numeric[..., 11:12].clamp(0.0, 1.0)
+    contains_agent = action_numeric[..., 24:25].clamp(0.0, 1.0)
+    contains_nonagent = contains_object * (1.0 - contains_agent)
+    x = screen_xy[..., 0:1]
+    y = screen_xy[..., 1:2]
+    row = mapped_rc[..., 0:1]
+    col = mapped_rc[..., 1:2]
+    edge_x = torch.minimum(x, 1.0 - x)
+    edge_y = torch.minimum(y, 1.0 - y)
+    center_dx = torch.abs(x - 0.5)
+    center_dy = torch.abs(y - 0.5)
+    return torch.cat(
+        [
+            is_click,
+            x,
+            y,
+            has_grid,
+            row,
+            col,
+            contains_object,
+            contains_agent,
+            contains_nonagent,
+            x * x,
+            y * y,
+            row * row,
+            col * col,
+            edge_x,
+            edge_y,
+            torch.sqrt((center_dx * center_dx + center_dy * center_dy).clamp_min(0.0)),
+        ],
+        dim=-1,
+    )
+
+
 def _multi_positive_rank_ce(
     logits: torch.Tensor,
     positive_mask: torch.Tensor,
@@ -1101,6 +1180,20 @@ class ObjectEventModel(nn.Module):
             self.coordinate_noeffect_memory_rank,
             self.axis_noeffect_memory_rank,
         )
+        self.action_family_diagnostic_utility = ActionFamilyDiagnosticUtility(
+            action_feature_dim=ACTION_NUMERIC_DIM,
+            belief_dim=d_model,
+            d_model=d_model,
+            dropout=float(self.config.dropout),
+        )
+        self.diagnostic_mix_head = nn.Sequential(
+            nn.LayerNorm((2 * d_model) + 8),
+            nn.Linear((2 * d_model) + 8, d_model),
+            nn.GELU(),
+            nn.Linear(d_model, 1),
+        )
+        nn.init.zeros_(self.diagnostic_mix_head[-1].weight)
+        nn.init.constant_(self.diagnostic_mix_head[-1].bias, -1.5)
         self.rank_score_head = nn.Linear(d_model, 1)
         nn.init.normal_(self.rank_score_head.weight, mean=0.0, std=0.02)
         nn.init.zeros_(self.rank_score_head.bias)
@@ -1194,6 +1287,19 @@ class ObjectEventModel(nn.Module):
             session_belief=session_belief,
             level_belief=level_belief,
         )
+        diagnostic_utility_logits = self.action_family_diagnostic_utility(
+            action_numeric=action_numeric,
+            session_belief=session_belief,
+            level_belief=level_belief,
+        )
+        diagnostic_mix_logit = self.diagnostic_mix_head(
+            self._diagnostic_mix_features(
+                session_belief=session_belief,
+                level_belief=level_belief,
+                rank_components=rank_components,
+                action_mask=action_mask,
+            )
+        ).squeeze(-1)
         rank_logits = self.rank_score_head(adapted).squeeze(-1) + rank_components.total
         return ObjectEventModelOutput(
             outcome_logits=outcome_logits,
@@ -1202,9 +1308,60 @@ class ObjectEventModel(nn.Module):
             action_repr=adapted,
             encoded_state=encoded_state,
             rank_logits=rank_logits,
+            diagnostic_utility_logits=diagnostic_utility_logits,
+            diagnostic_mix_logit=diagnostic_mix_logit,
             candidate_state_attn=candidate_state_attn,
             rank_components=rank_components,
         )
+
+    def _diagnostic_mix_features(
+        self,
+        *,
+        session_belief: torch.Tensor,
+        level_belief: torch.Tensor,
+        rank_components: RankComponentOutput,
+        action_mask: torch.Tensor | None,
+    ) -> torch.Tensor:
+        valid = action_mask.bool() if action_mask is not None else torch.ones_like(rank_components.total, dtype=torch.bool)
+
+        def std(values: torch.Tensor) -> torch.Tensor:
+            active = values.masked_fill(~valid, 0.0)
+            count = valid.to(dtype=values.dtype).sum(dim=1).clamp_min(1.0)
+            mean = active.sum(dim=1) / count
+            centered = torch.where(valid, values - mean[:, None], torch.zeros_like(values))
+            return torch.sqrt(((centered * centered).sum(dim=1) / count).clamp_min(1.0e-6))
+
+        def top_margin(values: torch.Tensor) -> torch.Tensor:
+            masked = values.masked_fill(~valid, -1.0e9)
+            topk = torch.topk(masked, k=min(2, masked.shape[1]), dim=1).values
+            if topk.shape[1] < 2:
+                return torch.zeros((values.shape[0],), dtype=values.dtype, device=values.device)
+            return topk[:, 0] - topk[:, 1]
+
+        coord_start = int(getattr(self.coordinate_noeffect_memory_rank, "start", 0))
+        coord_stop = int(getattr(self.coordinate_noeffect_memory_rank, "stop", coord_start))
+        axis_start = int(getattr(self.axis_noeffect_memory_rank, "start", 0))
+        axis_stop = int(getattr(self.axis_noeffect_memory_rank, "stop", axis_start))
+        coord_memory = level_belief[:, coord_start:coord_stop]
+        axis_memory = level_belief[:, axis_start:axis_stop]
+        coord_count = coord_memory[:, 0] if coord_memory.shape[1] > 0 else level_belief.new_zeros((level_belief.shape[0],))
+        axis_count = axis_memory[:, 0] if axis_memory.shape[1] > 0 else level_belief.new_zeros((level_belief.shape[0],))
+        coord_norm = torch.linalg.vector_norm(coord_memory, dim=1) if coord_memory.numel() else level_belief.new_zeros((level_belief.shape[0],))
+        axis_norm = torch.linalg.vector_norm(axis_memory, dim=1) if axis_memory.numel() else level_belief.new_zeros((level_belief.shape[0],))
+        stats = torch.stack(
+            [
+                torch.linalg.vector_norm(session_belief, dim=1),
+                torch.linalg.vector_norm(level_belief, dim=1),
+                torch.tanh(coord_count.clamp_min(0.0)),
+                torch.tanh(axis_count.clamp_min(0.0)),
+                torch.tanh(coord_norm),
+                torch.tanh(axis_norm),
+                std(rank_components.total),
+                top_margin(rank_components.total),
+            ],
+            dim=-1,
+        )
+        return torch.cat([session_belief, level_belief, stats], dim=-1)
 
     def inverse_logits(
         self,

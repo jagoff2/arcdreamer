@@ -64,6 +64,8 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         online_lr: float = 3.0e-3,
         temperature: float = 0.35,
         epsilon_floor: float = 0.01,
+        diagnostic_utility_weight: float = 0.75,
+        entropy_tiebreak_weight: float = 0.10,
     ) -> None:
         super().__init__(name="learned_online_object_event")
         self.seed = int(seed)
@@ -74,6 +76,8 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         self.online_lr = float(online_lr)
         self.temperature = float(temperature)
         self.epsilon_floor = float(epsilon_floor)
+        self.diagnostic_utility_weight = float(diagnostic_utility_weight)
+        self.entropy_tiebreak_weight = float(entropy_tiebreak_weight)
         self.session_belief = torch.zeros((self.config.d_model,), dtype=torch.float32, device=self.device)
         self.level_belief = torch.zeros((self.config.d_model,), dtype=torch.float32, device=self.device)
         self.level_epoch = 0
@@ -100,6 +104,11 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         self.last_runtime_rank_score_mean = 0.0
         self.last_runtime_rank_score_std = 0.0
         self.last_runtime_diagnostic_utility_mean = 0.0
+        self.last_runtime_learned_diagnostic_utility_used = False
+        self.last_runtime_learned_diagnostic_utility_mean = 0.0
+        self.last_runtime_learned_diagnostic_utility_std = 0.0
+        self.last_runtime_entropy_tiebreak_std = 0.0
+        self.last_runtime_diagnostic_mix = 0.0
         self.last_rank_component_stats: dict[str, object] = {}
         self.metadata = self.checkpoint_metadata()
 
@@ -131,6 +140,11 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         self.last_runtime_rank_score_mean = 0.0
         self.last_runtime_rank_score_std = 0.0
         self.last_runtime_diagnostic_utility_mean = 0.0
+        self.last_runtime_learned_diagnostic_utility_used = False
+        self.last_runtime_learned_diagnostic_utility_mean = 0.0
+        self.last_runtime_learned_diagnostic_utility_std = 0.0
+        self.last_runtime_entropy_tiebreak_std = 0.0
+        self.last_runtime_diagnostic_mix = 0.0
         self.last_rank_component_stats = {}
 
     def reset_level(self) -> None:
@@ -333,6 +347,11 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             "runtime_rank_score_mean": float(self.last_runtime_rank_score_mean),
             "runtime_rank_score_std": float(self.last_runtime_rank_score_std),
             "runtime_diagnostic_utility_mean": float(self.last_runtime_diagnostic_utility_mean),
+            "runtime_learned_diagnostic_utility_used": bool(self.last_runtime_learned_diagnostic_utility_used),
+            "runtime_learned_diagnostic_utility_mean": float(self.last_runtime_learned_diagnostic_utility_mean),
+            "runtime_learned_diagnostic_utility_std": float(self.last_runtime_learned_diagnostic_utility_std),
+            "runtime_entropy_tiebreak_std": float(self.last_runtime_entropy_tiebreak_std),
+            "runtime_diagnostic_mix": float(self.last_runtime_diagnostic_mix),
             **self.last_rank_component_stats,
             "runtime_greedy_rank_selection": True,
             "runtime_trace_cursor": False,
@@ -411,6 +430,7 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             "runtime_action_pattern_enumerator": False,
             "runtime_external_api_or_knowledge": False,
             "runtime_uses_policy_rank_logits": True,
+            "runtime_uses_learned_diagnostic_utility": True,
             "runtime_uncertainty_diagnostic_utility": True,
             "runtime_greedy_rank_selection": True,
             "trace_bootstrap_used": bool(trace_bootstrap_used),
@@ -467,15 +487,25 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             rank_logits = policy_rank_logits_from_predictions(output, mask_tensor)[0].detach().cpu().numpy()
         rank_scores = _standardize_valid(rank_logits, valid)
         entropy = _binary_entropy(outcome_probs)
-        diagnostic_utility = (
-            0.12 * entropy
-            + 0.4 * outcome_probs[:, OUT_VISIBLE_CHANGE]
-            + 0.5 * value
-            + 0.8 * outcome_probs[:, OUT_MECHANIC_CHANGE]
-            - 1.2 * outcome_probs[:, OUT_NO_EFFECT_NONPROGRESS]
-            - 2.0 * outcome_probs[:, OUT_HARM]
-        )
-        scores = rank_scores + diagnostic_utility
+        diagnostic_logits = getattr(output, "diagnostic_utility_logits", None)
+        if diagnostic_logits is None:
+            learned_diagnostic = np.zeros_like(rank_scores, dtype=np.float64)
+            learned_diagnostic_raw = learned_diagnostic
+            learned_used = False
+        else:
+            learned_diagnostic_raw = diagnostic_logits[0].detach().cpu().numpy()
+            learned_diagnostic = _standardize_valid(learned_diagnostic_raw, valid)
+            learned_used = True
+        entropy_tiebreak = _standardize_valid(entropy, valid)
+        mix_logit = getattr(output, "diagnostic_mix_logit", None)
+        if mix_logit is None:
+            diagnostic_mix = 0.0
+        else:
+            diagnostic_mix = float(torch.sigmoid(mix_logit[0]).detach().cpu())
+        evidence_strength = self._diagnostic_evidence_strength()
+        diagnostic_mix = min(max(diagnostic_mix, 0.0), 0.15 + 0.85 * evidence_strength)
+        diagnostic_utility = diagnostic_mix * learned_diagnostic + self.entropy_tiebreak_weight * entropy_tiebreak
+        scores = (1.0 - diagnostic_mix) * rank_scores + diagnostic_utility
         scores = np.asarray(scores, dtype=np.float64)
         logits = np.full_like(scores, -1.0e9, dtype=np.float64)
         logits[valid] = scores[valid] / max(self.temperature, 1.0e-6)
@@ -492,7 +522,25 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         self.last_runtime_rank_score_mean = float(np.mean(rank_scores[valid])) if valid.any() else 0.0
         self.last_runtime_rank_score_std = float(np.std(rank_scores[valid])) if valid.any() else 0.0
         self.last_runtime_diagnostic_utility_mean = float(np.mean(diagnostic_utility[valid])) if valid.any() else 0.0
+        self.last_runtime_learned_diagnostic_utility_used = bool(learned_used)
+        self.last_runtime_learned_diagnostic_utility_mean = (
+            float(np.mean(learned_diagnostic_raw[valid])) if valid.any() else 0.0
+        )
+        self.last_runtime_learned_diagnostic_utility_std = (
+            float(np.std(learned_diagnostic[valid])) if valid.any() else 0.0
+        )
+        self.last_runtime_entropy_tiebreak_std = float(np.std(entropy_tiebreak[valid])) if valid.any() else 0.0
+        self.last_runtime_diagnostic_mix = float(diagnostic_mix)
         return probs, scores, outcome_probs, value
+
+    def _diagnostic_evidence_strength(self) -> float:
+        coord_start = int(getattr(self.model.coordinate_noeffect_memory_rank, "start", 0))
+        coord_stop = int(getattr(self.model.coordinate_noeffect_memory_rank, "stop", coord_start))
+        axis_start = int(getattr(self.model.axis_noeffect_memory_rank, "start", 0))
+        axis_stop = int(getattr(self.model.axis_noeffect_memory_rank, "stop", axis_start))
+        coord_count = float(self.level_belief[coord_start].detach().cpu()) if coord_stop > coord_start else 0.0
+        axis_count = float(self.level_belief[axis_start].detach().cpu()) if axis_stop > axis_start else 0.0
+        return float(np.tanh(max(coord_count, 0.0) + max(axis_count, 0.0)))
 
     def _rank_component_diagnostics(
         self,
@@ -543,6 +591,31 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             stats["relation_positive_prior_scale"] = float(4.0 * torch.sigmoid(relation.positive_prior_scale_raw).detach().cpu())
             stats["relation_negative_prior_scale"] = float(4.0 * torch.sigmoid(relation.negative_prior_scale_raw).detach().cpu())
             stats["relation_repeat_penalty_scale"] = float(6.0 * torch.sigmoid(relation.repeat_penalty_scale_raw).detach().cpu())
+        diagnostic_logits = getattr(output, "diagnostic_utility_logits", None)
+        if diagnostic_logits is not None:
+            diagnostic_raw = diagnostic_logits[0].detach().cpu().numpy().astype(np.float64)
+            diagnostic = _standardize_valid(diagnostic_raw, valid)
+            active = diagnostic[valid]
+            stats["learned_diagnostic_utility_raw_std"] = float(np.std(diagnostic_raw[valid])) if active.size else 0.0
+            stats["learned_diagnostic_utility_std"] = float(np.std(active)) if active.size else 0.0
+            stats["learned_diagnostic_utility_mean"] = float(np.mean(active)) if active.size else 0.0
+            if active.size:
+                valid_indices = np.flatnonzero(valid)
+                top_index = int(valid_indices[int(np.argmax(active))])
+                stats["learned_diagnostic_utility_top_action"] = action_tuple[top_index]
+                stats["runtime_rank_diag_top_action_agreement"] = float(
+                    action_tuple[top_index] == stats.get("rank_component_total_top_action", "")
+                )
+        else:
+            stats["learned_diagnostic_utility_raw_std"] = 0.0
+            stats["learned_diagnostic_utility_std"] = 0.0
+            stats["learned_diagnostic_utility_mean"] = 0.0
+            stats["runtime_rank_diag_top_action_agreement"] = 0.0
+        mix_logit = getattr(output, "diagnostic_mix_logit", None)
+        if mix_logit is not None:
+            stats["diagnostic_mix_model_value"] = float(torch.sigmoid(mix_logit[0]).detach().cpu())
+        else:
+            stats["diagnostic_mix_model_value"] = 0.0
         for name in (
             "relation_object_prior",
             "relation_positive_prior",

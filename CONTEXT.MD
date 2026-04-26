@@ -5722,3 +5722,70 @@ Next execution slice:
 - commit and push the rank-gated patch and docs
 - consult GPT-Pro with the pushed code and the real ARC hygiene result before implementing another code change
 - ask specifically whether the next patch should target learned diagnostic-utility/value under repeated no-effect, learned uncertainty over click regions, richer belief state over action parameter families, or a different mechanism
+
+## 2026-04-26 Information-Gain Diagnostic Utility Prototype
+
+Crash recovery state:
+
+- prior background training session was gone after the PC crash, but `artifacts/object_event_info_gain_diagnostic_runtime_probe.pkl` exists and contains a saved best checkpoint
+- saved checkpoint is step `135`, not final step `180`
+- working tree contains source/test changes for the information-gain diagnostic utility and must be committed/pushed before the next GPT-Pro review
+
+GPT-Pro consensus before this patch:
+
+- add a learned action-family diagnostic utility
+- add learned/evidence-conditioned mixing between policy rank and diagnostic utility
+- train diagnostic utility on information gain / hypothesis disagreement after no-effect evidence, not on raw positive-action prediction
+- keep the full dense action surface finite-scored
+- forbidden: hard diversity rules, least-visited bins, untried-action bonuses, action blacklists, avoid-column rules, sweeps, coverage/frontier control, graph-search control, replay, or per-game logic
+
+Implemented:
+
+- `ActionFamilyDiagnosticUtility`
+- diagnostic utility logits in `ObjectEventModelOutput`
+- diagnostic rank-vs-utility mix head
+- generic numeric action-family features from legal action parameters
+- runtime scoring that mixes standardized policy rank and standardized learned diagnostic utility under evidence-conditioned mix
+- information-gain targets from red/blue hypothesis disagreement in the synthetic curriculum
+- diagnostic mix training target that stays low before evidence and can rise after no-effect evidence
+- tests covering full `447` finite scoring, utility/mix shape, information-gain preference, low no-evidence mix, and evidence-conditioned utility/mix changes
+
+Verification after crash recovery:
+
+- `python -m py_compile scripts\train_learned_online_object_event.py arcagi\agents\learned_online_object_event_agent.py arcagi\learned_online\object_event_model.py` -> passed
+- `python -m pytest tests\test_object_event_parametric_action_surface.py tests\test_learned_online_object_event_agent_contracts.py -q` -> `36 passed`
+- full object-event suite -> `90 passed`
+- recurrent suite -> `31 passed`
+
+447-action synthetic gate:
+
+- command used `--axis-noeffect-cases 0.25 --relation-contradiction-cases 0.25 --diagnostic-utility-cases 0.25 --steps 180 --eval-every 45 --save-best`
+- saved artifact: `artifacts/object_event_info_gain_diagnostic_runtime_probe.pkl`
+- saved checkpoint step: `135`
+- full `447` action scoring
+- no metadata leakage
+- true act-path within-5: `0.875`
+- true act-path within-3: `0.8333333333333334`
+- next-level first try: `0.7916666666666666`
+- exact repeat: `0.0`
+- near repeat: `0.037037037037037035`
+- max same-action streak: `3.0`
+- learned diagnostic utility used: `1.0`
+- runtime diagnostic mix: `0.13091241030066503`
+- rank/diagnostic top-action agreement: `0.0`
+- mapped-column concentration remains too high: `runtime_agent_act_path_top_score_same_mapped_col_fraction = 0.7847769028871392`
+- unique action count remains low: `1.8125`
+
+Current interpretation:
+
+- this patch is a valid learned/evidence-updated prototype and is not a forbidden controller
+- it is not an ARC success candidate
+- it improves the mechanism surface, but the synthetic gate still says the agent is too concentrated over dense click families
+- do not run a `320`-step ARC probe from this artifact
+- a `48`-step ARC run remains a hygiene/collapse detector, not an online-competence cutoff; the user explicitly reminded that real acquisition may require far more steps and a prior real win reportedly took about `300`
+
+Next execution slice:
+
+- commit and push the info-gain diagnostic prototype honestly as a prototype
+- consult GPT-Pro with the pushed code, rank-gated real ARC result, and the info-gain synthetic result
+- ask for a concrete next mechanism that increases learned diagnostic diversification without violating the prohibitions

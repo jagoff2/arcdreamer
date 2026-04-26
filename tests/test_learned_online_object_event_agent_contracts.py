@@ -369,8 +369,16 @@ def test_object_event_agent_parametric_no_effect_update_keeps_failed_action_scor
     assert "relation_repeat_penalty_scale" in diagnostics
     assert "relation_contradiction_gate_mean" in diagnostics
     assert "top_score_same_x_fraction" in diagnostics
+    assert diagnostics["runtime_learned_diagnostic_utility_used"] is True
+    assert "runtime_learned_diagnostic_utility_std" in diagnostics
+    assert "runtime_entropy_tiebreak_std" in diagnostics
+    assert "runtime_diagnostic_mix" in diagnostics
+    assert "learned_diagnostic_utility_std" in diagnostics
+    assert "diagnostic_mix_model_value" in diagnostics
     assert np.isfinite(float(diagnostics["rank_component_gate_relation"]))
     assert np.isfinite(float(diagnostics["relation_object_prior_scale"]))
+    assert np.isfinite(float(diagnostics["runtime_learned_diagnostic_utility_std"]))
+    assert 0.0 <= float(diagnostics["runtime_diagnostic_mix"]) <= 1.0
     assert after[failed_action].score != before[failed_action].score
     for forbidden in (
         "tried_actions",

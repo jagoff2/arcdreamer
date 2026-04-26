@@ -21,7 +21,12 @@ from arcagi.learned_online.object_event_curriculum import (
 )
 from arcagi.learned_online.object_event_model import ObjectEventModel, ObjectEventModelConfig, policy_rank_logits_from_predictions
 from arcagi.learned_online.object_event_runtime_extraction import ObjectEventRuntimeExtractor, extract_selected_transition_from_grid
-from scripts.train_learned_online_object_event import _batch_to_tensors, _far_click_action_indices, _near_action_indices
+from scripts.train_learned_online_object_event import (
+    _batch_to_tensors,
+    _far_click_action_indices,
+    _information_gain_from_hypothesis_success,
+    _near_action_indices,
+)
 from arcagi.learned_online.object_event_curriculum import collate_object_event_examples
 
 
@@ -487,6 +492,98 @@ def test_component_gating_keeps_all_actions_legal_and_finite_after_noeffect_colu
     assert torch.isfinite(components.component_gates).all()
     for forbidden in ("tried_actions", "blocked_actions", "action_blacklist", "sweep_index", "frontier", "coverage_queue"):
         assert not hasattr(model, forbidden)
+
+
+def test_diagnostic_utility_logits_present_and_full_surface() -> None:
+    level = _parametric_level(seed=218)
+    tensors = _batch_to_tensors(collate_object_event_examples((level.example,)), device=torch.device("cpu"))
+    model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
+    model.eval()
+
+    output = model(**tensors["inputs"])
+
+    assert output.diagnostic_utility_logits is not None
+    assert output.diagnostic_utility_logits.shape == (1, 447)
+    assert torch.isfinite(output.diagnostic_utility_logits[tensors["action_mask"]]).all()
+
+
+def test_information_gain_target_prefers_hypothesis_disagreement_not_positive_only() -> None:
+    success_by_hypothesis = torch.as_tensor([[[1.0, 1.0], [1.0, 0.0]]], dtype=torch.float32)
+
+    target = _information_gain_from_hypothesis_success(success_by_hypothesis)
+
+    assert target.shape == (1, 2)
+    assert float(target[0, 1]) > float(target[0, 0])
+
+
+def test_diagnostic_mix_is_low_without_evidence() -> None:
+    level = _parametric_level(seed=220)
+    tensors = _batch_to_tensors(collate_object_event_examples((level.example,)), device=torch.device("cpu"))
+    model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
+    model.eval()
+
+    output = model(**tensors["inputs"])
+
+    assert output.diagnostic_mix_logit is not None
+    assert float(torch.sigmoid(output.diagnostic_mix_logit[0]).detach()) < 0.25
+
+
+def test_diagnostic_utility_changes_after_online_noeffect_update() -> None:
+    level = _parametric_level(seed=219)
+    example = level.example
+    failed = _failed_click_index(example)
+    tensors = _batch_to_tensors(collate_object_event_examples((example,)), device=torch.device("cpu"))
+    model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
+    model.eval()
+    with torch.no_grad():
+        model.action_family_diagnostic_utility.utility[-1].weight.fill_(0.05)
+        model.action_family_diagnostic_utility.utility[-1].bias.zero_()
+    zero = torch.zeros((1, model.config.d_model), dtype=torch.float32)
+    before = model(**tensors["inputs"], level_belief=zero)
+    deltas = model.observed_event_belief_deltas(
+        before,
+        target_outcome=tensors["candidate_outcome_targets"][:, failed],
+        target_delta=tensors["candidate_delta_targets"][:, failed],
+        actual_action_index=torch.as_tensor([failed], dtype=torch.long),
+        state_numeric=tensors["inputs"]["state_numeric"],
+        state_type_ids=tensors["inputs"]["state_type_ids"],
+        state_mask=tensors["inputs"]["state_mask"],
+        action_numeric=tensors["inputs"]["action_numeric"],
+    )
+    after = model(**tensors["inputs"], level_belief=deltas.level_delta)
+
+    assert before.diagnostic_utility_logits is not None
+    assert after.diagnostic_utility_logits is not None
+    assert torch.isfinite(after.diagnostic_utility_logits[tensors["action_mask"]]).all()
+    assert torch.mean(torch.abs(after.diagnostic_utility_logits - before.diagnostic_utility_logits)) > 0.0
+
+
+def test_diagnostic_mix_can_change_after_noeffect_evidence() -> None:
+    level = _parametric_level(seed=221)
+    example = level.example
+    failed = _failed_click_index(example)
+    tensors = _batch_to_tensors(collate_object_event_examples((example,)), device=torch.device("cpu"))
+    model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
+    model.eval()
+    with torch.no_grad():
+        model.diagnostic_mix_head[-1].weight.fill_(0.05)
+    zero = torch.zeros((1, model.config.d_model), dtype=torch.float32)
+    before = model(**tensors["inputs"], level_belief=zero)
+    deltas = model.observed_event_belief_deltas(
+        before,
+        target_outcome=tensors["candidate_outcome_targets"][:, failed],
+        target_delta=tensors["candidate_delta_targets"][:, failed],
+        actual_action_index=torch.as_tensor([failed], dtype=torch.long),
+        state_numeric=tensors["inputs"]["state_numeric"],
+        state_type_ids=tensors["inputs"]["state_type_ids"],
+        state_mask=tensors["inputs"]["state_mask"],
+        action_numeric=tensors["inputs"]["action_numeric"],
+    )
+    after = model(**tensors["inputs"], level_belief=deltas.level_delta)
+
+    assert before.diagnostic_mix_logit is not None
+    assert after.diagnostic_mix_logit is not None
+    assert float(torch.abs(after.diagnostic_mix_logit - before.diagnostic_mix_logit).detach()) > 0.0
 
 
 def _parametric_level(*, seed: int):

@@ -1006,3 +1006,50 @@ Operator actions recorded for continuity:
    - ARC is still not solved and diversity remains too low under the 48-step hygiene probe
    - do not run 320-step ARC yet
    - commit/push, then ask GPT-Pro for the next mechanism before another code step
+
+## 2026-04-26 Information-Gain Diagnostic Utility Prototype
+
+Operator actions recorded for continuity:
+
+1. Recovered after the PC crash:
+   - the previous background terminal was no longer attached
+   - `artifacts/object_event_info_gain_diagnostic_runtime_probe.pkl` exists
+   - the artifact saved best checkpoint step `135`; final step `180` was not present in the saved summary
+2. GPT-Pro consensus that led to this patch:
+   - add learned action-family diagnostic utility
+   - add learned/evidence-conditioned rank-vs-diagnostic mixing
+   - train on information gain / hypothesis disagreement after no-effect evidence
+   - do not add hard diversity, least-visited, untried, avoid-column, blacklist, sweep, coverage/frontier, replay, graph-search, or per-game behavior
+3. Implemented:
+   - `ActionFamilyDiagnosticUtility`
+   - diagnostic utility logits and diagnostic mix logits in `ObjectEventModelOutput`
+   - generic numeric action-family features
+   - runtime standardized rank/diagnostic mixing with a small entropy tie-breaker
+   - information-gain target construction from competing synthetic hypotheses
+   - diagnostic mix loss to keep mix low before evidence and allow it after no-effect evidence
+   - runtime diagnostics for learned diagnostic utility, entropy tie-break, diagnostic mix, and rank/diagnostic top-action agreement
+4. Verification after crash recovery:
+   - `py_compile` passed for the edited train script, agent, and model files
+   - focused parametric/agent tests: `36 passed`
+   - full object-event suite: `90 passed`
+   - recurrent suite: `31 passed`
+5. 447-action synthetic gate:
+   - command included `--diagnostic-utility-cases 0.25 --axis-noeffect-cases 0.25 --relation-contradiction-cases 0.25 --steps 180 --eval-every 45`
+   - artifact: `artifacts/object_event_info_gain_diagnostic_runtime_probe.pkl`
+   - saved checkpoint step `135`
+   - full `447` scoring and no leakage
+   - true act-path within-5 `0.875`
+   - true act-path within-3 `0.8333333333333334`
+   - next-level first try `0.7916666666666666`
+   - exact repeat `0.0`
+   - near repeat `0.037037037037037035`
+   - max same-action streak `3.0`
+   - diagnostic mix about `0.1309`
+   - rank/diagnostic top-action agreement `0.0`
+6. Current conclusion:
+   - the prototype is learned/evidence-updated and preserves full finite action scoring
+   - it is not ARC success and should not be claimed as such
+   - synthetic dense-click diversification remains insufficient: mapped-column concentration `0.7847769028871392`, unique action count `1.8125`
+   - do not run a `320`-step ARC probe from this artifact
+   - treat `48` steps as a harsh hygiene/collapse detector, not a proof that online acquisition cannot require about `300` steps
+   - commit/push this exact state, then consult GPT-Pro before another code step
