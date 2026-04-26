@@ -297,6 +297,17 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         axis_memory = self.level_belief[axis_start:axis_stop] if axis_stop > axis_start else self.level_belief[:0]
         axis_count = float(axis_memory[0].detach().cpu()) if axis_memory.numel() > 0 else 0.0
         axis_norm = float(torch.linalg.vector_norm(axis_memory).detach().cpu()) if axis_memory.numel() > 0 else 0.0
+        family_start = int(getattr(self.model.action_family_belief, "start", 0))
+        family_stop = int(getattr(self.model.action_family_belief, "stop", family_start))
+        family_count = int(getattr(self.model.action_family_belief, "num_families", 0))
+        family_memory = self.level_belief[family_start:family_stop] if family_stop > family_start else self.level_belief[:0]
+        family_norm = float(torch.linalg.vector_norm(family_memory).detach().cpu()) if family_memory.numel() > 0 else 0.0
+        family_evidence = float(torch.sum(family_memory[:family_count].clamp_min(0.0)).detach().cpu()) if family_count > 0 else 0.0
+        family_noeffect = (
+            float(torch.sum(family_memory[2 * family_count : 3 * family_count].clamp_min(0.0)).detach().cpu())
+            if family_count > 0
+            else 0.0
+        )
         return {
             "controller_kind": self.controller_kind,
             "claim_eligible_arc_controller": bool(self.claim_eligible_arc_controller),
@@ -315,6 +326,9 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             "object_event_coordinate_noeffect_count": coord_count,
             "object_event_axis_noeffect_memory_norm": axis_norm,
             "object_event_axis_noeffect_count": axis_count,
+            "object_event_action_family_belief_norm": family_norm,
+            "object_event_action_family_evidence_count": family_evidence,
+            "object_event_action_family_noeffect_count": family_noeffect,
             "object_event_action_surface_capped": False,
             "object_event_oracle_support_used": False,
             "object_event_trace_replay_used": False,
@@ -339,6 +353,9 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             "coordinate_noeffect_count": coord_count,
             "axis_noeffect_memory_norm": axis_norm,
             "axis_noeffect_count": axis_count,
+            "action_family_belief_norm": family_norm,
+            "action_family_evidence_count": family_evidence,
+            "action_family_noeffect_count": family_noeffect,
             "level_epoch": int(self.level_epoch),
             "level_step": int(self.level_step),
             "last_predicted_outcome": tuple(self.last_predicted_outcome),
@@ -448,6 +465,7 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
                 "observed_event_belief_encoder",
                 "level_belief_coordinate_noeffect_slots",
                 "level_belief_axis_noeffect_slots",
+                "level_belief_action_family_slots",
                 "session_belief",
                 "level_belief",
             ],
@@ -540,7 +558,14 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         axis_stop = int(getattr(self.model.axis_noeffect_memory_rank, "stop", axis_start))
         coord_count = float(self.level_belief[coord_start].detach().cpu()) if coord_stop > coord_start else 0.0
         axis_count = float(self.level_belief[axis_start].detach().cpu()) if axis_stop > axis_start else 0.0
-        return float(np.tanh(max(coord_count, 0.0) + max(axis_count, 0.0)))
+        family_start = int(getattr(self.model.action_family_belief, "start", 0))
+        family_count = int(getattr(self.model.action_family_belief, "num_families", 0))
+        family_noeffect = 0.0
+        if family_count > 0:
+            start = family_start + 2 * family_count
+            stop = family_start + 3 * family_count
+            family_noeffect = float(torch.sum(self.level_belief[start:stop].clamp_min(0.0)).detach().cpu())
+        return float(np.tanh(max(coord_count, 0.0) + max(axis_count, 0.0) + max(family_noeffect, 0.0)))
 
     def _rank_component_diagnostics(
         self,
@@ -616,6 +641,31 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             stats["diagnostic_mix_model_value"] = float(torch.sigmoid(mix_logit[0]).detach().cpu())
         else:
             stats["diagnostic_mix_model_value"] = 0.0
+        family_features = getattr(output, "action_family_posterior_features", None)
+        if family_features is not None:
+            posterior = family_features[0].detach().cpu().numpy().astype(np.float64)
+            active = posterior[valid]
+            if active.size:
+                stats["action_family_belief_mean_effect_mean"] = float(np.mean(active[:, 0]))
+                stats["action_family_belief_uncertainty_mean"] = float(np.mean(active[:, 1]))
+                stats["action_family_belief_count_mean"] = float(np.mean(active[:, 2]))
+                stats["action_family_belief_noeffect_mean"] = float(np.mean(active[:, 3]))
+                stats["action_family_belief_uncertainty_top_value"] = float(np.max(active[:, 1]))
+                stats["action_family_belief_noeffect_top_value"] = float(np.max(active[:, 3]))
+            else:
+                stats["action_family_belief_mean_effect_mean"] = 0.0
+                stats["action_family_belief_uncertainty_mean"] = 0.0
+                stats["action_family_belief_count_mean"] = 0.0
+                stats["action_family_belief_noeffect_mean"] = 0.0
+                stats["action_family_belief_uncertainty_top_value"] = 0.0
+                stats["action_family_belief_noeffect_top_value"] = 0.0
+        else:
+            stats["action_family_belief_mean_effect_mean"] = 0.0
+            stats["action_family_belief_uncertainty_mean"] = 0.0
+            stats["action_family_belief_count_mean"] = 0.0
+            stats["action_family_belief_noeffect_mean"] = 0.0
+            stats["action_family_belief_uncertainty_top_value"] = 0.0
+            stats["action_family_belief_noeffect_top_value"] = 0.0
         for name in (
             "relation_object_prior",
             "relation_positive_prior",

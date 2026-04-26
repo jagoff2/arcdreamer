@@ -24,6 +24,8 @@ from arcagi.learned_online.object_event_runtime_extraction import ObjectEventRun
 from scripts.train_learned_online_object_event import (
     _batch_to_tensors,
     _far_click_action_indices,
+    _family_known_noeffect_mask,
+    _family_posterior_diagnostic_targets,
     _information_gain_from_hypothesis_success,
     _near_action_indices,
 )
@@ -505,6 +507,56 @@ def test_diagnostic_utility_logits_present_and_full_surface() -> None:
     assert output.diagnostic_utility_logits is not None
     assert output.diagnostic_utility_logits.shape == (1, 447)
     assert torch.isfinite(output.diagnostic_utility_logits[tensors["action_mask"]]).all()
+    assert output.action_family_posterior_features is not None
+    assert output.action_family_posterior_features.shape == (1, 447, 4)
+    assert torch.isfinite(output.action_family_posterior_features[tensors["action_mask"]]).all()
+
+
+def test_action_family_belief_updates_selected_transition_level_only() -> None:
+    level = _parametric_level(seed=222)
+    example = level.example
+    failed = _failed_click_index(example)
+    tensors = _batch_to_tensors(collate_object_event_examples((example,)), device=torch.device("cpu"))
+    model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
+    model.eval()
+
+    output = model(**tensors["inputs"])
+    deltas = model.observed_event_belief_deltas(
+        output,
+        target_outcome=tensors["candidate_outcome_targets"][:, failed],
+        target_delta=tensors["candidate_delta_targets"][:, failed],
+        actual_action_index=torch.as_tensor([failed], dtype=torch.long),
+        state_numeric=tensors["inputs"]["state_numeric"],
+        state_type_ids=tensors["inputs"]["state_type_ids"],
+        state_mask=tensors["inputs"]["state_mask"],
+        action_numeric=tensors["inputs"]["action_numeric"],
+    )
+    start = model.action_family_belief.start
+    stop = model.action_family_belief.stop
+
+    assert stop > start
+    assert torch.linalg.vector_norm(deltas.level_delta[:, start:stop]) > 0.0
+    assert torch.linalg.vector_norm(deltas.session_delta[:, start:stop]) == 0.0
+    for forbidden in ("visited_bins", "least_visited", "untried", "tried_families", "family_blacklist", "coverage_map", "frontier", "sweep_index", "probe_counter"):
+        assert not hasattr(model, forbidden)
+
+
+def test_family_posterior_target_prefers_uncertain_over_known_noeffect() -> None:
+    action_mask = torch.ones((1, 3), dtype=torch.bool)
+    features = torch.as_tensor(
+        [[[0.5, 0.25, 0.1, 0.0], [0.2, 0.05, 1.0, 1.0], [0.5, 0.20, 0.1, 0.0]]],
+        dtype=torch.float32,
+    )
+
+    output = type("Output", (), {})()
+    output.action_family_posterior_features = features
+
+    target = _family_posterior_diagnostic_targets(output, {"action_mask": action_mask})
+    known_noeffect = _family_known_noeffect_mask(output, {"action_mask": action_mask})
+
+    assert float(target[0, 0]) > float(target[0, 1])
+    assert bool(known_noeffect[0, 1])
+    assert not bool(known_noeffect[0, 0])
 
 
 def test_information_gain_target_prefers_hypothesis_disagreement_not_positive_only() -> None:

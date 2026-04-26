@@ -1053,3 +1053,51 @@ Operator actions recorded for continuity:
    - do not run a `320`-step ARC probe from this artifact
    - treat `48` steps as a harsh hygiene/collapse detector, not a proof that online acquisition cannot require about `300` steps
    - commit/push this exact state, then consult GPT-Pro before another code step
+
+## 2026-04-26 Soft Action-Family Belief Prototype
+
+Operator actions recorded for continuity:
+
+1. Consulted GPT-Pro after pushing `f2d4228`. Consensus:
+   - implement level-local soft action-family belief
+   - use learned prototypes over numeric action features
+   - feed posterior features into learned diagnostic utility
+   - train diagnostic utility from posterior uncertainty / known no-effect contrast
+   - add selected-family diversity metrics
+   - do not add least-visited family selection, untried bonuses, fixed diversity rules, avoid-column masks, sweeps, frontiers, replay, graph-search control, or per-game behavior
+2. Implemented:
+   - `ActionFamilyBelief`
+   - level-local evidence/success/no-effect family slots
+   - full-surface posterior features in `ObjectEventModelOutput`
+   - posterior features as input to `ActionFamilyDiagnosticUtility`
+   - runtime family belief diagnostics
+   - trainer flag `--family-diagnostic-cases`
+   - posterior uncertainty diagnostic targets and known-no-effect family masks
+   - selected unique x/mapped-column/learned-family/entropy metrics
+3. Verification:
+   - `py_compile` passed
+   - focused parametric/agent tests: `38 passed`
+   - full object-event suite: `92 passed`
+   - recurrent suite: `31 passed`
+   - 2-step family-diagnostic smoke emitted all new metrics
+4. 447-action family-belief gate:
+   - artifact: `artifacts/object_event_family_belief_runtime_probe.pkl`
+   - saved checkpoint step `150`
+   - full `447` scoring and no leakage
+   - true act-path within-5 `0.875`
+   - true act-path within-3 `0.8333333333333334`
+   - next-level first try `0.7708333333333334`
+   - max same-action streak `3.0`
+   - diagnostic family uncertainty top1 `1.0`
+   - diagnostic known-no-effect family top1 `0.0`
+5. Failure:
+   - selected learned-family diversity is still far below gate
+   - `runtime_agent_act_path_selected_unique_family_count = 1.2708333333333333`
+   - `runtime_agent_act_path_selected_family_entropy = 0.1848695475169042`
+   - `runtime_agent_act_path_unique_action_count_mean = 1.7916666666666667`
+   - `runtime_agent_act_path_selected_unique_mapped_col_count = 1.5416666666666667`
+   - `runtime_agent_act_path_top_score_same_mapped_col_fraction = 0.7827868852459017`
+6. Current conclusion:
+   - this is not ARC-ready and no real ARC probe should be run from this artifact
+   - the patch created a valid learned/evidence-updated substrate, but the learned family prototypes/targets collapse to one effective selected family in the true act path
+   - next step is to commit/push the failed prototype honestly and ask GPT-Pro whether to add prototype assignment regularization, contrastive family prediction, a different family parameterization, or a sharper diagnostic target

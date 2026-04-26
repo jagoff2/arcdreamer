@@ -5789,3 +5789,68 @@ Next execution slice:
 - commit and push the info-gain diagnostic prototype honestly as a prototype
 - consult GPT-Pro with the pushed code, rank-gated real ARC result, and the info-gain synthetic result
 - ask for a concrete next mechanism that increases learned diagnostic diversification without violating the prohibitions
+
+## 2026-04-26 Soft Action-Family Belief Prototype
+
+GPT-Pro consensus before this patch:
+
+- implement a level-local soft action-family belief module
+- use learned family prototypes over numeric action features, not exact tried actions, strings, fixed sweep bins, or controller state
+- write selected-transition evidence into level-local belief only
+- feed candidate family posterior features into learned diagnostic utility
+- train diagnostic utility primarily from posterior uncertainty / known no-effect contrast, with red/blue hypothesis IG kept only auxiliary
+- add metrics for selected learned-family diversity before any ARC run
+- defer ensemble/disagreement heads until this lower-cost mechanism is tested
+
+Implemented:
+
+- `ActionFamilyBelief` in `arcagi/learned_online/object_event_model.py`
+  - learned soft family prototypes
+  - level-local slots for evidence count, success evidence, and no-effect evidence
+  - full-surface posterior features per action: effect mean, uncertainty, evidence count, no-effect count
+- `ActionFamilyDiagnosticUtility` now receives the posterior features
+- `ObjectEventModelOutput` now exposes `action_family_posterior_features`
+- runtime diagnostics now expose action-family belief norm/count/no-effect count and posterior feature summaries
+- trainer now has `--family-diagnostic-cases`, posterior uncertainty targets, known-no-effect family masks, selected-family diversity metrics, and runtime act-path family diversity metrics
+- no hard diversity rule, no least-visited selection, no tried-family list, no action blacklist, no sweep, no coverage/frontier, no replay, no graph-search control, and no per-game behavior were added
+
+Verification:
+
+- `python -m py_compile scripts\train_learned_online_object_event.py arcagi\agents\learned_online_object_event_agent.py arcagi\learned_online\object_event_model.py` -> passed
+- focused parametric/agent tests: `38 passed`
+- full object-event suite: `92 passed`
+- recurrent suite: `31 passed`
+- 2-step smoke training with `--family-diagnostic-cases 0.25` emitted the new metrics without key/runtime errors
+
+447-action family-belief synthetic gate:
+
+- command:
+  - `python scripts\train_learned_online_object_event.py --mode synthetic_active_online_object_event --curriculum latent_rule_variable_palette --state-source extracted --action-surface arc_scale_parametric --action-surface-size 447 --coordinate-grid-size 64 --empty-click-fraction 0.80 --positive-region-radius 1 --seed 0 --steps 200 --batch-size 8 --train-sessions 48 --heldout-sessions 48 --levels-per-session 3 --max-distractors 2 --palette-size 8 --require-role-balanced-colors --max-steps-per-level 5 --axis-noeffect-cases 0.25 --relation-contradiction-cases 0.25 --diagnostic-utility-cases 0.25 --family-diagnostic-cases 0.25 --eval-every 50 --eval-runtime-agent --save-best --selection-metric runtime_agent_act_path_active_success_within_5 --save-path artifacts\object_event_family_belief_runtime_probe.pkl`
+- saved artifact:
+  - `artifacts/object_event_family_belief_runtime_probe.pkl`
+  - checkpoint best step `150`
+  - full `447` scoring
+  - no metadata leakage
+  - true act-path within-5 `0.875`
+  - true act-path within-3 `0.8333333333333334`
+  - next-level first try `0.7708333333333334`
+  - max same-action streak `3.0`
+  - diagnostic known-no-effect family top1 `0.0`
+  - diagnostic family uncertainty top1 `1.0`
+
+Failure:
+
+- the mechanism did not solve the intended family-diversification blocker
+- selected learned-family count stayed too low: `1.2708333333333333`
+- selected family entropy stayed too low: `0.1848695475169042`
+- unique action count stayed too low: `1.7916666666666667`
+- selected unique mapped columns stayed too low: `1.5416666666666667`
+- top-score mapped-column concentration stayed too high: `0.7827868852459017`
+
+Current interpretation:
+
+- the code is a valid learned/evidence-updated substrate, but the learned prototypes/family assignment collapsed to one effective selected family in the true act path
+- the diagnostic target can be learned numerically without causing the runtime agent to select diverse diagnostic families
+- do not run real ARC from this artifact
+- next likely issue is family prototype/assignment training or target sharpness, not absence of a family-belief memory substrate
+- consult GPT-Pro before another mechanism change

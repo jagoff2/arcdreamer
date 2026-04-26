@@ -114,6 +114,7 @@ def main() -> None:
     parser.add_argument("--relation-contradiction-cases", type=float, default=0.0)
     parser.add_argument("--diagnostic-utility-cases", type=float, default=0.0)
     parser.add_argument("--diagnostic-utility-weight", type=float, default=0.75)
+    parser.add_argument("--family-diagnostic-cases", type=float, default=0.0)
     args = parser.parse_args()
 
     mode = args.source or args.mode
@@ -276,6 +277,9 @@ def _run_synthetic_online_object_event(
     last_diagnostic_ig_top1_rate = 0.0
     last_diagnostic_mix_before_evidence = 0.0
     last_diagnostic_mix_after_noeffect = 0.0
+    last_diagnostic_family_uncertainty_top1_rate = 0.0
+    last_diagnostic_known_noeffect_family_top1_rate = 0.0
+    last_diagnostic_uncertain_minus_noeffect = 0.0
     best_metric_value = float("-inf")
     best_step = 0
     best_state: dict[str, torch.Tensor] | None = None
@@ -405,23 +409,51 @@ def _run_synthetic_online_object_event(
         else:
             contradiction_margin_loss = support_logits.new_tensor(0.0)
             component_balance_loss = support_logits.new_tensor(0.0)
-        diagnostic_scale = max(float(args.diagnostic_utility_cases), 0.0)
+        diagnostic_scale = max(float(args.diagnostic_utility_cases), float(args.family_diagnostic_cases), 0.0)
         if self_retry_output.diagnostic_utility_logits is not None:
             diag_logits = self_retry_output.diagnostic_utility_logits
-            diag_target = _diagnostic_information_gain_targets(support_examples, self_retry_tensors, self_selected).to(
+            hypothesis_target = _diagnostic_information_gain_targets(support_examples, self_retry_tensors, self_selected).to(
                 dtype=diag_logits.dtype,
                 device=diag_logits.device,
             )
+            family_target = _family_posterior_diagnostic_targets(self_retry_output, self_retry_tensors).to(
+                dtype=diag_logits.dtype,
+                device=diag_logits.device,
+            )
+            family_weight = 0.7 if float(args.family_diagnostic_cases) > 0.0 else 0.0
+            diag_target = (family_weight * family_target) + ((1.0 - family_weight) * hypothesis_target)
+            diag_target = diag_target.masked_fill(~self_retry_tensors["action_mask"].bool(), 0.0)
+            target_max = diag_target.max(dim=1, keepdim=True).values.clamp_min(1.0e-6)
+            diag_target = (diag_target / target_max).clamp(0.0, 1.0)
             valid_weight = self_retry_tensors["action_mask"].to(dtype=diag_logits.dtype)
             diag_bce = F.binary_cross_entropy_with_logits(diag_logits, diag_target, reduction="none")
             diagnostic_utility_loss = torch.sum(diag_bce * valid_weight) / torch.clamp(torch.sum(valid_weight), min=1.0)
-            info_good_mask = (diag_target >= 0.5) & self_retry_tensors["action_mask"].bool()
+            info_good_mask = (diag_target >= 0.6) & self_retry_tensors["action_mask"].bool()
             safe_info_good = torch.where(info_good_mask.any(dim=1, keepdim=True), info_good_mask, positive_mask)
             diag_good = torch.logsumexp(diag_logits.masked_fill(~safe_info_good, -1.0e9), dim=-1)
             diag_failed = torch.logsumexp(diag_logits.masked_fill(~relation_failed_mask, -1.0e9), dim=-1)
             diagnostic_margin_loss = _masked_mean_loss(F.relu(diag_failed - diag_good + 0.5), coord_failure_mask)
             diagnostic_good_minus_failed = _masked_mean_loss(diag_good - diag_failed, coord_failure_mask)
             diag_selected = torch.argmax(diag_logits.masked_fill(~self_retry_tensors["action_mask"].bool(), -1.0e9), dim=-1)
+            family_uncertain_mask = (family_target >= 0.6) & self_retry_tensors["action_mask"].bool()
+            family_known_noeffect_mask = _family_known_noeffect_mask(self_retry_output, self_retry_tensors)
+            safe_uncertain = torch.where(
+                family_uncertain_mask.any(dim=1, keepdim=True),
+                family_uncertain_mask,
+                info_good_mask,
+            )
+            family_uncertain_logit = _masked_action_mean(diag_logits, safe_uncertain)
+            family_noeffect_logit = _masked_action_mean(diag_logits, family_known_noeffect_mask)
+            diagnostic_uncertain_minus_noeffect = _masked_mean_loss(
+                family_uncertain_logit - family_noeffect_logit,
+                coord_failure_mask,
+            )
+            diagnostic_family_uncertainty_top1 = torch.mean(
+                family_uncertain_mask.gather(1, diag_selected[:, None]).squeeze(1).to(dtype=diag_logits.dtype)
+            )
+            diagnostic_known_noeffect_family_top1 = torch.mean(
+                family_known_noeffect_mask.gather(1, diag_selected[:, None]).squeeze(1).to(dtype=diag_logits.dtype)
+            )
             diagnostic_failed_family_top1 = torch.mean(
                 relation_failed_mask.gather(1, diag_selected[:, None]).squeeze(1).to(dtype=diag_logits.dtype)
             )
@@ -452,6 +484,9 @@ def _run_synthetic_online_object_event(
             diagnostic_good_minus_failed = support_logits.new_tensor(0.0)
             diagnostic_failed_family_top1 = support_logits.new_tensor(0.0)
             diagnostic_ig_top1 = support_logits.new_tensor(0.0)
+            diagnostic_family_uncertainty_top1 = support_logits.new_tensor(0.0)
+            diagnostic_known_noeffect_family_top1 = support_logits.new_tensor(0.0)
+            diagnostic_uncertain_minus_noeffect = support_logits.new_tensor(0.0)
             diagnostic_mix_loss = support_logits.new_tensor(0.0)
             diagnostic_mix_after = support_logits.new_zeros((support_logits.shape[0],))
             diagnostic_mix_before = support_logits.new_zeros((support_logits.shape[0],))
@@ -473,6 +508,7 @@ def _run_synthetic_online_object_event(
             + contradiction_scale * 0.10 * component_balance_loss
             + diagnostic_scale * max(float(args.diagnostic_utility_weight), 0.0) * 0.30 * diagnostic_utility_loss
             + diagnostic_scale * 0.20 * diagnostic_margin_loss
+            + diagnostic_scale * 0.15 * F.relu(0.25 - diagnostic_uncertain_minus_noeffect)
             + diagnostic_scale * 0.10 * diagnostic_mix_loss
             + 0.2 * plausible_loss
         )
@@ -488,6 +524,9 @@ def _run_synthetic_online_object_event(
         last_diagnostic_ig_top1_rate = float(diagnostic_ig_top1.detach().cpu())
         last_diagnostic_mix_before_evidence = float(torch.mean(diagnostic_mix_before.detach()).cpu())
         last_diagnostic_mix_after_noeffect = float(torch.mean(diagnostic_mix_after.detach()).cpu())
+        last_diagnostic_family_uncertainty_top1_rate = float(diagnostic_family_uncertainty_top1.detach().cpu())
+        last_diagnostic_known_noeffect_family_top1_rate = float(diagnostic_known_noeffect_family_top1.detach().cpu())
+        last_diagnostic_uncertain_minus_noeffect = float(diagnostic_uncertain_minus_noeffect.detach().cpu())
         if step in eval_steps:
             eval_extra_metrics = dict(extraction_metrics)
             eval_extra_metrics.update(
@@ -497,6 +536,9 @@ def _run_synthetic_online_object_event(
                     "diagnostic_good_minus_failed_family_mean": last_diagnostic_good_minus_failed_family,
                     "diagnostic_failed_family_top1_rate": last_diagnostic_failed_family_top1_rate,
                     "diagnostic_ig_top1_rate": last_diagnostic_ig_top1_rate,
+                    "diagnostic_family_uncertainty_top1_rate": last_diagnostic_family_uncertainty_top1_rate,
+                    "diagnostic_known_noeffect_family_top1_rate": last_diagnostic_known_noeffect_family_top1_rate,
+                    "diagnostic_uncertain_minus_noeffect_mean": last_diagnostic_uncertain_minus_noeffect,
                     "diagnostic_mix_before_evidence_mean": last_diagnostic_mix_before_evidence,
                     "diagnostic_mix_after_noeffect_mean": last_diagnostic_mix_after_noeffect,
                 }
@@ -900,6 +942,35 @@ def _diagnostic_information_gain_targets(
         prior = prior / prior.sum(dim=1, keepdim=True).clamp_min(1.0e-6)
         targets[row] = _information_gain_from_hypothesis_success(success, prior)[0] * action_mask[row].to(dtype=torch.float32)
     return targets
+
+
+def _family_posterior_diagnostic_targets(
+    output: Any,
+    tensors: dict[str, Any],
+) -> torch.Tensor:
+    action_mask = tensors["action_mask"].bool()
+    features = getattr(output, "action_family_posterior_features", None)
+    if features is None:
+        return torch.zeros_like(action_mask, dtype=torch.float32)
+    posterior = features.to(dtype=torch.float32)
+    uncertainty = posterior[..., 1].clamp_min(0.0)
+    noeffect_count = posterior[..., 3].clamp_min(0.0)
+    targets = uncertainty * torch.exp(-0.5 * noeffect_count)
+    targets = targets.masked_fill(~action_mask, 0.0)
+    max_value = targets.max(dim=1, keepdim=True).values.clamp_min(1.0e-6)
+    return (targets / max_value).clamp(0.0, 1.0)
+
+
+def _family_known_noeffect_mask(
+    output: Any,
+    tensors: dict[str, Any],
+) -> torch.Tensor:
+    action_mask = tensors["action_mask"].bool()
+    features = getattr(output, "action_family_posterior_features", None)
+    if features is None:
+        return torch.zeros_like(action_mask, dtype=torch.bool)
+    posterior = features.to(dtype=torch.float32)
+    return action_mask & (posterior[..., 3] >= 0.20)
 
 
 def _masked_mean_loss(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -1650,6 +1721,53 @@ def _max_same_action_streak(actions: Sequence[str]) -> int:
     return int(best)
 
 
+def _selected_action_diversity(
+    *,
+    model: ObjectEventModel,
+    example: ObjectEventExample,
+    selected_actions: Sequence[str],
+    device: torch.device,
+) -> dict[str, float]:
+    if not selected_actions:
+        return {
+            "selected_unique_x_count": 0.0,
+            "selected_unique_mapped_col_count": 0.0,
+            "selected_unique_family_count": 0.0,
+            "selected_family_entropy": 0.0,
+        }
+    action_to_index = {str(action): index for index, action in enumerate(example.legal_actions)}
+    selected_indices = tuple(action_to_index[str(action)] for action in selected_actions if str(action) in action_to_index)
+    click_x_values: set[int] = set()
+    mapped_cols: set[float] = set()
+    family_ids: list[int] = []
+    for action in selected_actions:
+        click = parse_click_action(str(action))
+        if click is not None:
+            click_x_values.add(int(click[0]))
+    if selected_indices:
+        numeric_np = example.action_tokens.numeric[list(selected_indices)]
+        for row in numeric_np:
+            if float(row[ACTION_FEATURE_HAS_GRID_CELL]) > 0.5:
+                mapped_cols.add(round(float(row[ACTION_FEATURE_GRID_COL]), 4))
+        numeric = torch.as_tensor(numeric_np[None, :, :], dtype=torch.float32, device=device)
+        with torch.no_grad():
+            probs = model.action_family_belief.family_probs(numeric)
+        if probs.numel() > 0:
+            family_ids = [int(value) for value in torch.argmax(probs[0], dim=-1).detach().cpu().tolist()]
+    if family_ids:
+        counts = np.asarray([family_ids.count(family) for family in sorted(set(family_ids))], dtype=np.float64)
+        probabilities = counts / max(float(np.sum(counts)), 1.0)
+        entropy = -float(np.sum(probabilities * np.log(np.clip(probabilities, 1.0e-12, 1.0))))
+    else:
+        entropy = 0.0
+    return {
+        "selected_unique_x_count": float(len(click_x_values)),
+        "selected_unique_mapped_col_count": float(len(mapped_cols)),
+        "selected_unique_family_count": float(len(set(family_ids))),
+        "selected_family_entropy": float(entropy),
+    }
+
+
 def _is_near_repeat_action(first: str, second: str, example: ObjectEventExample) -> bool:
     if first == second:
         return True
@@ -1767,6 +1885,12 @@ _RANK_DIAGNOSTIC_FLOAT_KEYS = (
     "learned_diagnostic_utility_std",
     "diagnostic_mix_model_value",
     "runtime_rank_diag_top_action_agreement",
+    "action_family_belief_mean_effect_mean",
+    "action_family_belief_uncertainty_mean",
+    "action_family_belief_count_mean",
+    "action_family_belief_noeffect_mean",
+    "action_family_belief_uncertainty_top_value",
+    "action_family_belief_noeffect_top_value",
 )
 
 
@@ -1851,6 +1975,10 @@ def _runtime_agent_active_metrics(
             "runtime_agent_act_path_failed_far_score_delta_mean": 0.0,
             "runtime_agent_act_path_failed_neighborhood_top1_rate": 0.0,
             "runtime_agent_act_path_failed_same_mapped_cell_top1_rate": 0.0,
+            "runtime_agent_act_path_selected_unique_x_count": 0.0,
+            "runtime_agent_act_path_selected_unique_mapped_col_count": 0.0,
+            "runtime_agent_act_path_selected_unique_family_count": 0.0,
+            "runtime_agent_act_path_selected_family_entropy": 0.0,
         }
     base_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
     success_steps: list[int] = []
@@ -1995,6 +2123,10 @@ def _runtime_agent_act_path_metrics(
     failed_same_y_deltas: list[float] = []
     same_streaks: list[float] = []
     unique_counts: list[float] = []
+    unique_x_counts: list[float] = []
+    unique_mapped_col_counts: list[float] = []
+    unique_family_counts: list[float] = []
+    family_entropies: list[float] = []
     no_effect_count = 0
     forbidden_count = 0
     for session_index, session in enumerate(sessions):
@@ -2088,6 +2220,16 @@ def _runtime_agent_act_path_metrics(
         success_steps.append(step_success)
         same_streaks.append(float(_max_same_action_streak(selected_actions_for_level)))
         unique_counts.append(float(len(set(selected_actions_for_level))))
+        diversity = _selected_action_diversity(
+            model=agent.model,
+            example=first_example,
+            selected_actions=selected_actions_for_level,
+            device=device,
+        )
+        unique_x_counts.append(float(diversity["selected_unique_x_count"]))
+        unique_mapped_col_counts.append(float(diversity["selected_unique_mapped_col_count"]))
+        unique_family_counts.append(float(diversity["selected_unique_family_count"]))
+        family_entropies.append(float(diversity["selected_family_entropy"]))
         online_counts.append(float(agent.online_update_count))
         if len(session.levels) > 1:
             query = session.levels[1].example
@@ -2140,6 +2282,10 @@ def _runtime_agent_act_path_metrics(
         "runtime_agent_act_path_max_same_action_streak_mean": float(np.mean(same_streaks)) if same_streaks else 0.0,
         "runtime_agent_act_path_max_same_action_streak_max": float(np.max(same_streaks)) if same_streaks else 0.0,
         "runtime_agent_act_path_unique_action_count_mean": float(np.mean(unique_counts)) if unique_counts else 0.0,
+        "runtime_agent_act_path_selected_unique_x_count": float(np.mean(unique_x_counts)) if unique_x_counts else 0.0,
+        "runtime_agent_act_path_selected_unique_mapped_col_count": float(np.mean(unique_mapped_col_counts)) if unique_mapped_col_counts else 0.0,
+        "runtime_agent_act_path_selected_unique_family_count": float(np.mean(unique_family_counts)) if unique_family_counts else 0.0,
+        "runtime_agent_act_path_selected_family_entropy": float(np.mean(family_entropies)) if family_entropies else 0.0,
     }
     metrics.update(_mean_rank_diagnostic_metrics("runtime_agent_act_path_", diag_series))
     return metrics

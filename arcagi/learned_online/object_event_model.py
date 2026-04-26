@@ -49,6 +49,9 @@ class ObjectEventModelConfig:
     failed_action_key_dim: int = 12
     coordinate_noeffect_key_dim: int = 8
     axis_noeffect_key_dim: int = 12
+    action_family_count: int = 8
+    action_family_key_dim: int = 16
+    action_family_temperature: float = 0.25
     outcome_dim: int = OUTCOME_DIM
     delta_dim: int = STATE_DELTA_DIM
 
@@ -104,6 +107,7 @@ class ObjectEventModelOutput:
     rank_logits: torch.Tensor | None = None
     diagnostic_utility_logits: torch.Tensor | None = None
     diagnostic_mix_logit: torch.Tensor | None = None
+    action_family_posterior_features: torch.Tensor | None = None
     candidate_state_attn: torch.Tensor | None = None
     rank_components: RankComponentOutput | None = None
 
@@ -767,6 +771,94 @@ class AxisNoEffectMemoryRank(nn.Module):
         return is_click.squeeze(-1) * self.rank_mlp(features).squeeze(-1)
 
 
+class ActionFamilyBelief(nn.Module):
+    def __init__(
+        self,
+        *,
+        action_feature_dim: int,
+        belief_dim: int,
+        start: int,
+        num_families: int = 8,
+        key_dim: int = 16,
+        temperature: float = 0.25,
+    ) -> None:
+        super().__init__()
+        self.start = int(start)
+        self.num_families = max(int(num_families), 0)
+        self.width = 3 * self.num_families
+        self.stop = self.start + self.width
+        self.belief_dim = int(belief_dim)
+        self.temperature = max(float(temperature), 1.0e-6)
+        hidden = max(int(key_dim), 2)
+        self.action_key = nn.Sequential(
+            nn.LayerNorm(int(action_feature_dim)),
+            nn.Linear(int(action_feature_dim), hidden),
+            nn.Tanh(),
+        )
+        self.prototype = nn.Parameter(torch.randn(self.num_families, hidden) * 0.05)
+
+    def family_probs(self, action_numeric: torch.Tensor) -> torch.Tensor:
+        if self.num_families <= 0:
+            return action_numeric.new_zeros((*action_numeric.shape[:-1], 0))
+        key = self.action_key(action_numeric)
+        logits = torch.einsum("...d,kd->...k", key, self.prototype) / self.temperature
+        return torch.softmax(logits, dim=-1)
+
+    def observed_delta(
+        self,
+        *,
+        selected_action_numeric: torch.Tensor,
+        target_outcome: torch.Tensor,
+    ) -> torch.Tensor:
+        delta = selected_action_numeric.new_zeros((selected_action_numeric.shape[0], self.belief_dim))
+        if self.num_families <= 0 or self.width <= 0:
+            return delta
+        probs = self.family_probs(selected_action_numeric)
+        success = (
+            target_outcome[:, OUT_OBJECTIVE_PROGRESS] + target_outcome[:, OUT_REWARD_PROGRESS]
+        ).clamp(0.0, 1.0).unsqueeze(-1)
+        no_effect = target_outcome[:, OUT_NO_EFFECT_NONPROGRESS].clamp(0.0, 1.0).unsqueeze(-1)
+        k = self.num_families
+        delta[:, self.start : self.start + k] = probs
+        delta[:, self.start + k : self.start + 2 * k] = probs * success
+        delta[:, self.start + 2 * k : self.start + 3 * k] = probs * no_effect
+        return delta
+
+    def posterior_features(
+        self,
+        *,
+        candidate_action_numeric: torch.Tensor,
+        level_belief: torch.Tensor,
+    ) -> torch.Tensor:
+        shape = (*candidate_action_numeric.shape[:2], 4)
+        if self.num_families <= 0 or self.width <= 0:
+            return candidate_action_numeric.new_zeros(shape)
+        probs = self.family_probs(candidate_action_numeric)
+        k = self.num_families
+        counts = level_belief[:, self.start : self.start + k].clamp_min(0.0)
+        successes = level_belief[:, self.start + k : self.start + 2 * k].clamp_min(0.0)
+        no_effects = level_belief[:, self.start + 2 * k : self.start + 3 * k].clamp_min(0.0)
+        alpha = 1.0 + successes
+        beta = 1.0 + no_effects
+        total = (alpha + beta).clamp_min(1.0e-6)
+        mean = alpha / total
+        variance = (alpha * beta) / ((total * total) * (total + 1.0)).clamp_min(1.0e-6)
+        uncertainty = torch.sqrt(variance.clamp_min(0.0))
+        candidate_mean = torch.einsum("bak,bk->ba", probs, mean)
+        candidate_uncertainty = torch.einsum("bak,bk->ba", probs, uncertainty)
+        candidate_count = torch.einsum("bak,bk->ba", probs, counts)
+        candidate_noeffect = torch.einsum("bak,bk->ba", probs, no_effects)
+        return torch.stack(
+            [
+                candidate_mean,
+                candidate_uncertainty,
+                torch.tanh(candidate_count),
+                torch.tanh(candidate_noeffect),
+            ],
+            dim=-1,
+        )
+
+
 class ActionFamilyDiagnosticUtility(nn.Module):
     def __init__(
         self,
@@ -777,7 +869,7 @@ class ActionFamilyDiagnosticUtility(nn.Module):
         dropout: float,
     ) -> None:
         super().__init__()
-        input_dim = int(action_feature_dim) + (2 * int(belief_dim)) + 16
+        input_dim = int(action_feature_dim) + (2 * int(belief_dim)) + 16 + 4
         hidden = max(int(d_model), 16)
         self.utility = nn.Sequential(
             nn.LayerNorm(input_dim),
@@ -797,11 +889,17 @@ class ActionFamilyDiagnosticUtility(nn.Module):
         action_numeric: torch.Tensor,
         session_belief: torch.Tensor,
         level_belief: torch.Tensor,
+        family_posterior_features: torch.Tensor | None = None,
     ) -> torch.Tensor:
         family_features = _action_family_features(action_numeric)
         expanded_session = session_belief[:, None, :].expand(-1, action_numeric.shape[1], -1)
         expanded_level = level_belief[:, None, :].expand(-1, action_numeric.shape[1], -1)
-        features = torch.cat([action_numeric, expanded_session, expanded_level, family_features], dim=-1)
+        if family_posterior_features is None:
+            family_posterior_features = action_numeric.new_zeros((*action_numeric.shape[:2], 4))
+        features = torch.cat(
+            [action_numeric, expanded_session, expanded_level, family_features, family_posterior_features],
+            dim=-1,
+        )
         return self.utility(features).squeeze(-1)
 
 
@@ -1128,16 +1226,27 @@ class ObjectEventModel(nn.Module):
                 for _ in range(int(self.config.action_cross_layers))
             ]
         )
+        requested_family_count = max(int(self.config.action_family_count), 0)
+        family_count = min(requested_family_count, max((d_model - 32) // 3, 0))
+        family_reserved_width = 3 * family_count
+        pre_family_budget = max(d_model - family_reserved_width, 0)
+        relation_key_dim = max(
+            2,
+            min(
+                int(self.config.relation_key_dim),
+                max((pre_family_budget - 16) // 5, 2),
+            ),
+        )
         self.event_relation_memory_rank = EventRelationMemoryRank(
             cue_feature_dim=STATE_NUMERIC_DIM,
             target_feature_dim=ACTION_NUMERIC_DIM,
             outcome_dim=int(self.config.outcome_dim),
             belief_dim=d_model,
-            key_dim=max(2, min(int(self.config.relation_key_dim), max(d_model // 8, 2))),
+            key_dim=relation_key_dim,
             dropout=float(self.config.dropout),
         )
         relation_width = int(self.event_relation_memory_rank.key_dim * 5)
-        available_after_relation = max(d_model - relation_width, 0)
+        available_after_relation = max(pre_family_budget - relation_width, 0)
         axis_width = min(
             max(int(self.config.axis_noeffect_key_dim), 0),
             max(available_after_relation - 4, 0),
@@ -1170,7 +1279,17 @@ class ObjectEventModel(nn.Module):
             width=axis_width,
             dropout=float(self.config.dropout),
         )
-        self.reserved_belief_width = min(int(relation_width + failed_key_dim + coord_width + axis_width), d_model)
+        family_start = relation_width + failed_key_dim + coord_width + axis_width
+        family_count = min(family_count, max((d_model - family_start) // 3, 0))
+        self.action_family_belief = ActionFamilyBelief(
+            action_feature_dim=ACTION_NUMERIC_DIM,
+            belief_dim=d_model,
+            start=family_start,
+            num_families=family_count,
+            key_dim=int(self.config.action_family_key_dim),
+            temperature=float(self.config.action_family_temperature),
+        )
+        self.reserved_belief_width = min(int(family_start + self.action_family_belief.width), d_model)
         self.candidate_state_compat = CandidateStateCompatibility(d_model, float(self.config.dropout))
         self.raw_candidate_rank = RawCandidateStateRank(
             d_model,
@@ -1287,10 +1406,15 @@ class ObjectEventModel(nn.Module):
             session_belief=session_belief,
             level_belief=level_belief,
         )
+        action_family_posterior_features = self.action_family_belief.posterior_features(
+            candidate_action_numeric=action_numeric,
+            level_belief=level_belief,
+        )
         diagnostic_utility_logits = self.action_family_diagnostic_utility(
             action_numeric=action_numeric,
             session_belief=session_belief,
             level_belief=level_belief,
+            family_posterior_features=action_family_posterior_features,
         )
         diagnostic_mix_logit = self.diagnostic_mix_head(
             self._diagnostic_mix_features(
@@ -1310,6 +1434,7 @@ class ObjectEventModel(nn.Module):
             rank_logits=rank_logits,
             diagnostic_utility_logits=diagnostic_utility_logits,
             diagnostic_mix_logit=diagnostic_mix_logit,
+            action_family_posterior_features=action_family_posterior_features,
             candidate_state_attn=candidate_state_attn,
             rank_components=rank_components,
         )
@@ -1468,11 +1593,16 @@ class ObjectEventModel(nn.Module):
                 selected_action_numeric=chosen_action,
                 no_effect_gate=target_outcome[:, OUT_NO_EFFECT_NONPROGRESS],
             )
+            action_family_delta = self.action_family_belief.observed_delta(
+                selected_action_numeric=chosen_action,
+                target_outcome=target_outcome,
+            )
         else:
             direct = raw_context.new_zeros((raw_context.shape[0], self.config.d_model))
             failed_action_delta = raw_context.new_zeros((raw_context.shape[0], self.config.d_model))
             coordinate_noeffect_delta = raw_context.new_zeros((raw_context.shape[0], self.config.d_model))
             axis_noeffect_delta = raw_context.new_zeros((raw_context.shape[0], self.config.d_model))
+            action_family_delta = raw_context.new_zeros((raw_context.shape[0], self.config.d_model))
         learned = self.observed_event_belief_encoder(torch.cat([raw_context, event], dim=-1))
         learned = 0.05 * learned
         reserved_width = min(int(self.reserved_belief_width), learned.shape[1])
@@ -1486,6 +1616,7 @@ class ObjectEventModel(nn.Module):
             + failed_action_delta
             + coordinate_noeffect_delta
             + axis_noeffect_delta
+            + action_family_delta
             + learned * (0.5 + no_effect_gate)
         )
         return ObservedEventBeliefDelta(session_delta=session_delta, level_delta=level_delta)
