@@ -6107,3 +6107,53 @@ Diagnostics-patch gate result:
   - the old aggregate diversity failure is mostly explained away; failed-level behavior is non-collapsed under the conditional metric
   - the remaining issue is specifically the post-no-effect window uniqueness target
   - this target may itself be confounded because a one-action recovery window has maximum uniqueness `1`; ask GPT-Pro before changing model or running ARC
+
+GPT-Pro follow-up on the post-no-effect uniqueness gate:
+
+- the raw `post_noeffect_unique_action_count_mean >= 2.0` gate is invalid/confounded because a one-action recovery or horizon end has maximum uniqueness `1`
+- replace that hard gate with:
+  - `runtime_agent_act_path_post_noeffect_next_action_same_mapped_col_rate <= 0.65`
+  - `runtime_agent_act_path_post_noeffect_next_action_same_x_rate <= 0.70`
+  - `runtime_agent_act_path_post_noeffect_rank_recovery_success_rate >= 0.35`
+- optional future metric: normalized `post_noeffect_unique_action_fraction = len(set(window)) / realized_window_length`, gate `>= 0.75`
+- current synthetic artifact passes the corrected synthetic hygiene gate and was approved for exactly one labeled 48-step ARC hygiene probe
+
+48-step ARC hygiene probe result:
+
+- command:
+  - `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent learned_online_object_event --checkpoint-path artifacts\object_event_basis_recovery_runtime_probe.pkl --mode offline --game-limit 1 --max-steps 48 --progress-every 8 --object-event-bridge-diagnostics`
+- result:
+  - `success = false`
+  - `won = false`
+  - `return = 0.0`
+  - `levels_completed = 0`
+  - `steps = 48`
+- compliance passed:
+  - `legal_action_count = 447`
+  - `scored_action_count = 447`
+  - `object_event_legal_action_count = 447`
+  - `object_event_scored_action_count = 447`
+  - `object_event_action_surface_capped = false`
+  - `object_event_oracle_support_used = false`
+  - `object_event_trace_replay_used = false`
+  - `object_event_graph_controller_used = false`
+  - `object_event_metadata_input_forbidden_count = 0`
+  - `object_event_online_update_count = 48`
+  - `runtime_diagnostic_mix_effective = 0.1061375955960635`
+  - `runtime_rank_weight_effective = 0.8938624044039365`
+- behavioral hygiene failed:
+  - `max_same_action_streak = 36`
+  - `max_same_click_x_streak = 36`
+  - `max_same_mapped_col_streak = 36`
+  - `unique_action_count = 6`
+  - `unique_click_x_count = 5`
+  - `unique_mapped_col_count = 5`
+  - `post_noeffect_next_action_same_x_rate = 0.8723404255319149`
+  - `post_noeffect_next_action_same_mapped_col_rate = 0.8723404255319149`
+  - `top_score_same_mapped_col_fraction = 0.9756944444444444`
+  - action histogram concentrated on `click:31:61` for `37/48` steps
+- interpretation:
+  - do not run 320-step ARC acquisition
+  - real ARC collapse returned despite synthetic failed-level diversity passing
+  - next diagnosis should inspect real click-to-grid mapping, action token rows, and top-score/rank components for the repeated click column
+  - do not add hard no-repeat / avoid-column / count-based exploration control

@@ -1304,3 +1304,30 @@ Operator actions recorded for continuity:
    - do not run real ARC yet under the agreed gate
    - commit and push the diagnostics patch plus updated artifact
    - ask GPT-Pro whether the post-no-effect uniqueness target is a genuine failure or still confounded by one-action recovery / horizon truncation
+
+6. Pushed `d14d447` and asked GPT-Pro about the post-no-effect uniqueness gate. Consensus:
+   - raw `post_noeffect_unique_action_count_mean >= 2.0` is invalid/confounded
+   - replace it with same-x/same-column repeat rates plus rank recovery success
+   - current synthetic result passes the corrected synthetic hygiene gate
+   - run exactly one labeled 48-step ARC hygiene probe
+   - do not run 320-step acquisition before the 48-step hygiene passes
+7. 48-step ARC hygiene probe:
+   - command: `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent learned_online_object_event --checkpoint-path artifacts\object_event_basis_recovery_runtime_probe.pkl --mode offline --game-limit 1 --max-steps 48 --progress-every 8 --object-event-bridge-diagnostics`
+   - result: failed hygiene
+   - no reward, no level completion, no win
+   - compliance passed: full `447` scoring, no action cap, no oracle, no trace replay, no graph controller, no metadata leakage, online updates `48`
+   - behavior failed:
+     - `max_same_action_streak = 36`
+     - `max_same_click_x_streak = 36`
+     - `max_same_mapped_col_streak = 36`
+     - `unique_action_count = 6`
+     - `unique_click_x_count = 5`
+     - `unique_mapped_col_count = 5`
+     - `post_noeffect_next_action_same_x_rate = 0.8723404255319149`
+     - `post_noeffect_next_action_same_mapped_col_rate = 0.8723404255319149`
+     - `top_score_same_mapped_col_fraction = 0.9756944444444444`
+     - action histogram repeated `click:31:61` for `37/48` steps
+8. Current conclusion:
+   - do not run 320-step ARC
+   - real ARC still collapses into a single click column/action despite corrected synthetic hygiene
+   - next step is a diagnosis of real click mapping/action-token/rank-component mismatch, not another hard diversity controller
