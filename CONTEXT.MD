@@ -6197,3 +6197,69 @@ Rank-trace diagnosis after the 48-step hygiene failure:
 - next execution slice:
   - commit and push the passive trace patch plus docs
   - consult GPT-Pro with commit hash, trace summary, and exact failure category before changing runtime behavior or training objectives
+
+## 2026-04-26 No-Effect Contradiction Gate Attempt
+
+GPT-Pro consensus after pushed trace `e05f9ce`:
+
+- failure category is learned rank-component/calibration failure under real observations
+- not a click mapping bug, not diagnostic utility, not missing no-effect evidence
+- minimum next intervention: add a learned no-effect contradiction gate over model/belief evidence, train it on real-failure-shaped synthetic cases, and gate future artifacts on a rank-trace-style contradiction criterion
+- explicitly still forbidden: hard no-repeat, avoid-column masks, action blacklists, least-visited/untried bonuses, basis inverse-count runtime bonuses, graph/frontier/coverage search, fixed sweeps/probes, trace replay, state-hash lookup, per-game logic, action caps, and using rank trace as runtime input
+
+Implemented first attempt:
+
+- model:
+  - added `NoEffectContradictionGate` in `arcagi/learned_online/object_event_model.py`
+  - `ObjectEventModelOutput` now carries `noeffect_contradiction_gate` and `noeffect_contradiction_penalty`
+  - `rank_logits = rank_score_head + rank_components.total - noeffect_contradiction_penalty`
+  - every legal action remains finite-scored; no action availability or action mask changes
+- trainer:
+  - added `--noeffect-contradiction-cases`
+  - added `--noeffect-contradiction-loss-weight`
+  - added `--noeffect-contradiction-margin-weight`
+  - added synthetic contradiction mask/loss/metrics using predicted no-effect, synthetic candidate no-effect target, level-local basis/family no-effect posterior, and relation failed-column masks
+- diagnostics:
+  - agent diagnostics and rank trace include no-effect contradiction gate/penalty
+  - runtime act-path metrics include contradicted top-1 rate and top-action gate/penalty means
+- verification:
+  - `py_compile` passed
+  - focused parametric/agent tests: `60 passed`
+  - full object-event suite: `114 passed`
+  - recurrent suite: `31 passed`
+  - 2-step full-447 smoke completed and emitted contradiction metrics
+
+Full synthetic gate command:
+
+- `python scripts\train_learned_online_object_event.py --mode synthetic_active_online_object_event --curriculum latent_rule_variable_palette --state-source extracted --action-surface arc_scale_parametric --action-surface-size 447 --coordinate-grid-size 64 --empty-click-fraction 0.80 --positive-region-radius 1 --seed 0 --steps 220 --batch-size 8 --train-sessions 48 --heldout-sessions 48 --levels-per-session 3 --max-distractors 2 --palette-size 8 --require-role-balanced-colors --max-steps-per-level 5 --axis-noeffect-cases 0.25 --relation-contradiction-cases 0.25 --diagnostic-utility-cases 0.25 --action-basis-diagnostic-cases 0.25 --action-basis-diagnostic-loss-weight 0.10 --action-basis-postfailure-margin-weight 0.05 --diagnostic-recovery-loss-weight 0.35 --diagnostic-recovery-margin-weight 0.20 --noeffect-contradiction-cases 0.25 --noeffect-contradiction-loss-weight 0.20 --noeffect-contradiction-margin-weight 0.20 --eval-every 55 --eval-runtime-agent --save-best --selection-metric runtime_agent_act_path_balanced_score --save-path artifacts\object_event_noeffect_contradiction_runtime_probe.pkl`
+
+Result:
+
+- artifact: `artifacts/object_event_noeffect_contradiction_runtime_probe.pkl`
+- saved best step: `110`
+- balanced score: `1.066167861409797`
+- compliance:
+  - full `447` scored
+  - `metadata_model_input_forbidden_count = 0`
+  - `object_event_action_surface_capped = false`
+  - no oracle, trace replay, graph controller
+- old competence/hygiene mostly passed:
+  - `runtime_agent_act_path_active_success_within_5 = 0.8125`
+  - `runtime_agent_act_path_active_success_within_3 = 0.8125`
+  - `runtime_agent_act_path_next_level_first_try_acc = 0.6666666666666666`
+  - `runtime_agent_act_path_failed_level_count = 9.0`
+  - `runtime_agent_act_path_failed_level_unique_action_count_mean = 2.7777777777777777`
+  - `runtime_agent_act_path_failed_level_max_same_action_streak_max = 4.0`
+  - `runtime_agent_act_path_post_noeffect_next_action_same_mapped_col_rate = 0.288135593220339`
+  - `runtime_agent_act_path_post_noeffect_next_action_same_x_rate = 0.2542372881355932`
+  - `runtime_agent_act_path_post_noeffect_rank_recovery_success_rate = 0.3898305084745763`
+- new contradiction gate failed:
+  - `runtime_agent_act_path_contradicted_top1_rate = 0.3225806451612903`
+  - target was `<= 0.10`
+  - `runtime_agent_act_path_noeffect_contradiction_gate_top_mean = 0.6811418110324491`
+  - `runtime_agent_act_path_noeffect_contradiction_penalty_top_mean = 0.9830865456211951`
+  - `runtime_agent_act_path_top_score_same_mapped_col_fraction = 0.7246376811594203`
+- interpretation:
+  - do not run real ARC from this artifact
+  - the mechanism is active and does not break the older synthetic gate, but the top selected action can still be contradicted by no-effect evidence too often
+  - next likely issue is loss/selection pressure or where the gate is applied, but consult GPT-Pro again before changing model/training

@@ -120,6 +120,8 @@ class ObjectEventModelOutput:
     action_basis_posterior_features: torch.Tensor | None = None
     candidate_state_attn: torch.Tensor | None = None
     rank_components: RankComponentOutput | None = None
+    noeffect_contradiction_gate: torch.Tensor | None = None
+    noeffect_contradiction_penalty: torch.Tensor | None = None
 
 
 @dataclass(frozen=True)
@@ -1059,6 +1061,69 @@ class ActionFamilyDiagnosticUtility(nn.Module):
         return self.utility(features).squeeze(-1)
 
 
+class NoEffectContradictionGate(nn.Module):
+    def __init__(self, *, d_model: int, dropout: float) -> None:
+        super().__init__()
+        input_dim = 15
+        hidden = max(int(d_model) // 2, 32)
+        self.net = nn.Sequential(
+            nn.LayerNorm(input_dim),
+            nn.Linear(input_dim, hidden),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden, 2),
+        )
+        self.penalty_scale_raw = nn.Parameter(torch.tensor(1.0))
+        nn.init.zeros_(self.net[-1].weight)
+        nn.init.zeros_(self.net[-1].bias)
+
+    def forward(
+        self,
+        *,
+        basis_features: torch.Tensor,
+        family_features: torch.Tensor,
+        outcome_logits: torch.Tensor,
+        rank_components: RankComponentOutput,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        no_effect_prob = torch.sigmoid(outcome_logits[..., OUT_NO_EFFECT_NONPROGRESS]).unsqueeze(-1)
+        component_features = torch.stack(
+            [
+                rank_components.base,
+                rank_components.relation,
+                rank_components.failed_action,
+                rank_components.coordinate_noeffect,
+                rank_components.axis_noeffect,
+            ],
+            dim=-1,
+        )
+        relation_minus_noeffect = (
+            rank_components.relation
+            - rank_components.failed_action
+            - rank_components.coordinate_noeffect
+            - rank_components.axis_noeffect
+        ).unsqueeze(-1)
+        features = torch.cat(
+            [
+                basis_features,
+                family_features,
+                no_effect_prob,
+                relation_minus_noeffect,
+                component_features,
+            ],
+            dim=-1,
+        )
+        raw = self.net(features)
+        gate = torch.sigmoid(raw[..., 0])
+        penalty_fraction = torch.sigmoid(raw[..., 1])
+        posterior_noeffect = torch.maximum(
+            basis_features[..., 3].clamp(0.0, 1.0),
+            family_features[..., 3].clamp(0.0, 1.0),
+        )
+        evidence = (no_effect_prob.squeeze(-1).clamp(0.0, 1.0) * posterior_noeffect).clamp(0.0, 1.0)
+        penalty = _bounded_scale(self.penalty_scale_raw, 4.0) * gate * penalty_fraction * (0.25 + 0.75 * evidence)
+        return gate, penalty
+
+
 class RawCandidateStateRank(nn.Module):
     def __init__(
         self,
@@ -1481,6 +1546,10 @@ class ObjectEventModel(nn.Module):
             d_model=d_model,
             dropout=float(self.config.dropout),
         )
+        self.noeffect_contradiction_gate = NoEffectContradictionGate(
+            d_model=d_model,
+            dropout=float(self.config.dropout),
+        )
         self.diagnostic_mix_head = nn.Sequential(
             nn.LayerNorm((2 * d_model) + 8),
             nn.Linear((2 * d_model) + 8, d_model),
@@ -1607,7 +1676,17 @@ class ObjectEventModel(nn.Module):
                 action_mask=action_mask,
             )
         ).squeeze(-1)
-        rank_logits = self.rank_score_head(adapted).squeeze(-1) + rank_components.total
+        noeffect_contradiction_gate, noeffect_contradiction_penalty = self.noeffect_contradiction_gate(
+            basis_features=action_basis_posterior_features,
+            family_features=action_family_posterior_features,
+            outcome_logits=outcome_logits,
+            rank_components=rank_components,
+        )
+        rank_logits = (
+            self.rank_score_head(adapted).squeeze(-1)
+            + rank_components.total
+            - noeffect_contradiction_penalty
+        )
         return ObjectEventModelOutput(
             outcome_logits=outcome_logits,
             delta_pred=delta_pred,
@@ -1623,6 +1702,8 @@ class ObjectEventModel(nn.Module):
             action_basis_posterior_features=action_basis_posterior_features,
             candidate_state_attn=candidate_state_attn,
             rank_components=rank_components,
+            noeffect_contradiction_gate=noeffect_contradiction_gate,
+            noeffect_contradiction_penalty=noeffect_contradiction_penalty,
         )
 
     def _diagnostic_mix_features(

@@ -570,6 +570,8 @@ def test_object_event_rank_trace_topk_contains_finite_component_values() -> None
             "component_relation",
             "component_coordinate_noeffect",
             "component_axis_noeffect",
+            "noeffect_contradiction_gate",
+            "noeffect_contradiction_penalty",
             "basis_noeffect",
         ):
             assert np.isfinite(float(record[key]))
@@ -586,6 +588,29 @@ def test_action_numeric_decode_matches_click_to_grid_mapping() -> None:
 
     assert click_records
     assert all(record["action_token"]["mapping_match"] is True for record in click_records)
+
+
+def test_noeffect_contradiction_diagnostics_are_model_scores_not_controller_state() -> None:
+    level = _parametric_level()
+    observation = level_to_grid_observation(level)
+    agent = LearnedOnlineObjectEventAgent(seed=39, device="cpu", temperature=0.1, epsilon_floor=0.0)
+
+    agent.act(observation)
+    diagnostics = agent.diagnostics()
+    trace = agent.object_event_rank_trace(observation.available_actions, top_k=4)
+
+    for key in (
+        "noeffect_contradiction_gate_mean",
+        "noeffect_contradiction_gate_selected",
+        "noeffect_contradiction_penalty_mean",
+        "noeffect_contradiction_penalty_selected",
+    ):
+        assert key in diagnostics
+        assert np.isfinite(float(diagnostics[key]))
+    assert trace["top_actions"][0]["noeffect_contradiction_gate"] >= 0.0
+    assert trace["top_actions"][0]["noeffect_contradiction_penalty"] >= 0.0
+    for forbidden in ("tried_actions", "blocked_actions", "action_blacklist", "avoid_column", "frontier", "coverage_queue"):
+        assert not hasattr(agent, forbidden)
 
 
 def test_harness_rank_trace_writes_jsonl_without_replay_or_action_change(tmp_path: Path) -> None:

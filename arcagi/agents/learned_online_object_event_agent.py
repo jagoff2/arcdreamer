@@ -499,6 +499,8 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             "runtime_uncertainty_diagnostic_utility": True,
             "runtime_bounded_diagnostic_mix": True,
             "runtime_diagnostic_mix_max": 0.35,
+            "runtime_learned_noeffect_contradiction_gate": True,
+            "runtime_noeffect_contradiction_controller": False,
             "runtime_greedy_rank_selection": True,
             "trace_bootstrap_used": bool(trace_bootstrap_used),
             "trace_bootstrap_transition_count": int(trace_bootstrap_transition_count),
@@ -652,6 +654,12 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
                 return np.zeros_like(values("total"))
             return tensor[0].detach().cpu().numpy().astype(np.float64)
 
+        def output_values(name: str) -> np.ndarray:
+            tensor = getattr(output, name, None)
+            if tensor is None:
+                return np.zeros_like(values("total"))
+            return tensor[0].detach().cpu().numpy().astype(np.float64)
+
         stats: dict[str, object] = {}
         for name in ("base", "relation", "failed_action", "coordinate_noeffect", "axis_noeffect", "total"):
             raw = values(name)
@@ -676,6 +684,25 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         boost = getattr(components, "noeffect_boost", None)
         if boost is not None:
             stats["rank_component_noeffect_boost_mean"] = float(np.mean(boost.detach().cpu().numpy().astype(np.float64)))
+        for name in ("noeffect_contradiction_gate", "noeffect_contradiction_penalty"):
+            raw = output_values(name)
+            active = raw[valid]
+            stats[f"{name}_mean"] = float(np.mean(active)) if active.size else 0.0
+            stats[f"{name}_std"] = float(np.std(active)) if active.size else 0.0
+            if active.size:
+                valid_indices = np.flatnonzero(valid)
+                top_index = int(valid_indices[int(np.argmax(active))])
+                stats[f"{name}_top_action"] = action_tuple[top_index]
+        selected_action = self.last_decision.action if self.last_decision is not None else ""
+        if selected_action in action_tuple:
+            selected_index = int(action_tuple.index(selected_action))
+            stats["noeffect_contradiction_gate_selected"] = float(output_values("noeffect_contradiction_gate")[selected_index])
+            stats["noeffect_contradiction_penalty_selected"] = float(
+                output_values("noeffect_contradiction_penalty")[selected_index]
+            )
+        else:
+            stats["noeffect_contradiction_gate_selected"] = 0.0
+            stats["noeffect_contradiction_penalty_selected"] = 0.0
         relation = getattr(self.model, "event_relation_memory_rank", None)
         if relation is not None:
             stats["relation_object_prior_scale"] = float(2.0 * torch.sigmoid(relation.object_prior_scale_raw).detach().cpu())
@@ -1027,6 +1054,8 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             "relation_negative_prior": self._rank_component_value(components, "relation_negative_prior", index),
             "relation_repeat_penalty": self._rank_component_value(components, "relation_repeat_penalty", index),
             "relation_contradiction_gate": self._rank_component_value(components, "relation_contradiction_gate", index),
+            "noeffect_contradiction_gate": self._output_value(output, "noeffect_contradiction_gate", index),
+            "noeffect_contradiction_penalty": self._output_value(output, "noeffect_contradiction_penalty", index),
             "out_no_effect_prob": float(outcome_probs[index, OUT_NO_EFFECT_NONPROGRESS]),
             "value": float(value),
             "action_token": self._decode_action_numeric_row(state, action, action_numeric[index]),
@@ -1042,6 +1071,12 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
 
     def _rank_component_value(self, components, name: str, index: int) -> float:
         tensor = getattr(components, name, None) if components is not None else None
+        if tensor is None:
+            return 0.0
+        return float(tensor[0, int(index)].detach().cpu())
+
+    def _output_value(self, output, name: str, index: int) -> float:
+        tensor = getattr(output, name, None)
         if tensor is None:
             return 0.0
         return float(tensor[0, int(index)].detach().cpu())

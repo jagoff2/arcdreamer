@@ -1372,3 +1372,50 @@ Operator actions recorded for continuity:
    - diagnostic utility is not causing the repeated action
    - likely failure is learned rank-component/calibration: strong no-effect evidence exists but does not dominate relation/object and coordinate/rank terms under real ARC observations
    - commit and push this diagnostic patch, then consult GPT-Pro before any model/training/runtime change
+
+## 2026-04-26 No-Effect Contradiction Gate Attempt
+
+Operator actions recorded for continuity:
+
+1. Pushed rank trace diagnostic commit `e05f9ce` and consulted GPT-Pro.
+2. GPT-Pro consensus:
+   - failure is learned rank-component/calibration under real observations
+   - not mapping, diagnostic utility, or missing no-effect evidence
+   - next patch should be a learned no-effect contradiction gate trained on synthetic real-failure-shaped cases
+   - still no hard no-repeat, avoid-column, blacklist, least-visited/untried bonus, graph/frontier/search, fixed sweep/probe, trace replay, state-hash lookup, per-game logic, or action caps
+3. Implemented first attempt:
+   - `NoEffectContradictionGate`
+   - output fields `noeffect_contradiction_gate` and `noeffect_contradiction_penalty`
+   - rank logits subtract the learned penalty while preserving full finite scoring
+   - trainer flags and losses: `--noeffect-contradiction-cases`, `--noeffect-contradiction-loss-weight`, `--noeffect-contradiction-margin-weight`
+   - agent diagnostics and rank trace include the gate and penalty
+4. Verification:
+   - `py_compile` passed
+   - focused parametric/agent tests: `60 passed`
+   - full object-event suite: `114 passed`
+   - recurrent suite: `31 passed`
+   - 2-step full-447 training smoke completed and emitted contradiction metrics
+5. Full 447-action synthetic gate:
+   - artifact: `artifacts/object_event_noeffect_contradiction_runtime_probe.pkl`
+   - saved best step: `110`
+   - balanced score: `1.066167861409797`
+   - compliance passed: full `447` scoring, no metadata leakage, no action cap, no oracle, no trace replay, no graph controller
+   - old competence/hygiene mostly passed:
+     - within-5 `0.8125`
+     - within-3 `0.8125`
+     - next-level first try `0.6666666666666666`
+     - failed-level unique actions `2.7777777777777777`
+     - failed-level max same-action streak `4.0`
+     - post-no-effect same mapped column `0.288135593220339`
+     - post-no-effect same x `0.2542372881355932`
+     - post-no-effect rank recovery `0.3898305084745763`
+   - new contradiction gate failed:
+     - contradicted top-1 `0.3225806451612903`
+     - target `<= 0.10`
+     - top contradiction gate mean `0.6811418110324491`
+     - top contradiction penalty mean `0.9830865456211951`
+     - top-score same mapped column `0.7246376811594203`
+6. Current conclusion:
+   - do not run real ARC from `artifacts/object_event_noeffect_contradiction_runtime_probe.pkl`
+   - the gate is active and did not break the older synthetic gate, but it did not suppress contradicted top actions enough
+   - commit/push the failed attempt honestly, then ask GPT-Pro whether to retune loss weights, change checkpoint selection pressure, or move the gate deeper into rank-component composition

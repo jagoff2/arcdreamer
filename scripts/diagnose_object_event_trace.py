@@ -71,6 +71,8 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "relation_positive_prior",
         "relation_repeat_penalty",
         "relation_contradiction_gate",
+        "noeffect_contradiction_gate",
+        "noeffect_contradiction_penalty",
         "basis_noeffect",
         "basis_uncertainty",
         "family_noeffect",

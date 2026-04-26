@@ -503,6 +503,58 @@ def test_component_gating_keeps_all_actions_legal_and_finite_after_noeffect_colu
         assert not hasattr(model, forbidden)
 
 
+def test_noeffect_contradiction_penalty_increases_after_noeffect_evidence_without_masking() -> None:
+    level = _parametric_level(seed=228)
+    example = level.example
+    failed = _failed_click_index(example)
+    model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
+    model.eval()
+    tensors = _batch_to_tensors(collate_object_event_examples((example,)), device=torch.device("cpu"))
+    zero = torch.zeros((1, model.config.d_model), dtype=torch.float32)
+    before = model(**tensors["inputs"], level_belief=zero)
+    deltas = model.observed_event_belief_deltas(
+        before,
+        target_outcome=tensors["candidate_outcome_targets"][:, failed],
+        target_delta=tensors["candidate_delta_targets"][:, failed],
+        actual_action_index=torch.as_tensor([failed], dtype=torch.long),
+        state_numeric=tensors["inputs"]["state_numeric"],
+        state_type_ids=tensors["inputs"]["state_type_ids"],
+        state_mask=tensors["inputs"]["state_mask"],
+        action_numeric=tensors["inputs"]["action_numeric"],
+    )
+    after = model(**tensors["inputs"], level_belief=deltas.level_delta)
+
+    assert before.noeffect_contradiction_gate is not None
+    assert before.noeffect_contradiction_penalty is not None
+    assert after.noeffect_contradiction_gate is not None
+    assert after.noeffect_contradiction_penalty is not None
+    assert after.noeffect_contradiction_penalty.shape[-1] == 447
+    assert float(after.noeffect_contradiction_penalty[0, failed].detach()) > float(
+        before.noeffect_contradiction_penalty[0, failed].detach()
+    )
+    logits = policy_rank_logits_from_predictions(after, tensors["action_mask"])
+    assert torch.isfinite(logits[tensors["action_mask"]]).all()
+    assert int(tensors["action_mask"].sum().detach()) == 447
+
+
+def test_noeffect_contradiction_penalty_subtracts_from_rank_without_action_mask() -> None:
+    level = _parametric_level(seed=229)
+    tensors = _batch_to_tensors(collate_object_event_examples((level.example,)), device=torch.device("cpu"))
+    model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
+    model.eval()
+
+    output = model(**tensors["inputs"])
+    assert output.rank_components is not None
+    assert output.noeffect_contradiction_penalty is not None
+    raw_rank = model.rank_score_head(output.action_repr).squeeze(-1) + output.rank_components.total
+
+    assert torch.allclose(output.rank_logits, raw_rank - output.noeffect_contradiction_penalty, atol=1.0e-5)
+    assert output.rank_logits.shape[-1] == 447
+    assert torch.isfinite(output.rank_logits[tensors["action_mask"]]).all()
+    for forbidden in ("tried_actions", "blocked_actions", "action_blacklist", "avoid_column", "frontier", "coverage_queue"):
+        assert not hasattr(model, forbidden)
+
+
 def test_diagnostic_utility_logits_present_and_full_surface() -> None:
     level = _parametric_level(seed=218)
     tensors = _batch_to_tensors(collate_object_event_examples((level.example,)), device=torch.device("cpu"))
