@@ -1101,3 +1101,53 @@ Operator actions recorded for continuity:
    - this is not ARC-ready and no real ARC probe should be run from this artifact
    - the patch created a valid learned/evidence-updated substrate, but the learned family prototypes/targets collapse to one effective selected family in the true act path
    - next step is to commit/push the failed prototype honestly and ask GPT-Pro whether to add prototype assignment regularization, contrastive family prediction, a different family parameterization, or a sharper diagnostic target
+
+## 2026-04-26 Family-Assignment Regularization Failure
+
+Operator actions recorded for continuity:
+
+1. Consulted GPT-Pro after pushing `b0f8b3e`. Consensus:
+   - keep the soft family-belief substrate
+   - add training-only contrastive family assignment, full-surface load balancing, entropy/sharpness pressure, and post-failure diagnostic margins
+   - do not add deterministic hash/RFF family features yet
+   - do not add ensembles yet
+   - do not add least-visited/untried/avoid-family controller rules, fixed diversity rules, avoid-column masks, sweeps, frontiers, replay, graph-search control, or per-game behavior
+2. Implemented:
+   - full-surface `action_family_logits` and `action_family_probs`
+   - runtime family-assignment diagnostics
+   - `--family-balance-loss-weight`
+   - `--family-contrastive-loss-weight`
+   - `--family-sharpness-loss-weight`
+   - `--family-postfailure-margin-weight`
+   - selected-family-overlap target penalty and different-family post-failure margin loss
+3. Verification before the long gate:
+   - `py_compile` passed
+   - focused parametric/agent tests: `41 passed`
+   - full object-event suite: `95 passed`
+   - recurrent suite: `31 passed`
+   - 2-step smoke emitted finite family-assignment metrics
+4. 447-action regularized family gate:
+   - command used `--steps 220 --eval-every 55 --family-balance-loss-weight 0.05 --family-contrastive-loss-weight 0.10 --family-sharpness-loss-weight 0.02 --family-postfailure-margin-weight 0.20`
+   - selection metric was `runtime_agent_act_path_selected_unique_family_count`
+   - artifact: `artifacts/object_event_family_regularized_runtime_probe.pkl`
+   - full `447` scoring and no leakage
+5. Gate result:
+   - failed
+   - best selected unique family count was step `55`: `1.8958333333333333`
+   - final step `220`:
+     - `runtime_agent_act_path_active_success_within_5 = 0.4375`
+     - `runtime_agent_act_path_active_success_within_3 = 0.4375`
+     - `runtime_agent_act_path_next_level_first_try_acc = 0.3333333333333333`
+     - `runtime_agent_act_path_selected_unique_family_count = 1.625`
+     - `runtime_agent_act_path_selected_family_entropy = 0.31177332107019007`
+     - `runtime_agent_act_path_unique_action_count_mean = 2.2291666666666665`
+     - `runtime_agent_act_path_selected_unique_mapped_col_count = 2.0416666666666665`
+     - `runtime_agent_act_path_top_score_same_mapped_col_fraction = 0.7313296903460836`
+     - `runtime_agent_act_path_family_assignment_effective_count = 3.3459513043083082`
+     - `runtime_agent_act_path_family_assignment_usage_max = 0.6951802292269035`
+6. Current conclusion:
+   - this is not ARC-ready and no real ARC run should be made from this artifact
+   - assignment regularization mildly improves diagnostics but does not create enough true act-path diversity
+   - final synthetic competence regressed, so the objective is not aligned enough
+   - commit/push the failed attempt honestly, then ask GPT-Pro for the next mechanism before changing code
+   - remember the user's note: `48` ARC steps is only a harsh hygiene/collapse cutoff, not a real online-learning competence budget; a prior real ARC win reportedly took about `300` steps

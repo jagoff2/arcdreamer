@@ -381,10 +381,13 @@ def test_object_event_agent_parametric_no_effect_update_keeps_failed_action_scor
     assert "diagnostic_mix_model_value" in diagnostics
     assert "action_family_belief_uncertainty_mean" in diagnostics
     assert "action_family_belief_noeffect_mean" in diagnostics
+    assert "family_assignment_effective_count" in diagnostics
+    assert "family_assignment_usage_max" in diagnostics
     assert np.isfinite(float(diagnostics["rank_component_gate_relation"]))
     assert np.isfinite(float(diagnostics["relation_object_prior_scale"]))
     assert np.isfinite(float(diagnostics["runtime_learned_diagnostic_utility_std"]))
     assert np.isfinite(float(diagnostics["action_family_belief_uncertainty_mean"]))
+    assert np.isfinite(float(diagnostics["family_assignment_effective_count"]))
     assert 0.0 <= float(diagnostics["runtime_diagnostic_mix"]) <= 1.0
     assert after[failed_action].score != before[failed_action].score
     for forbidden in (

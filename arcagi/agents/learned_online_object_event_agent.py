@@ -666,6 +666,32 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             stats["action_family_belief_noeffect_mean"] = 0.0
             stats["action_family_belief_uncertainty_top_value"] = 0.0
             stats["action_family_belief_noeffect_top_value"] = 0.0
+        family_probs = getattr(output, "action_family_probs", None)
+        if family_probs is not None and family_probs.shape[-1] > 0:
+            probs = family_probs[0].detach().cpu().numpy().astype(np.float64)
+            active = probs[valid]
+            if active.size:
+                usage = np.mean(active, axis=0)
+                usage = usage / max(float(np.sum(usage)), 1.0e-12)
+                surface_entropy = -float(np.sum(usage * np.log(np.clip(usage, 1.0e-12, 1.0))))
+                per_action_entropy = -np.sum(active * np.log(np.clip(active, 1.0e-12, 1.0)), axis=-1)
+                stats["family_assignment_surface_entropy"] = surface_entropy
+                stats["family_assignment_per_action_entropy"] = float(np.mean(per_action_entropy))
+                stats["family_assignment_usage_min"] = float(np.min(usage))
+                stats["family_assignment_usage_max"] = float(np.max(usage))
+                stats["family_assignment_effective_count"] = float(np.exp(surface_entropy))
+            else:
+                stats["family_assignment_surface_entropy"] = 0.0
+                stats["family_assignment_per_action_entropy"] = 0.0
+                stats["family_assignment_usage_min"] = 0.0
+                stats["family_assignment_usage_max"] = 0.0
+                stats["family_assignment_effective_count"] = 0.0
+        else:
+            stats["family_assignment_surface_entropy"] = 0.0
+            stats["family_assignment_per_action_entropy"] = 0.0
+            stats["family_assignment_usage_min"] = 0.0
+            stats["family_assignment_usage_max"] = 0.0
+            stats["family_assignment_effective_count"] = 0.0
         for name in (
             "relation_object_prior",
             "relation_positive_prior",

@@ -5854,3 +5854,71 @@ Current interpretation:
 - do not run real ARC from this artifact
 - next likely issue is family prototype/assignment training or target sharpness, not absence of a family-belief memory substrate
 - consult GPT-Pro before another mechanism change
+
+## 2026-04-26 Family-Assignment Regularization Failure
+
+GPT-Pro consensus before this patch:
+
+- keep the soft action-family belief substrate
+- add training-only contrastive family-assignment losses over the full legal action surface
+- add prototype usage/load-balance regularization and entropy/sharpness pressure
+- add a sharper post-failure diagnostic margin against the selected no-effect family
+- do not add deterministic RFF/hash features yet
+- do not add ensembles yet
+- do not add least-visited/untried/avoid-family controller rules, hard diversity rules, avoid-column masks, sweeps, frontiers, replay, graph-search control, or per-game behavior
+
+Implemented:
+
+- `ObjectEventModelOutput` exposes full-surface `action_family_logits` and `action_family_probs`
+- `ActionFamilyBelief` exposes `family_logits(...)` separately from `family_probs(...)`
+- runtime diagnostics expose assignment surface entropy, per-action entropy, usage min/max, and effective family count
+- trainer flags:
+  - `--family-balance-loss-weight`
+  - `--family-contrastive-loss-weight`
+  - `--family-sharpness-loss-weight`
+  - `--family-postfailure-margin-weight`
+- training-only losses:
+  - full-surface family usage KL/load balance
+  - assignment entropy target
+  - contrastive same-near/same-outcome vs far/different-outcome family similarity
+  - post-failure margin favoring different uncertain families over the selected failed family
+- no runtime family controller, no family blacklist, no least-visited family score, no hard diversity mask, no graph/frontier/replay/search behavior
+
+Verification:
+
+- `python -m py_compile scripts\train_learned_online_object_event.py arcagi\agents\learned_online_object_event_agent.py arcagi\learned_online\object_event_model.py` -> passed
+- focused parametric/agent tests: `41 passed`
+- full object-event suite: `95 passed`
+- recurrent suite: `31 passed`
+- 2-step regularized smoke emitted finite new metrics
+
+447-action regularized family gate:
+
+- command:
+  - `python scripts\train_learned_online_object_event.py --mode synthetic_active_online_object_event --curriculum latent_rule_variable_palette --state-source extracted --action-surface arc_scale_parametric --action-surface-size 447 --coordinate-grid-size 64 --empty-click-fraction 0.80 --positive-region-radius 1 --seed 0 --steps 220 --batch-size 8 --train-sessions 48 --heldout-sessions 48 --levels-per-session 3 --max-distractors 2 --palette-size 8 --require-role-balanced-colors --max-steps-per-level 5 --axis-noeffect-cases 0.25 --relation-contradiction-cases 0.25 --diagnostic-utility-cases 0.25 --family-diagnostic-cases 0.25 --family-balance-loss-weight 0.05 --family-contrastive-loss-weight 0.10 --family-sharpness-loss-weight 0.02 --family-postfailure-margin-weight 0.20 --eval-every 55 --eval-runtime-agent --save-best --selection-metric runtime_agent_act_path_selected_unique_family_count --save-path artifacts\object_event_family_regularized_runtime_probe.pkl`
+- artifact:
+  - `artifacts/object_event_family_regularized_runtime_probe.pkl`
+  - selected by `runtime_agent_act_path_selected_unique_family_count`
+  - best observed selected unique family count was step `55`: `1.8958333333333333`
+- final step `220`:
+  - full `447` scoring
+  - no metadata leakage
+  - `runtime_agent_act_path_active_success_within_5 = 0.4375`
+  - `runtime_agent_act_path_active_success_within_3 = 0.4375`
+  - `runtime_agent_act_path_next_level_first_try_acc = 0.3333333333333333`
+  - `runtime_agent_act_path_selected_unique_family_count = 1.625`
+  - `runtime_agent_act_path_selected_family_entropy = 0.31177332107019007`
+  - `runtime_agent_act_path_unique_action_count_mean = 2.2291666666666665`
+  - `runtime_agent_act_path_selected_unique_mapped_col_count = 2.0416666666666665`
+  - `runtime_agent_act_path_top_score_same_mapped_col_fraction = 0.7313296903460836`
+  - `runtime_agent_act_path_family_assignment_effective_count = 3.3459513043083082`
+  - `runtime_agent_act_path_family_assignment_usage_max = 0.6951802292269035`
+
+Current interpretation:
+
+- the patch did not solve the intended blocker
+- family assignment diagnostics improved mildly compared with the unregularized family-belief probe, but assignment remains dominated by one large family and true selected-action diversity is still far below gate
+- synthetic competence regressed sharply by final step when optimizing this objective
+- no real ARC run should be made from this artifact
+- the next GPT-Pro request should include this exact negative result and ask whether to change the family representation itself, the training target, or the online update interface rather than adding a runtime diversity controller
+- a `48`-step ARC run remains only a hygiene/collapse detector; it is too harsh to judge full online acquisition when a prior real ARC win reportedly took about `300` steps

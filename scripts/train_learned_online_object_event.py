@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 import pickle
 import sys
@@ -115,6 +116,10 @@ def main() -> None:
     parser.add_argument("--diagnostic-utility-cases", type=float, default=0.0)
     parser.add_argument("--diagnostic-utility-weight", type=float, default=0.75)
     parser.add_argument("--family-diagnostic-cases", type=float, default=0.0)
+    parser.add_argument("--family-balance-loss-weight", type=float, default=0.0)
+    parser.add_argument("--family-contrastive-loss-weight", type=float, default=0.0)
+    parser.add_argument("--family-sharpness-loss-weight", type=float, default=0.0)
+    parser.add_argument("--family-postfailure-margin-weight", type=float, default=0.0)
     args = parser.parse_args()
 
     mode = args.source or args.mode
@@ -280,6 +285,19 @@ def _run_synthetic_online_object_event(
     last_diagnostic_family_uncertainty_top1_rate = 0.0
     last_diagnostic_known_noeffect_family_top1_rate = 0.0
     last_diagnostic_uncertain_minus_noeffect = 0.0
+    last_family_balance_loss = 0.0
+    last_family_sharpness_loss = 0.0
+    last_family_contrastive_loss = 0.0
+    last_family_postfailure_margin_loss = 0.0
+    last_diagnostic_different_uncertain_family_top1_rate = 0.0
+    last_diagnostic_same_failed_family_top1_rate = 0.0
+    last_diagnostic_different_minus_same_failed_family = 0.0
+    last_family_assignment_effective_count = 0.0
+    last_family_assignment_usage_min = 0.0
+    last_family_assignment_usage_max = 0.0
+    last_family_assignment_per_action_entropy = 0.0
+    last_family_contrastive_positive_score = 0.0
+    last_family_contrastive_negative_score = 0.0
     best_metric_value = float("-inf")
     best_step = 0
     best_state: dict[str, torch.Tensor] | None = None
@@ -325,6 +343,7 @@ def _run_synthetic_online_object_event(
         retry_loss = _positive_rank_loss(retry_logits, retry_tensors)
         support_output = _forward_tensors(model, support_tensors)
         support_logits = policy_rank_logits_from_predictions(support_output, support_tensors["action_mask"])
+        family_regularization = _family_assignment_regularization_losses(support_output, support_tensors)
         self_selected = torch.argmax(support_logits.detach(), dim=-1)
         self_failure_mask = (~_selected_is_positive(support_tensors, self_selected)).float()
         self_observed_tensors = _with_observed_candidate_targets(support_tensors, self_selected)
@@ -412,11 +431,16 @@ def _run_synthetic_online_object_event(
         diagnostic_scale = max(float(args.diagnostic_utility_cases), float(args.family_diagnostic_cases), 0.0)
         if self_retry_output.diagnostic_utility_logits is not None:
             diag_logits = self_retry_output.diagnostic_utility_logits
+            selected_family_overlap = _selected_family_overlap(support_output, self_retry_output, self_selected)
             hypothesis_target = _diagnostic_information_gain_targets(support_examples, self_retry_tensors, self_selected).to(
                 dtype=diag_logits.dtype,
                 device=diag_logits.device,
             )
-            family_target = _family_posterior_diagnostic_targets(self_retry_output, self_retry_tensors).to(
+            family_target = _family_posterior_diagnostic_targets(
+                self_retry_output,
+                self_retry_tensors,
+                selected_family_overlap=selected_family_overlap,
+            ).to(
                 dtype=diag_logits.dtype,
                 device=diag_logits.device,
             )
@@ -460,6 +484,45 @@ def _run_synthetic_online_object_event(
             diagnostic_ig_top1 = torch.mean(
                 info_good_mask.gather(1, diag_selected[:, None]).squeeze(1).to(dtype=diag_logits.dtype)
             )
+            same_failed_family_mask = (
+                (selected_family_overlap > 0.50)
+                & self_retry_tensors["action_mask"].bool()
+                & ~positive_mask
+            )
+            different_uncertain_family_mask = (
+                (selected_family_overlap < 0.25)
+                & (family_target >= 0.60)
+                & self_retry_tensors["action_mask"].bool()
+            )
+            safe_different_uncertain = torch.where(
+                different_uncertain_family_mask.any(dim=1, keepdim=True),
+                different_uncertain_family_mask,
+                safe_info_good,
+            )
+            same_failed_family_logit = torch.logsumexp(diag_logits.masked_fill(~same_failed_family_mask, -1.0e9), dim=-1)
+            different_uncertain_family_logit = torch.logsumexp(
+                diag_logits.masked_fill(~safe_different_uncertain, -1.0e9),
+                dim=-1,
+            )
+            family_margin_rows = (
+                coord_failure_mask
+                * same_failed_family_mask.any(dim=1).to(dtype=diag_logits.dtype)
+                * safe_different_uncertain.any(dim=1).to(dtype=diag_logits.dtype)
+            )
+            family_postfailure_margin_loss = _masked_mean_loss(
+                F.relu(same_failed_family_logit - different_uncertain_family_logit + 0.5),
+                family_margin_rows,
+            )
+            diagnostic_different_minus_same_failed = _masked_mean_loss(
+                different_uncertain_family_logit - same_failed_family_logit,
+                family_margin_rows,
+            )
+            diagnostic_different_uncertain_family_top1 = torch.mean(
+                different_uncertain_family_mask.gather(1, diag_selected[:, None]).squeeze(1).to(dtype=diag_logits.dtype)
+            )
+            diagnostic_same_failed_family_top1 = torch.mean(
+                same_failed_family_mask.gather(1, diag_selected[:, None]).squeeze(1).to(dtype=diag_logits.dtype)
+            )
             if self_retry_output.diagnostic_mix_logit is not None and support_output.diagnostic_mix_logit is not None:
                 ig_available = (diag_target.max(dim=1).values > 0.5).to(dtype=diag_logits.dtype)
                 mix_target = (coord_failure_mask * ig_available).clamp(0.0, 1.0)
@@ -487,6 +550,10 @@ def _run_synthetic_online_object_event(
             diagnostic_family_uncertainty_top1 = support_logits.new_tensor(0.0)
             diagnostic_known_noeffect_family_top1 = support_logits.new_tensor(0.0)
             diagnostic_uncertain_minus_noeffect = support_logits.new_tensor(0.0)
+            family_postfailure_margin_loss = support_logits.new_tensor(0.0)
+            diagnostic_different_uncertain_family_top1 = support_logits.new_tensor(0.0)
+            diagnostic_same_failed_family_top1 = support_logits.new_tensor(0.0)
+            diagnostic_different_minus_same_failed = support_logits.new_tensor(0.0)
             diagnostic_mix_loss = support_logits.new_tensor(0.0)
             diagnostic_mix_after = support_logits.new_zeros((support_logits.shape[0],))
             diagnostic_mix_before = support_logits.new_zeros((support_logits.shape[0],))
@@ -510,6 +577,10 @@ def _run_synthetic_online_object_event(
             + diagnostic_scale * 0.20 * diagnostic_margin_loss
             + diagnostic_scale * 0.15 * F.relu(0.25 - diagnostic_uncertain_minus_noeffect)
             + diagnostic_scale * 0.10 * diagnostic_mix_loss
+            + max(float(args.family_balance_loss_weight), 0.0) * family_regularization["balance_loss"]
+            + max(float(args.family_sharpness_loss_weight), 0.0) * family_regularization["sharpness_loss"]
+            + max(float(args.family_contrastive_loss_weight), 0.0) * family_regularization["contrastive_loss"]
+            + max(float(args.family_postfailure_margin_weight), 0.0) * family_postfailure_margin_loss
             + 0.2 * plausible_loss
         )
         optimizer.zero_grad(set_to_none=True)
@@ -527,6 +598,19 @@ def _run_synthetic_online_object_event(
         last_diagnostic_family_uncertainty_top1_rate = float(diagnostic_family_uncertainty_top1.detach().cpu())
         last_diagnostic_known_noeffect_family_top1_rate = float(diagnostic_known_noeffect_family_top1.detach().cpu())
         last_diagnostic_uncertain_minus_noeffect = float(diagnostic_uncertain_minus_noeffect.detach().cpu())
+        last_family_balance_loss = float(family_regularization["balance_loss"].detach().cpu())
+        last_family_sharpness_loss = float(family_regularization["sharpness_loss"].detach().cpu())
+        last_family_contrastive_loss = float(family_regularization["contrastive_loss"].detach().cpu())
+        last_family_postfailure_margin_loss = float(family_postfailure_margin_loss.detach().cpu())
+        last_diagnostic_different_uncertain_family_top1_rate = float(diagnostic_different_uncertain_family_top1.detach().cpu())
+        last_diagnostic_same_failed_family_top1_rate = float(diagnostic_same_failed_family_top1.detach().cpu())
+        last_diagnostic_different_minus_same_failed_family = float(diagnostic_different_minus_same_failed.detach().cpu())
+        last_family_assignment_effective_count = float(family_regularization["effective_count"].detach().cpu())
+        last_family_assignment_usage_min = float(family_regularization["usage_min"].detach().cpu())
+        last_family_assignment_usage_max = float(family_regularization["usage_max"].detach().cpu())
+        last_family_assignment_per_action_entropy = float(family_regularization["per_action_entropy"].detach().cpu())
+        last_family_contrastive_positive_score = float(family_regularization["positive_score_mean"].detach().cpu())
+        last_family_contrastive_negative_score = float(family_regularization["negative_score_mean"].detach().cpu())
         if step in eval_steps:
             eval_extra_metrics = dict(extraction_metrics)
             eval_extra_metrics.update(
@@ -539,6 +623,19 @@ def _run_synthetic_online_object_event(
                     "diagnostic_family_uncertainty_top1_rate": last_diagnostic_family_uncertainty_top1_rate,
                     "diagnostic_known_noeffect_family_top1_rate": last_diagnostic_known_noeffect_family_top1_rate,
                     "diagnostic_uncertain_minus_noeffect_mean": last_diagnostic_uncertain_minus_noeffect,
+                    "diagnostic_different_uncertain_family_top1_rate": last_diagnostic_different_uncertain_family_top1_rate,
+                    "diagnostic_same_failed_family_top1_rate": last_diagnostic_same_failed_family_top1_rate,
+                    "diagnostic_different_minus_same_failed_family_mean": last_diagnostic_different_minus_same_failed_family,
+                    "family_balance_loss": last_family_balance_loss,
+                    "family_sharpness_loss": last_family_sharpness_loss,
+                    "family_contrastive_loss": last_family_contrastive_loss,
+                    "family_postfailure_margin_loss": last_family_postfailure_margin_loss,
+                    "family_assignment_effective_count": last_family_assignment_effective_count,
+                    "family_assignment_usage_min": last_family_assignment_usage_min,
+                    "family_assignment_usage_max": last_family_assignment_usage_max,
+                    "family_assignment_per_action_entropy": last_family_assignment_per_action_entropy,
+                    "family_contrastive_positive_score_mean": last_family_contrastive_positive_score,
+                    "family_contrastive_negative_score_mean": last_family_contrastive_negative_score,
                     "diagnostic_mix_before_evidence_mean": last_diagnostic_mix_before_evidence,
                     "diagnostic_mix_after_noeffect_mean": last_diagnostic_mix_after_noeffect,
                 }
@@ -947,6 +1044,8 @@ def _diagnostic_information_gain_targets(
 def _family_posterior_diagnostic_targets(
     output: Any,
     tensors: dict[str, Any],
+    *,
+    selected_family_overlap: torch.Tensor | None = None,
 ) -> torch.Tensor:
     action_mask = tensors["action_mask"].bool()
     features = getattr(output, "action_family_posterior_features", None)
@@ -955,7 +1054,11 @@ def _family_posterior_diagnostic_targets(
     posterior = features.to(dtype=torch.float32)
     uncertainty = posterior[..., 1].clamp_min(0.0)
     noeffect_count = posterior[..., 3].clamp_min(0.0)
-    targets = uncertainty * torch.exp(-0.5 * noeffect_count)
+    if selected_family_overlap is None:
+        overlap_penalty = 1.0
+    else:
+        overlap_penalty = (1.0 - selected_family_overlap.to(dtype=torch.float32)).clamp(0.0, 1.0)
+    targets = uncertainty * torch.exp(-0.75 * noeffect_count) * overlap_penalty
     targets = targets.masked_fill(~action_mask, 0.0)
     max_value = targets.max(dim=1, keepdim=True).values.clamp_min(1.0e-6)
     return (targets / max_value).clamp(0.0, 1.0)
@@ -971,6 +1074,126 @@ def _family_known_noeffect_mask(
         return torch.zeros_like(action_mask, dtype=torch.bool)
     posterior = features.to(dtype=torch.float32)
     return action_mask & (posterior[..., 3] >= 0.20)
+
+
+def _selected_family_overlap(
+    before_output: Any,
+    after_output: Any,
+    selected_indices: torch.Tensor,
+) -> torch.Tensor:
+    before_probs = getattr(before_output, "action_family_probs", None)
+    after_probs = getattr(after_output, "action_family_probs", None)
+    if before_probs is None or after_probs is None or before_probs.shape[-1] <= 0:
+        action_count = after_output.outcome_logits.shape[1]
+        return after_output.outcome_logits.new_zeros((after_output.outcome_logits.shape[0], action_count))
+    family_count = before_probs.shape[-1]
+    selected = before_probs.gather(
+        1,
+        selected_indices[:, None, None].expand(-1, 1, family_count),
+    ).squeeze(1)
+    return torch.sum(after_probs * selected[:, None, :], dim=-1).clamp(0.0, 1.0)
+
+
+def _family_assignment_regularization_losses(
+    output: Any,
+    tensors: dict[str, Any],
+) -> dict[str, torch.Tensor]:
+    probs = getattr(output, "action_family_probs", None)
+    if probs is None or probs.shape[-1] <= 0:
+        zero = tensors["action_mask"].to(dtype=torch.float32).sum() * 0.0
+        return {
+            "balance_loss": zero,
+            "sharpness_loss": zero,
+            "contrastive_loss": zero,
+            "positive_score_mean": zero,
+            "negative_score_mean": zero,
+            "effective_count": zero,
+            "usage_min": zero,
+            "usage_max": zero,
+            "per_action_entropy": zero,
+        }
+    action_mask = tensors["action_mask"].bool()
+    valid_weight = action_mask.to(dtype=probs.dtype)
+    valid_count = valid_weight.sum(dim=1, keepdim=True).clamp_min(1.0)
+    usage = (probs * valid_weight[..., None]).sum(dim=1) / valid_count
+    usage = usage / usage.sum(dim=-1, keepdim=True).clamp_min(1.0e-6)
+    uniform = torch.full_like(usage, 1.0 / max(int(usage.shape[-1]), 1))
+    balance_loss = F.kl_div((usage + 1.0e-6).log(), uniform, reduction="batchmean")
+    per_action_entropy = -(probs.clamp_min(1.0e-6) * probs.clamp_min(1.0e-6).log()).sum(dim=-1)
+    entropy_mean = torch.sum(per_action_entropy * valid_weight) / valid_weight.sum().clamp_min(1.0)
+    target_entropy = 0.35 * math.log(max(int(probs.shape[-1]), 2))
+    sharpness_loss = (entropy_mean - probs.new_tensor(target_entropy)).pow(2)
+    surface_entropy = -(usage.clamp_min(1.0e-6) * usage.clamp_min(1.0e-6).log()).sum(dim=-1)
+    effective_count = torch.exp(surface_entropy).mean()
+    usage_min = usage.min(dim=-1).values.mean()
+    usage_max = usage.max(dim=-1).values.mean()
+    contrastive = _family_contrastive_loss(output, tensors, probs=probs)
+    return {
+        "balance_loss": balance_loss,
+        "sharpness_loss": sharpness_loss,
+        "contrastive_loss": contrastive["loss"],
+        "positive_score_mean": contrastive["positive_score_mean"],
+        "negative_score_mean": contrastive["negative_score_mean"],
+        "effective_count": effective_count,
+        "usage_min": usage_min,
+        "usage_max": usage_max,
+        "per_action_entropy": entropy_mean,
+    }
+
+
+def _family_contrastive_loss(
+    output: Any,
+    tensors: dict[str, Any],
+    *,
+    probs: torch.Tensor,
+) -> dict[str, torch.Tensor]:
+    del output
+    actions = tensors["inputs"]["action_numeric"]
+    valid = tensors["action_mask"].bool()
+    value = tensors["candidate_value_targets"].to(dtype=torch.float32) > 0.5
+    is_click = actions[..., ACTION_FEATURE_IS_CLICK] > 0.5
+    screen_xy = actions[..., ACTION_FEATURE_CLICK_X : ACTION_FEATURE_CLICK_Y + 1]
+    mapped_rc = actions[..., ACTION_FEATURE_GRID_ROW : ACTION_FEATURE_GRID_COL + 1]
+    has_grid = actions[..., ACTION_FEATURE_HAS_GRID_CELL] > 0.5
+    positive_scores: list[torch.Tensor] = []
+    negative_scores: list[torch.Tensor] = []
+    for row in range(actions.shape[0]):
+        row_valid = valid[row] & is_click[row]
+        if int(row_valid.sum().detach().cpu()) < 2:
+            continue
+        indices = torch.nonzero(row_valid, as_tuple=False).squeeze(1)
+        p = probs[row, indices]
+        similarity = torch.matmul(p, p.t()).clamp(0.0, 1.0)
+        xy = screen_xy[row, indices]
+        rc = mapped_rc[row, indices]
+        grid = has_grid[row, indices]
+        val = value[row, indices]
+        screen_l1 = torch.abs(xy[:, None, :] - xy[None, :, :]).sum(dim=-1)
+        grid_l1 = torch.abs(rc[:, None, :] - rc[None, :, :]).sum(dim=-1)
+        both_grid = grid[:, None] & grid[None, :]
+        near = (screen_l1 <= 0.15) | (both_grid & (grid_l1 <= 0.15))
+        far = (screen_l1 >= 0.35) | (both_grid & (grid_l1 >= 0.35))
+        same_outcome = val[:, None] == val[None, :]
+        different_outcome = ~same_outcome
+        upper = torch.triu(torch.ones_like(similarity, dtype=torch.bool), diagonal=1)
+        positive_mask = upper & near & same_outcome
+        negative_mask = upper & far & different_outcome
+        if bool(positive_mask.any()):
+            positive_scores.append(similarity[positive_mask])
+        if bool(negative_mask.any()):
+            negative_scores.append(similarity[negative_mask])
+    zero = probs.sum() * 0.0
+    positive_values = torch.cat(positive_scores) if positive_scores else zero.reshape(1)[:0]
+    negative_values = torch.cat(negative_scores) if negative_scores else zero.reshape(1)[:0]
+    positive_loss = F.relu(0.75 - positive_values).mean() if positive_values.numel() else zero
+    negative_loss = F.relu(negative_values - 0.25).mean() if negative_values.numel() else zero
+    positive_mean = positive_values.mean() if positive_values.numel() else zero
+    negative_mean = negative_values.mean() if negative_values.numel() else zero
+    return {
+        "loss": positive_loss + negative_loss,
+        "positive_score_mean": positive_mean,
+        "negative_score_mean": negative_mean,
+    }
 
 
 def _masked_mean_loss(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -1891,6 +2114,11 @@ _RANK_DIAGNOSTIC_FLOAT_KEYS = (
     "action_family_belief_noeffect_mean",
     "action_family_belief_uncertainty_top_value",
     "action_family_belief_noeffect_top_value",
+    "family_assignment_surface_entropy",
+    "family_assignment_per_action_entropy",
+    "family_assignment_usage_min",
+    "family_assignment_usage_max",
+    "family_assignment_effective_count",
 )
 
 

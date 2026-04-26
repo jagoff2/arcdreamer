@@ -24,6 +24,7 @@ from arcagi.learned_online.object_event_runtime_extraction import ObjectEventRun
 from scripts.train_learned_online_object_event import (
     _batch_to_tensors,
     _far_click_action_indices,
+    _family_assignment_regularization_losses,
     _family_known_noeffect_mask,
     _family_posterior_diagnostic_targets,
     _information_gain_from_hypothesis_success,
@@ -557,6 +558,53 @@ def test_family_posterior_target_prefers_uncertain_over_known_noeffect() -> None
     assert float(target[0, 0]) > float(target[0, 1])
     assert bool(known_noeffect[0, 1])
     assert not bool(known_noeffect[0, 0])
+
+
+def test_family_posterior_target_penalizes_selected_failed_family_overlap() -> None:
+    action_mask = torch.ones((1, 3), dtype=torch.bool)
+    features = torch.as_tensor(
+        [[[0.5, 0.25, 0.1, 0.0], [0.5, 0.25, 0.1, 0.0], [0.5, 0.20, 0.1, 0.0]]],
+        dtype=torch.float32,
+    )
+    overlap = torch.as_tensor([[0.9, 0.1, 0.2]], dtype=torch.float32)
+    output = type("Output", (), {})()
+    output.action_family_posterior_features = features
+
+    target = _family_posterior_diagnostic_targets(output, {"action_mask": action_mask}, selected_family_overlap=overlap)
+
+    assert float(target[0, 1]) > float(target[0, 0])
+    assert float(target[0, 0]) < 0.2
+
+
+def test_family_assignment_regularization_penalizes_single_family_collapse() -> None:
+    level = _parametric_level(seed=223)
+    tensors = _batch_to_tensors(collate_object_event_examples((level.example,)), device=torch.device("cpu"))
+    action_count = tensors["action_mask"].shape[1]
+    collapsed = torch.zeros((1, action_count, 4), dtype=torch.float32)
+    collapsed[..., 0] = 1.0
+    output = type("Output", (), {})()
+    output.action_family_probs = collapsed
+
+    losses = _family_assignment_regularization_losses(output, tensors)
+
+    assert float(losses["balance_loss"]) > 0.1
+    assert float(losses["effective_count"]) < 2.0
+
+
+def test_family_assignment_uses_multiple_families_on_447_surface() -> None:
+    level = _parametric_level(seed=224)
+    tensors = _batch_to_tensors(collate_object_event_examples((level.example,)), device=torch.device("cpu"))
+    model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
+    model.eval()
+
+    output = model(**tensors["inputs"])
+    losses = _family_assignment_regularization_losses(output, tensors)
+
+    assert output.action_family_probs is not None
+    assert output.action_family_probs.shape == (1, 447, model.action_family_belief.num_families)
+    assert float(losses["effective_count"].detach()) > 1.0
+    assert 0.0 <= float(losses["usage_min"].detach()) <= float(losses["usage_max"].detach()) <= 1.0
+    assert torch.isfinite(output.action_family_probs[tensors["action_mask"]]).all()
 
 
 def test_information_gain_target_prefers_hypothesis_disagreement_not_positive_only() -> None:

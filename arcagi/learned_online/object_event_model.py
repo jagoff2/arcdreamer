@@ -107,6 +107,8 @@ class ObjectEventModelOutput:
     rank_logits: torch.Tensor | None = None
     diagnostic_utility_logits: torch.Tensor | None = None
     diagnostic_mix_logit: torch.Tensor | None = None
+    action_family_logits: torch.Tensor | None = None
+    action_family_probs: torch.Tensor | None = None
     action_family_posterior_features: torch.Tensor | None = None
     candidate_state_attn: torch.Tensor | None = None
     rank_components: RankComponentOutput | None = None
@@ -797,11 +799,16 @@ class ActionFamilyBelief(nn.Module):
         )
         self.prototype = nn.Parameter(torch.randn(self.num_families, hidden) * 0.05)
 
-    def family_probs(self, action_numeric: torch.Tensor) -> torch.Tensor:
+    def family_logits(self, action_numeric: torch.Tensor) -> torch.Tensor:
         if self.num_families <= 0:
             return action_numeric.new_zeros((*action_numeric.shape[:-1], 0))
         key = self.action_key(action_numeric)
-        logits = torch.einsum("...d,kd->...k", key, self.prototype) / self.temperature
+        return torch.einsum("...d,kd->...k", key, self.prototype) / self.temperature
+
+    def family_probs(self, action_numeric: torch.Tensor) -> torch.Tensor:
+        logits = self.family_logits(action_numeric)
+        if logits.shape[-1] <= 0:
+            return logits
         return torch.softmax(logits, dim=-1)
 
     def observed_delta(
@@ -1406,6 +1413,8 @@ class ObjectEventModel(nn.Module):
             session_belief=session_belief,
             level_belief=level_belief,
         )
+        action_family_logits = self.action_family_belief.family_logits(action_numeric)
+        action_family_probs = torch.softmax(action_family_logits, dim=-1) if action_family_logits.shape[-1] > 0 else action_family_logits
         action_family_posterior_features = self.action_family_belief.posterior_features(
             candidate_action_numeric=action_numeric,
             level_belief=level_belief,
@@ -1434,6 +1443,8 @@ class ObjectEventModel(nn.Module):
             rank_logits=rank_logits,
             diagnostic_utility_logits=diagnostic_utility_logits,
             diagnostic_mix_logit=diagnostic_mix_logit,
+            action_family_logits=action_family_logits,
+            action_family_probs=action_family_probs,
             action_family_posterior_features=action_family_posterior_features,
             candidate_state_attn=candidate_state_attn,
             rank_components=rank_components,
