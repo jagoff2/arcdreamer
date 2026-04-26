@@ -262,6 +262,11 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             top_action, top_score = max(self.last_scores.items(), key=lambda item: item[1])
         selected = self.last_decision.action if self.last_decision is not None else ""
         selected_score = self.last_decision.score if self.last_decision is not None else 0.0
+        coord_start = int(getattr(self.model.coordinate_noeffect_memory_rank, "start", 0))
+        coord_stop = int(getattr(self.model.coordinate_noeffect_memory_rank, "stop", coord_start))
+        coord_memory = self.level_belief[coord_start:coord_stop] if coord_stop > coord_start else self.level_belief[:0]
+        coord_count = float(coord_memory[0].detach().cpu()) if coord_memory.numel() > 0 else 0.0
+        coord_norm = float(torch.linalg.vector_norm(coord_memory).detach().cpu()) if coord_memory.numel() > 0 else 0.0
         return {
             "controller_kind": self.controller_kind,
             "claim_eligible_arc_controller": bool(self.claim_eligible_arc_controller),
@@ -276,6 +281,8 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             "object_event_online_update_count": int(self.online_update_count),
             "object_event_session_belief_norm": float(torch.linalg.vector_norm(self.session_belief).detach().cpu()),
             "object_event_level_belief_norm": float(torch.linalg.vector_norm(self.level_belief).detach().cpu()),
+            "object_event_coordinate_noeffect_memory_norm": coord_norm,
+            "object_event_coordinate_noeffect_count": coord_count,
             "object_event_action_surface_capped": False,
             "object_event_oracle_support_used": False,
             "object_event_trace_replay_used": False,
@@ -296,6 +303,8 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             "last_delta_loss": float(self.last_delta_loss),
             "session_belief_norm": float(torch.linalg.vector_norm(self.session_belief).detach().cpu()),
             "level_belief_norm": float(torch.linalg.vector_norm(self.level_belief).detach().cpu()),
+            "coordinate_noeffect_memory_norm": coord_norm,
+            "coordinate_noeffect_count": coord_count,
             "level_epoch": int(self.level_epoch),
             "level_step": int(self.level_step),
             "last_predicted_outcome": tuple(self.last_predicted_outcome),
@@ -396,6 +405,7 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
                 "fast_delta_head",
                 "fast_value_head",
                 "observed_event_belief_encoder",
+                "level_belief_coordinate_noeffect_slots",
                 "session_belief",
                 "level_belief",
             ],

@@ -322,7 +322,11 @@ def test_object_event_agent_scores_arc_scale_parametric_surface_without_cap() ->
 def test_object_event_agent_parametric_no_effect_update_keeps_failed_action_scored() -> None:
     level = _parametric_level()
     example = level.example
-    failed = next(index for index, value in enumerate(example.candidate_targets.value) if float(value) == 0.0)
+    failed = next(
+        index
+        for index, value in enumerate(example.candidate_targets.value)
+        if float(value) == 0.0 and example.legal_actions[index].startswith("click:")
+    )
     failed_action = example.legal_actions[failed]
     agent = LearnedOnlineObjectEventAgent(seed=22, device="cpu", temperature=0.1, epsilon_floor=0.0)
     with torch.no_grad():
@@ -350,9 +354,21 @@ def test_object_event_agent_parametric_no_effect_update_keeps_failed_action_scor
     assert np.isfinite(after[failed_action].score)
     assert diagnostics["legal_action_count"] == 447
     assert diagnostics["scored_action_count"] == 447
+    assert float(diagnostics["coordinate_noeffect_memory_norm"]) > 0.0
+    assert float(diagnostics["coordinate_noeffect_count"]) > 0.0
     assert after[failed_action].score != before[failed_action].score
-    assert not hasattr(agent, "action_sequence")
-    assert not hasattr(agent, "state_hash_to_action")
+    for forbidden in (
+        "tried_actions",
+        "blocked_actions",
+        "blacklist",
+        "action_sequence",
+        "trace_cursor",
+        "state_hash_to_action",
+        "frontier",
+        "coverage_queue",
+        "sweep_index",
+    ):
+        assert not hasattr(agent, forbidden)
 
 
 def test_harness_alias_loads_object_event_checkpoint(tmp_path: Path) -> None:

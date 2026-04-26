@@ -21,7 +21,7 @@ from arcagi.learned_online.object_event_curriculum import (
 )
 from arcagi.learned_online.object_event_model import ObjectEventModel, ObjectEventModelConfig, policy_rank_logits_from_predictions
 from arcagi.learned_online.object_event_runtime_extraction import ObjectEventRuntimeExtractor, extract_selected_transition_from_grid
-from scripts.train_learned_online_object_event import _batch_to_tensors
+from scripts.train_learned_online_object_event import _batch_to_tensors, _far_click_action_indices, _near_action_indices
 from arcagi.learned_online.object_event_curriculum import collate_object_event_examples
 
 
@@ -158,7 +158,7 @@ def test_parametric_runtime_extraction_preserves_selected_transition_surface() -
 def test_failed_action_memory_changes_scores_without_hard_masking() -> None:
     level = _parametric_level(seed=209)
     example = level.example
-    failed = next(index for index, value in enumerate(example.candidate_targets.value) if float(value) == 0.0)
+    failed = _failed_click_index(example)
     model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
     model.eval()
     with torch.no_grad():
@@ -195,7 +195,7 @@ def test_failed_action_memory_changes_scores_without_hard_masking() -> None:
 def test_failed_action_memory_resets_on_level_reset() -> None:
     level = _parametric_level(seed=210)
     example = level.example
-    failed = next(index for index, value in enumerate(example.candidate_targets.value) if float(value) == 0.0)
+    failed = _failed_click_index(example)
     model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
     model.eval()
     with torch.no_grad():
@@ -221,6 +221,84 @@ def test_failed_action_memory_resets_on_level_reset() -> None:
     assert changed[0, failed] != reset[0, failed]
 
 
+def test_coordinate_noeffect_memory_writes_only_on_noeffect_click() -> None:
+    level = _parametric_level(seed=211)
+    example = level.example
+    failed = _failed_click_index(example)
+    success = int(example.positive_action_indices[0])
+    model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
+    model.eval()
+    tensors = _batch_to_tensors(collate_object_event_examples((example,)), device=torch.device("cpu"))
+    base = model(**tensors["inputs"])
+
+    failed_deltas = model.observed_event_belief_deltas(
+        base,
+        target_outcome=tensors["candidate_outcome_targets"][:, failed],
+        target_delta=tensors["candidate_delta_targets"][:, failed],
+        actual_action_index=torch.as_tensor([failed], dtype=torch.long),
+        state_numeric=tensors["inputs"]["state_numeric"],
+        state_type_ids=tensors["inputs"]["state_type_ids"],
+        state_mask=tensors["inputs"]["state_mask"],
+        action_numeric=tensors["inputs"]["action_numeric"],
+    )
+    success_deltas = model.observed_event_belief_deltas(
+        base,
+        target_outcome=tensors["candidate_outcome_targets"][:, success],
+        target_delta=tensors["candidate_delta_targets"][:, success],
+        actual_action_index=torch.as_tensor([success], dtype=torch.long),
+        state_numeric=tensors["inputs"]["state_numeric"],
+        state_type_ids=tensors["inputs"]["state_type_ids"],
+        state_mask=tensors["inputs"]["state_mask"],
+        action_numeric=tensors["inputs"]["action_numeric"],
+    )
+    start = model.coordinate_noeffect_memory_rank.start
+    stop = model.coordinate_noeffect_memory_rank.stop
+
+    assert torch.linalg.vector_norm(failed_deltas.level_delta[:, start:stop]) > 0.0
+    assert torch.linalg.vector_norm(failed_deltas.session_delta[:, start:stop]) == 0.0
+    assert torch.linalg.vector_norm(success_deltas.level_delta[:, start:stop]) == 0.0
+
+
+def test_coordinate_noeffect_rank_changes_nearby_click_scores_without_hard_masking() -> None:
+    level = _parametric_level(seed=212)
+    example = level.example
+    failed = _failed_click_index(example)
+    failed_action = example.legal_actions[failed]
+    near = _near_action_indices(example, failed_action)
+    far = _far_click_action_indices(example, failed_action)
+    assert near
+    assert far
+    model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
+    model.eval()
+    with torch.no_grad():
+        model.coordinate_noeffect_memory_rank.rank_mlp[-1].weight.fill_(-0.25)
+        model.coordinate_noeffect_memory_rank.rank_mlp[-1].bias.zero_()
+    tensors = _batch_to_tensors(collate_object_event_examples((example,)), device=torch.device("cpu"))
+    zero = torch.zeros((1, model.config.d_model), dtype=torch.float32)
+    before = policy_rank_logits_from_predictions(model(**tensors["inputs"], level_belief=zero), tensors["action_mask"])
+    base = model(**tensors["inputs"], level_belief=zero)
+    deltas = model.observed_event_belief_deltas(
+        base,
+        target_outcome=tensors["candidate_outcome_targets"][:, failed],
+        target_delta=tensors["candidate_delta_targets"][:, failed],
+        actual_action_index=torch.as_tensor([failed], dtype=torch.long),
+        state_numeric=tensors["inputs"]["state_numeric"],
+        state_type_ids=tensors["inputs"]["state_type_ids"],
+        state_mask=tensors["inputs"]["state_mask"],
+        action_numeric=tensors["inputs"]["action_numeric"],
+    )
+    after = policy_rank_logits_from_predictions(model(**tensors["inputs"], level_belief=deltas.level_delta), tensors["action_mask"])
+
+    assert before.shape[-1] == 447
+    assert after.shape[-1] == 447
+    assert torch.isfinite(after[0, failed])
+    assert torch.isfinite(after[0, list(near)]).all()
+    assert torch.isfinite(after[0, list(far)]).all()
+    assert torch.mean(torch.abs(after[0, list(near)] - before[0, list(near)])) > 0.0
+    reset = policy_rank_logits_from_predictions(model(**tensors["inputs"], level_belief=zero), tensors["action_mask"])
+    assert torch.allclose(reset, before)
+
+
 def _parametric_level(*, seed: int):
     split = build_active_online_object_event_curriculum(
         ActiveOnlineObjectEventConfig(
@@ -240,6 +318,14 @@ def _parametric_level(*, seed: int):
         )
     )
     return split.train[0].levels[0]
+
+
+def _failed_click_index(example) -> int:
+    return next(
+        index
+        for index, value in enumerate(example.candidate_targets.value)
+        if float(value) == 0.0 and example.legal_actions[index].startswith("click:")
+    )
 
 
 def _display_state() -> StructuredState:

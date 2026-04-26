@@ -874,3 +874,38 @@ Operator actions recorded for continuity:
    - the `48`-step ARC run is only a harsh hygiene cutoff for collapse/forbidden behavior
    - it must not be treated as a fair competence budget for a game that may require online learning over hundreds of steps
    - future real ARC checks should combine short hygiene probes with longer acquisition probes after collapse behavior is fixed
+
+## 2026-04-25 Coordinate No-Effect Memory Iteration
+
+Operator actions recorded for continuity:
+
+1. Asked GPT-Pro about the post-parametric failure:
+   - latest pushed commit at the time: `b35738b`
+   - failure signature: real ARC `ar25-0c556536`, 48 steps, full `447/447` scoring, no forbidden controller flags, repeated `click:31:*` coordinate column
+   - GPT-Pro consensus: add learned level-local coordinate-neighborhood no-effect memory; no hard masks, tried sets, graph/frontier search, trace replay, or per-game behavior
+2. Implemented the coordinate no-effect patch:
+   - named action-coordinate feature constants in `event_tokens.py`
+   - `CoordinateNoEffectMemoryRank` in `object_event_model.py`
+   - no-effect click exact/near score-revision losses and metrics in `scripts/train_learned_online_object_event.py`
+   - coordinate no-effect diagnostics in `LearnedOnlineObjectEventAgent`
+   - focused tests for no-effect-only writes, level-local storage, finite legal scoring, reset behavior, and absence of forbidden controller attributes
+3. Verification:
+   - focused coordinate/object-event tests: `25 passed`
+   - full object-event suite: `79 passed`
+   - recurrent regression: `31 passed`
+   - `py_compile` passed for edited files
+4. 447-action synthetic gate:
+   - command used `--state-source extracted --action-surface arc_scale_parametric --action-surface-size 447 --coordinate-grid-size 64 --steps 160`
+   - artifact: `artifacts/object_event_coord_noeffect_runtime_probe.pkl`
+   - final true runtime metrics: within-5 `0.8333333333333334`, next-level first try `0.75`, failed exact repeat `0.0`, failed near repeat `0.037037037037037035`, failed near score delta `-1.9747445317962005`, max same-action streak `2.0`, full `447` scoring, no leakage
+5. Dense 68-action regression:
+   - final true runtime metrics: within-3 `0.8958333333333334`, within-5 `1.0`, next-level first try `0.8125`, no leakage
+6. Real ARC 48-step hygiene probe:
+   - command: `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent learned_online_object_event --checkpoint-path artifacts/object_event_coord_noeffect_runtime_probe.pkl --mode offline --game-limit 1 --max-steps 48 --progress-every 8 --object-event-bridge-diagnostics`
+   - result: no win, no level completion, full `447/447` scoring, no forbidden controller/oracle/replay/metadata leakage, `object_event_online_update_count=48`
+   - improvement: `max_same_action_streak` dropped from `11` to `5`
+   - remaining failure: column-level collapse persists, especially `click:31:1=33`; top scores remain dominated by `click:31:*`
+7. Next required action:
+   - commit and push this patch
+   - ask GPT-Pro for the next mechanism before coding
+   - do not run a 320-step ARC probe until the short-run column-collapse hygiene issue is addressed

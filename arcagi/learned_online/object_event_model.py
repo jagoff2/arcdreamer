@@ -8,6 +8,12 @@ from torch import nn
 import torch.nn.functional as F
 
 from arcagi.learned_online.event_tokens import (
+    ACTION_FEATURE_CLICK_X,
+    ACTION_FEATURE_CLICK_Y,
+    ACTION_FEATURE_GRID_COL,
+    ACTION_FEATURE_GRID_ROW,
+    ACTION_FEATURE_HAS_GRID_CELL,
+    ACTION_FEATURE_IS_CLICK,
     ACTION_NUMERIC_DIM,
     ACTION_OTHER,
     DIR_RIGHT,
@@ -41,6 +47,7 @@ class ObjectEventModelConfig:
     online_rank: int = 8
     relation_key_dim: int = 8
     failed_action_key_dim: int = 12
+    coordinate_noeffect_key_dim: int = 8
     outcome_dim: int = OUTCOME_DIM
     delta_dim: int = STATE_DELTA_DIM
 
@@ -402,6 +409,114 @@ class FailedActionMemoryRank(nn.Module):
         return self.rank_mlp(features).squeeze(-1)
 
 
+class CoordinateNoEffectMemoryRank(nn.Module):
+    def __init__(
+        self,
+        *,
+        belief_dim: int,
+        start: int,
+        width: int,
+        dropout: float,
+    ) -> None:
+        super().__init__()
+        self.start = int(start)
+        self.width = max(int(width), 0)
+        self.belief_dim = int(belief_dim)
+        feature_dim = 12
+        self.rank_mlp = nn.Sequential(
+            nn.LayerNorm(feature_dim),
+            nn.Linear(feature_dim, 32),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(32, 1),
+        )
+        nn.init.zeros_(self.rank_mlp[-1].weight)
+        nn.init.zeros_(self.rank_mlp[-1].bias)
+
+    @property
+    def stop(self) -> int:
+        return int(self.start + self.width)
+
+    def _coord_features(self, action_numeric: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        is_click = action_numeric[..., ACTION_FEATURE_IS_CLICK : ACTION_FEATURE_IS_CLICK + 1].clamp(0.0, 1.0)
+        screen_xy = action_numeric[..., ACTION_FEATURE_CLICK_X : ACTION_FEATURE_CLICK_Y + 1].clamp(0.0, 1.0)
+        has_grid = action_numeric[..., ACTION_FEATURE_HAS_GRID_CELL : ACTION_FEATURE_HAS_GRID_CELL + 1].clamp(0.0, 1.0)
+        mapped_rc = action_numeric[..., ACTION_FEATURE_GRID_ROW : ACTION_FEATURE_GRID_COL + 1].clamp(0.0, 1.0) * has_grid
+        return is_click, screen_xy, mapped_rc
+
+    def observed_delta(
+        self,
+        *,
+        selected_action_numeric: torch.Tensor,
+        no_effect_gate: torch.Tensor,
+    ) -> torch.Tensor:
+        delta = selected_action_numeric.new_zeros((selected_action_numeric.shape[0], self.belief_dim))
+        if self.width <= 0 or self.start >= self.belief_dim:
+            return delta
+        is_click, screen_xy, mapped_rc = self._coord_features(selected_action_numeric)
+        gate = no_effect_gate.reshape(-1, 1).clamp(0.0, 1.0) * is_click
+        values = torch.cat(
+            [
+                gate,
+                gate * screen_xy[:, 0:1],
+                gate * screen_xy[:, 1:2],
+                gate * screen_xy[:, 0:1] * screen_xy[:, 0:1],
+                gate * screen_xy[:, 1:2] * screen_xy[:, 1:2],
+                gate * mapped_rc[:, 0:1],
+                gate * mapped_rc[:, 1:2],
+                gate,
+            ],
+            dim=-1,
+        )
+        writable = min(self.width, values.shape[-1], max(self.belief_dim - self.start, 0))
+        if writable > 0:
+            delta[:, self.start : self.start + writable] = values[:, :writable]
+        return delta
+
+    def rank_delta(
+        self,
+        *,
+        candidate_action_numeric: torch.Tensor,
+        level_belief: torch.Tensor,
+    ) -> torch.Tensor:
+        if self.width <= 0 or self.start >= level_belief.shape[-1]:
+            return candidate_action_numeric.new_zeros(candidate_action_numeric.shape[:2])
+        is_click, screen_xy, mapped_rc = self._coord_features(candidate_action_numeric)
+        memory = level_belief[:, self.start : min(self.stop, level_belief.shape[-1])]
+        if memory.shape[-1] < 8:
+            padding = memory.new_zeros((memory.shape[0], 8 - memory.shape[-1]))
+            memory = torch.cat([memory, padding], dim=-1)
+        count = memory[:, 0:1].clamp_min(0.0)
+        denom = count.clamp_min(1.0)
+        mean_screen = torch.cat([memory[:, 1:2] / denom, memory[:, 2:3] / denom], dim=-1)[:, None, :]
+        mean_grid = torch.cat([memory[:, 5:6] / denom, memory[:, 6:7] / denom], dim=-1)[:, None, :]
+        strength = torch.tanh(memory[:, 7:8]).clamp_min(0.0)[:, None, :]
+        screen_delta = screen_xy - mean_screen
+        grid_delta = mapped_rc - mean_grid
+        screen_d2 = (screen_delta * screen_delta).sum(dim=-1, keepdim=True)
+        grid_d2 = (grid_delta * grid_delta).sum(dim=-1, keepdim=True)
+        radial = torch.cat(
+            [
+                torch.exp(-screen_d2 / 0.0025),
+                torch.exp(-screen_d2 / 0.0100),
+                torch.exp(-grid_d2 / 0.0200),
+                torch.exp(-grid_d2 / 0.0800),
+            ],
+            dim=-1,
+        )
+        features = torch.cat(
+            [
+                screen_xy,
+                mapped_rc,
+                radial * strength,
+                torch.abs(screen_delta),
+                torch.abs(grid_delta),
+            ],
+            dim=-1,
+        )
+        return is_click.squeeze(-1) * self.rank_mlp(features).squeeze(-1)
+
+
 class RawCandidateStateRank(nn.Module):
     def __init__(
         self,
@@ -409,10 +524,12 @@ class RawCandidateStateRank(nn.Module):
         dropout: float,
         relation_memory: EventRelationMemoryRank,
         failed_action_memory: FailedActionMemoryRank,
+        coordinate_noeffect_memory: CoordinateNoEffectMemoryRank,
     ) -> None:
         super().__init__()
         self.relation_memory = relation_memory
         self.failed_action_memory = failed_action_memory
+        self.coordinate_noeffect_memory = coordinate_noeffect_memory
         input_dim = ACTION_NUMERIC_DIM + (4 * STATE_NUMERIC_DIM) + (2 * STATE_NUMERIC_DIM) + (4 * d_model)
         self.rank_mlp = nn.Sequential(
             nn.LayerNorm(input_dim),
@@ -483,7 +600,22 @@ class RawCandidateStateRank(nn.Module):
             candidate_action_numeric=action_numeric,
             level_belief=level_belief,
         )
-        return self.rank_mlp(features).squeeze(-1) + relation_rank + failed_action_rank
+        coordinate_noeffect_rank = self.coordinate_noeffect_memory.rank_delta(
+            candidate_action_numeric=action_numeric,
+            level_belief=level_belief,
+        )
+        return self.rank_mlp(features).squeeze(-1) + relation_rank + failed_action_rank + coordinate_noeffect_rank
+
+    def coordinate_noeffect_rank_delta(
+        self,
+        *,
+        action_numeric: torch.Tensor,
+        level_belief: torch.Tensor,
+    ) -> torch.Tensor:
+        return self.coordinate_noeffect_memory.rank_delta(
+            candidate_action_numeric=action_numeric,
+            level_belief=level_belief,
+        )
 
 
 def _soft_same(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
@@ -567,7 +699,15 @@ class ObjectEventModel(nn.Module):
             dropout=float(self.config.dropout),
         )
         relation_width = int(self.event_relation_memory_rank.key_dim * 5)
-        failed_key_dim = max(2, min(int(self.config.failed_action_key_dim), max(d_model - relation_width, 2)))
+        available_after_relation = max(d_model - relation_width, 0)
+        coord_width = min(
+            max(int(self.config.coordinate_noeffect_key_dim), 0),
+            max(available_after_relation - 2, 0),
+        )
+        failed_key_dim = max(
+            2,
+            min(int(self.config.failed_action_key_dim), max(available_after_relation - coord_width, 2)),
+        )
         self.failed_action_memory_rank = FailedActionMemoryRank(
             action_feature_dim=ACTION_NUMERIC_DIM,
             belief_dim=d_model,
@@ -575,13 +715,20 @@ class ObjectEventModel(nn.Module):
             start=relation_width,
             dropout=float(self.config.dropout),
         )
-        self.reserved_belief_width = min(int(relation_width + failed_key_dim), d_model)
+        self.coordinate_noeffect_memory_rank = CoordinateNoEffectMemoryRank(
+            belief_dim=d_model,
+            start=relation_width + failed_key_dim,
+            width=coord_width,
+            dropout=float(self.config.dropout),
+        )
+        self.reserved_belief_width = min(int(relation_width + failed_key_dim + coord_width), d_model)
         self.candidate_state_compat = CandidateStateCompatibility(d_model, float(self.config.dropout))
         self.raw_candidate_rank = RawCandidateStateRank(
             d_model,
             float(self.config.dropout),
             self.event_relation_memory_rank,
             self.failed_action_memory_rank,
+            self.coordinate_noeffect_memory_rank,
         )
         self.rank_score_head = nn.Linear(d_model, 1)
         nn.init.normal_(self.rank_score_head.weight, mean=0.0, std=0.02)
@@ -783,9 +930,14 @@ class ObjectEventModel(nn.Module):
                 selected_action_numeric=chosen_action,
                 no_effect_gate=target_outcome[:, OUT_NO_EFFECT_NONPROGRESS],
             )
+            coordinate_noeffect_delta = self.coordinate_noeffect_memory_rank.observed_delta(
+                selected_action_numeric=chosen_action,
+                no_effect_gate=target_outcome[:, OUT_NO_EFFECT_NONPROGRESS],
+            )
         else:
             direct = raw_context.new_zeros((raw_context.shape[0], self.config.d_model))
             failed_action_delta = raw_context.new_zeros((raw_context.shape[0], self.config.d_model))
+            coordinate_noeffect_delta = raw_context.new_zeros((raw_context.shape[0], self.config.d_model))
         learned = self.observed_event_belief_encoder(torch.cat([raw_context, event], dim=-1))
         learned = 0.05 * learned
         reserved_width = min(int(self.reserved_belief_width), learned.shape[1])
@@ -794,7 +946,7 @@ class ObjectEventModel(nn.Module):
             learned[:, :reserved_width] = 0.0
         session_delta = torch.tanh(direct + learned)
         no_effect_gate = target_outcome[:, OUT_NO_EFFECT_NONPROGRESS].reshape(-1, 1)
-        level_delta = torch.tanh(direct + failed_action_delta + learned * (0.5 + no_effect_gate))
+        level_delta = torch.tanh(direct + failed_action_delta + coordinate_noeffect_delta + learned * (0.5 + no_effect_gate))
         return ObservedEventBeliefDelta(session_delta=session_delta, level_delta=level_delta)
 
     def loss(

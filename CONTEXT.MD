@@ -5438,3 +5438,116 @@ Next execution slice:
 - push this focused parametric implementation
 - ask GPT-Pro to review the pushed commit and this failure signature
 - likely next implementation target, pending GPT-Pro consensus: stronger learned/evidence-updated continuous coordinate no-effect memory or uncertainty revision, not hard masks, scripted probes, graph/frontier control, replay, or per-game logic
+
+## Entry 082: 2026-04-25 / Coordinate-Neighborhood No-Effect Memory
+
+Iteration objective:
+
+- address the real ARC `click:31:*` local-repeat failure without using hard no-repeat masks, tried-action sets, scripted probes, graph/frontier control, replay, or per-game behavior
+
+GPT-Pro consensus:
+
+- target learned, level-local coordinate-neighborhood no-effect belief/revision next
+- keep all legal actions visible and finite-scored
+- use smooth coordinate/RBF-style features and learned rank deltas only
+- treat the 48-step ARC run as a hygiene probe, not a final competence budget
+- do not run longer ARC acquisition probes until short-run local collapse is under control
+
+Implemented:
+
+- `arcagi/learned_online/event_tokens.py`
+  - added named action numeric feature constants for click x/y and mapped grid row/col
+- `arcagi/learned_online/object_event_model.py`
+  - added `coordinate_noeffect_key_dim`
+  - added `CoordinateNoEffectMemoryRank`
+  - writes selected no-effect click evidence into level-local belief slots only
+  - scores all candidate actions through learned coordinate-neighborhood rank deltas
+  - no action strings, blacklists, tried sets, sweep cursors, or hard masks are used
+- `scripts/train_learned_online_object_event.py`
+  - added no-effect click exact/near score-revision losses
+  - added near/far score-delta metrics, neighborhood top1 metrics, and coordinate memory norm/count metrics
+- `arcagi/agents/learned_online_object_event_agent.py`
+  - exposed coordinate no-effect belief diagnostics
+- tests
+  - coordinate memory writes only for no-effect clicks
+  - no coordinate memory is written into session belief
+  - successful clicks do not write no-effect coordinate memory
+  - nearby and far click scores remain legal/finite
+  - level-local reset clears the score effect
+  - agent has no forbidden tried-action/frontier/sweep attributes
+
+Verification:
+
+- focused tests:
+  - `python -m pytest tests/test_object_event_parametric_action_surface.py tests/test_learned_online_object_event_agent_contracts.py -q`
+  - `25 passed`
+- full object-event suite:
+  - `python -m pytest tests/test_object_event_tokens.py tests/test_object_event_curriculum.py tests/test_object_event_online_adaptation.py tests/test_object_event_model_learning.py tests/test_learned_online_object_event_agent_contracts.py tests/test_object_event_bridge_contracts.py tests/test_object_event_active_variable_palette.py tests/test_object_event_runtime_extraction.py tests/test_object_event_parametric_action_surface.py -q`
+  - `79 passed`
+- recurrent regression:
+  - `python -m pytest tests/test_learned_online_recurrent_gates.py tests/test_learned_online_sequence_curriculum.py -q`
+  - `31 passed`
+- `py_compile` passed for edited source files
+
+447-action coordinate gate:
+
+- command:
+  - `python scripts\train_learned_online_object_event.py --mode synthetic_active_online_object_event --curriculum latent_rule_variable_palette --state-source extracted --action-surface arc_scale_parametric --action-surface-size 447 --coordinate-grid-size 64 --empty-click-fraction 0.80 --positive-region-radius 1 --seed 0 --steps 160 --batch-size 8 --train-sessions 48 --heldout-sessions 48 --levels-per-session 3 --max-distractors 2 --palette-size 8 --require-role-balanced-colors --max-steps-per-level 5 --eval-every 40 --eval-runtime-agent --save-best --selection-metric runtime_agent_act_path_active_success_within_5 --save-path artifacts/object_event_coord_noeffect_runtime_probe.pkl`
+- final metrics:
+  - `runtime_agent_act_path_num_legal_actions_mean = 447.0`
+  - `runtime_agent_act_path_active_success_within_3 = 0.8125`
+  - `runtime_agent_act_path_active_success_within_5 = 0.8333333333333334`
+  - `runtime_agent_act_path_next_level_first_try_acc = 0.75`
+  - `runtime_agent_act_path_failed_exact_repeat_top1_rate = 0.0`
+  - `runtime_agent_act_path_failed_near_repeat_top1_rate = 0.037037037037037035`
+  - `runtime_agent_act_path_failed_near_score_delta_mean = -1.9747445317962005`
+  - `runtime_agent_act_path_failed_far_score_delta_mean = 0.032896945338782894`
+  - `runtime_agent_act_path_failed_same_mapped_cell_top1_rate = 0.0`
+  - `runtime_agent_act_path_max_same_action_streak_max = 2.0`
+  - `runtime_agent_act_path_metadata_model_input_forbidden_count = 0.0`
+
+Dense 68-action regression:
+
+- command:
+  - `python scripts\train_learned_online_object_event.py --mode synthetic_active_online_object_event --curriculum latent_rule_variable_palette --state-source extracted --action-surface dense_8x8 --seed 0 --steps 150 --batch-size 16 --train-sessions 48 --heldout-sessions 48 --levels-per-session 3 --max-distractors 1 --palette-size 8 --require-role-balanced-colors --eval-every 50 --eval-runtime-agent --no-save`
+- final:
+  - `runtime_agent_act_path_num_legal_actions_mean = 68.0`
+  - `runtime_agent_act_path_active_success_within_3 = 0.8958333333333334`
+  - `runtime_agent_act_path_active_success_within_5 = 1.0`
+  - `runtime_agent_act_path_next_level_first_try_acc = 0.8125`
+  - no metadata leakage
+
+Real ARC hygiene probe:
+
+- command:
+  - `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent learned_online_object_event --checkpoint-path artifacts/object_event_coord_noeffect_runtime_probe.pkl --mode offline --game-limit 1 --max-steps 48 --progress-every 8 --object-event-bridge-diagnostics`
+- result:
+  - `success = false`
+  - `won = false`
+  - `levels_completed = 0`
+  - `return = 0.0`
+  - `legal_action_count = 447`
+  - `scored_action_count = 447`
+  - no action-surface cap, oracle support, trace replay, graph controller, or metadata leakage
+  - `object_event_online_update_count = 48`
+  - `coordinate_noeffect_memory_norm = 62.41513442993164`
+  - `coordinate_noeffect_count = 36.650413513183594`
+  - final observed outcome is no-effect
+  - action histogram:
+    - `click:31:1 = 33`
+    - `click:31:28 = 8`
+    - other one-off clicks: `click:25:16`, `click:52:46`, `click:31:10`, `click:31:7`, `click:31:4`, `click:7:25`, `click:31:25`
+  - `max_same_action_streak = 5`
+
+Current interpretation:
+
+- coordinate-neighborhood memory improved exact local repetition enough to pass the short same-action streak hygiene target
+- it did not fix column-level collapse; the policy still overvalues an entire `x=31` click column after extensive no-effect evidence
+- the coordinate memory currently stores only aggregate mean/moment evidence, so many failed clicks along one column can leave far-away cells in the same column insufficiently penalized
+- the next mechanism likely needs learned row/column or multi-site no-effect structure, rank-component normalization, or stronger evidence gating, but must remain learned/evidence-updated and finite-scored
+
+Next execution slice:
+
+- commit and push this coordinate no-effect patch so GPT-Pro can inspect the exact code
+- ask GPT-Pro for the next mechanism-level step using the real `click:31:*` histogram and high coordinate memory norm/count
+- do not run a 320-step ARC acquisition probe until the short-run column-collapse hygiene issue is addressed
