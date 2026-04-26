@@ -1331,3 +1331,44 @@ Operator actions recorded for continuity:
    - do not run 320-step ARC
    - real ARC still collapses into a single click column/action despite corrected synthetic hygiene
    - next step is a diagnosis of real click mapping/action-token/rank-component mismatch, not another hard diversity controller
+
+## 2026-04-26 Passive ARC Rank Trace Diagnosis
+
+Operator actions recorded for continuity:
+
+1. Implemented a diagnostics-only rank trace path:
+   - `LearnedOnlineObjectEventAgent.object_event_rank_trace(...)`
+   - harness flags `--object-event-rank-trace-path` and `--object-event-rank-trace-top-k`
+   - `scripts/diagnose_object_event_trace.py`
+   - new regression tests covering non-control behavior and click-token/grid mapping agreement
+2. Verification:
+   - `py_compile` passed for edited source and scripts
+   - focused object-event/parametric tests: `65 passed`
+   - full object-event suite: `111 passed`
+   - recurrent suite: `31 passed`
+3. Traced one 48-step ARC hygiene run:
+   - command: `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent learned_online_object_event --checkpoint-path artifacts\object_event_basis_recovery_runtime_probe.pkl --mode offline --game-limit 1 --max-steps 48 --progress-every 8 --object-event-bridge-diagnostics --object-event-rank-trace-path artifacts\arc_rank_trace_ar25_48.jsonl --object-event-rank-trace-top-k 16`
+   - result: failed hygiene again, no reward, no level completion, no win
+   - compliance still passed: full `447/447` legal/scored actions, no action cap, no oracle, no trace replay, no graph controller, no metadata leakage
+   - rank trace was passive: `runtime_rank_trace_diagnostics_only=true`, `runtime_rank_trace_controls_action=false`
+4. Trace diagnosis:
+   - `scripts\diagnose_object_event_trace.py --trace artifacts\arc_rank_trace_ar25_48.jsonl`
+   - selected action concentration: `click:31:61` `37/48`, `click:31:10` `7/48`
+   - mapping error count: `0`
+   - repeated action `click:31:61` maps consistently to grid cell `(20, 10)`
+   - repeated action mean evidence:
+     - `out_no_effect_prob=0.9998565058450442`
+     - `basis_noeffect=0.9995730213216834`
+     - `family_noeffect=0.9999999871125093`
+     - `diagnostic_utility=-0.23523079559673582`
+     - `component_relation=2.4872559985599003`
+     - `component_coordinate_noeffect=1.0375615519446295`
+     - `component_axis_noeffect=-0.21112685066622658`
+     - `total_score=2.3188516401818497`
+5. Current conclusion:
+   - `48` steps is only a harsh collapse detector, not a fair online-learning budget
+   - do not run long `300+` step acquisition while the short trace shows repeated near-certain no-effect clicks
+   - mapping is not the bug
+   - diagnostic utility is not causing the repeated action
+   - likely failure is learned rank-component/calibration: strong no-effect evidence exists but does not dominate relation/object and coordinate/rank terms under real ARC observations
+   - commit and push this diagnostic patch, then consult GPT-Pro before any model/training/runtime change

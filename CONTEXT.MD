@@ -6157,3 +6157,43 @@ GPT-Pro follow-up on the post-no-effect uniqueness gate:
   - real ARC collapse returned despite synthetic failed-level diversity passing
   - next diagnosis should inspect real click-to-grid mapping, action token rows, and top-score/rank components for the repeated click column
   - do not add hard no-repeat / avoid-column / count-based exploration control
+
+Rank-trace diagnosis after the 48-step hygiene failure:
+
+- implemented passive rank tracing only:
+  - `LearnedOnlineObjectEventAgent.object_event_rank_trace(...)`
+  - harness flags `--object-event-rank-trace-path` and `--object-event-rank-trace-top-k`
+  - `scripts/diagnose_object_event_trace.py`
+  - tests proving the trace does not own action selection and click-token decoding matches the normal click-to-grid mapping
+- verification:
+  - `py_compile` passed for agent, harness, trace diagnosis script, and object-event trainer
+  - focused object-event/parametric tests: `65 passed`
+  - full object-event suite: `111 passed`
+  - recurrent suite: `31 passed`
+- traced run:
+  - `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent learned_online_object_event --checkpoint-path artifacts\object_event_basis_recovery_runtime_probe.pkl --mode offline --game-limit 1 --max-steps 48 --progress-every 8 --object-event-bridge-diagnostics --object-event-rank-trace-path artifacts\arc_rank_trace_ar25_48.jsonl --object-event-rank-trace-top-k 16`
+- traced result:
+  - no reward, no level completion, no win
+  - full `447/447` legal/scored actions
+  - rank trace marks `runtime_rank_trace_diagnostics_only = true` and `runtime_rank_trace_controls_action = false`
+  - selected action counts: `click:31:61` `37/48`, `click:31:10` `7/48`, four other clicks once each
+  - mapping error count: `0`
+  - repeated `click:31:61` maps consistently to grid cell `(20, 10)`
+  - repeated-action means:
+    - `out_no_effect_prob = 0.9998565058450442`
+    - `basis_noeffect = 0.9995730213216834`
+    - `family_noeffect = 0.9999999871125093`
+    - `component_relation = 2.4872559985599003`
+    - `component_coordinate_noeffect = 1.0375615519446295`
+    - `component_axis_noeffect = -0.21112685066622658`
+    - `diagnostic_utility = -0.23523079559673582`
+    - `total_score = 2.3188516401818497`
+- interpretation:
+  - this is not a click mapping/token decoding bug
+  - this is not diagnostic utility causing repeated action selection; diagnostic utility is negative on the repeated action
+  - the learned rank path is failing to turn strong same-session no-effect evidence into a decisive action-preference change under deployed real-ARC observations
+  - likely next category is rank-component/calibration failure: relation/object prior and learned coordinate/no-effect components still overpower no-effect beliefs in the real slice
+  - `48` steps remains a harsh hygiene detector only; do not infer long-budget online incompetence from the short cutoff alone, but do not run a long acquisition probe while the trace shows obvious no-effect repetition collapse
+- next execution slice:
+  - commit and push the passive trace patch plus docs
+  - consult GPT-Pro with commit hash, trace summary, and exact failure category before changing runtime behavior or training objectives

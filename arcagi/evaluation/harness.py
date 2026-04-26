@@ -236,6 +236,8 @@ def run_episode(
     progress_every: int = 0,
     trace_path: str | Path | None = None,
     object_event_bridge_diagnostics: bool = False,
+    object_event_rank_trace_path: str | Path | None = None,
+    object_event_rank_trace_top_k: int = 16,
 ) -> dict[str, object]:
     observation = env.reset(seed=seed)
     _reset_agent_for_episode(agent)
@@ -274,6 +276,7 @@ def run_episode(
     runtime_rank_weight_values: list[float] = []
     last_bridge_diagnostics: dict[str, Any] = {}
     trace_handle = None
+    rank_trace_handle = None
     try:
         if trace_path is not None:
             trace_file = Path(trace_path)
@@ -294,6 +297,10 @@ def run_episode(
                     **claim_metadata,
                 },
             )
+        if object_event_rank_trace_path is not None:
+            rank_trace_file = Path(object_event_rank_trace_path)
+            rank_trace_file.parent.mkdir(parents=True, exist_ok=True)
+            rank_trace_handle = rank_trace_file.open("w", encoding="utf-8")
         while not done and (max_steps is None or steps < max_steps):
             before = observation
             before_levels = _levels_completed(before)
@@ -376,6 +383,36 @@ def run_episode(
             )
             if bridge_diagnostics:
                 last_bridge_diagnostics = bridge_diagnostics
+            if rank_trace_handle is not None:
+                rank_trace_fn = getattr(agent, "object_event_rank_trace", None)
+                rank_trace = {}
+                if callable(rank_trace_fn):
+                    try:
+                        rank_trace = rank_trace_fn(before_actions, top_k=max(1, int(object_event_rank_trace_top_k)))
+                    except Exception as exc:
+                        rank_trace = {
+                            "runtime_rank_trace_diagnostics_only": True,
+                            "runtime_rank_trace_controls_action": False,
+                            "rank_trace_available": False,
+                            "rank_trace_error": repr(exc),
+                        }
+                _write_trace_row(
+                    rank_trace_handle,
+                    {
+                        "event": "object_event_rank_trace",
+                        "step": steps + 1,
+                        "family_id": getattr(env, "family_id", getattr(env, "task_id", "unknown")),
+                        "selected_action": action_text,
+                        "reward": float(result.reward),
+                        "terminated": bool(result.terminated or result.truncated),
+                        "before_levels_completed": before_levels,
+                        "after_levels_completed": _levels_completed(result.observation),
+                        "legal_action_count": len(before_actions),
+                        "scored_action_count": int(rank_trace.get("scored_action_count", 0) or 0) if isinstance(rank_trace, dict) else 0,
+                        "object_event_bridge": bridge_diagnostics,
+                        "rank_trace": rank_trace,
+                    },
+                )
             _observe_step(agent, action=action_text, before=before, result=result)
             observation = result.observation
             after_levels = _levels_completed(observation)
@@ -501,6 +538,8 @@ def run_episode(
                 },
             )
             trace_handle.close()
+        if rank_trace_handle is not None:
+            rank_trace_handle.close()
     return {
         "success": success,
         "won": won,
@@ -595,6 +634,8 @@ def evaluate_arc(
     trace_path: str | None = None,
     allow_sparse_click_smoke: bool = False,
     object_event_bridge_diagnostics: bool = False,
+    object_event_rank_trace_path: str | None = None,
+    object_event_rank_trace_top_k: int = 16,
 ) -> dict[str, object]:
     if not arc_toolkit_available():
         return {"agent": agent_name, "skipped": True, "reason": "ARC toolkit not installed"}
@@ -623,6 +664,15 @@ def evaluate_arc(
                 progress_every=progress_every,
                 trace_path=_trace_path_for_game(trace_path, game_id, index, len(games)) if trace_path else None,
                 object_event_bridge_diagnostics=bool(object_event_bridge_diagnostics),
+                object_event_rank_trace_path=_trace_path_for_game(
+                    object_event_rank_trace_path,
+                    game_id,
+                    index,
+                    len(games),
+                )
+                if object_event_rank_trace_path
+                else None,
+                object_event_rank_trace_top_k=int(object_event_rank_trace_top_k),
             )
         finally:
             env.close()
@@ -735,6 +785,10 @@ def _compact_diagnostics(diagnostics: Any) -> dict[str, Any]:
         "runtime_diagnostic_mix_effective",
         "runtime_diagnostic_mix_evidence_gate",
         "runtime_rank_weight_effective",
+        "runtime_hygiene_diversity_diagnostics_only",
+        "runtime_diversity_controller_active",
+        "runtime_rank_trace_diagnostics_only",
+        "runtime_rank_trace_controls_action",
         "runtime_greedy_rank_selection",
         "runtime_controller_active",
         "objective_stall_steps",
@@ -889,6 +943,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="emit passive selected-action object-event bridge diagnostics without changing control",
     )
+    arc_parser.add_argument(
+        "--object-event-rank-trace-path",
+        type=str,
+        default="",
+        help="write passive object-event rank/action-token JSONL diagnostics without changing control",
+    )
+    arc_parser.add_argument("--object-event-rank-trace-top-k", type=int, default=16)
     return parser
 
 
@@ -917,6 +978,8 @@ def main() -> int:
             trace_path=args.trace_path or None,
             allow_sparse_click_smoke=bool(args.allow_sparse_click_smoke),
             object_event_bridge_diagnostics=bool(args.object_event_bridge_diagnostics),
+            object_event_rank_trace_path=args.object_event_rank_trace_path or None,
+            object_event_rank_trace_top_k=max(1, int(args.object_event_rank_trace_top_k)),
         )
         print(json.dumps(result, indent=2))
         return 0

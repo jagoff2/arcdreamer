@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pickle
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -532,6 +533,94 @@ def test_harness_reports_hygiene_diversity_metrics_without_controller_state() ->
     assert result["runtime_diagnostic_mix_effective"] == 0.1
     assert result["runtime_rank_weight_effective"] == 0.9
     assert not hasattr(ScriptedAgent(), "coverage_queue")
+
+
+def test_object_event_rank_trace_does_not_control_action_selection() -> None:
+    level = _parametric_level()
+    observation = level_to_grid_observation(level)
+    agent = LearnedOnlineObjectEventAgent(seed=35, device="cpu", temperature=0.1, epsilon_floor=0.0)
+
+    action = agent.act(observation)
+    trace = agent.object_event_rank_trace(observation.available_actions, top_k=8)
+
+    assert agent.last_action == action
+    assert trace["runtime_rank_trace_diagnostics_only"] is True
+    assert trace["runtime_rank_trace_controls_action"] is False
+    assert trace["selected_action"] == action
+    assert len(trace["top_actions"]) == 8
+    for forbidden in ("trace_cursor", "state_hash_to_action", "action_sequence", "frontier", "coverage_queue", "blacklist"):
+        assert not hasattr(agent, forbidden)
+
+
+def test_object_event_rank_trace_topk_contains_finite_component_values() -> None:
+    level = _parametric_level()
+    observation = level_to_grid_observation(level)
+    agent = LearnedOnlineObjectEventAgent(seed=36, device="cpu", temperature=0.1, epsilon_floor=0.0)
+
+    agent.act(observation)
+    trace = agent.object_event_rank_trace(observation.available_actions, top_k=4)
+
+    for record in trace["top_actions"]:
+        for key in (
+            "total_score",
+            "policy_rank",
+            "diagnostic_utility",
+            "component_total",
+            "component_base",
+            "component_relation",
+            "component_coordinate_noeffect",
+            "component_axis_noeffect",
+            "basis_noeffect",
+        ):
+            assert np.isfinite(float(record[key]))
+
+
+def test_action_numeric_decode_matches_click_to_grid_mapping() -> None:
+    level = _parametric_level()
+    observation = level_to_grid_observation(level)
+    agent = LearnedOnlineObjectEventAgent(seed=37, device="cpu", temperature=0.1, epsilon_floor=0.0)
+
+    agent.act(observation)
+    trace = agent.object_event_rank_trace(observation.available_actions, top_k=16)
+    click_records = [record for record in trace["top_actions"] if str(record["action"]).startswith("click:")]
+
+    assert click_records
+    assert all(record["action_token"]["mapping_match"] is True for record in click_records)
+
+
+def test_harness_rank_trace_writes_jsonl_without_replay_or_action_change(tmp_path: Path) -> None:
+    class Env:
+        def reset(self, seed: int = 0) -> GridObservation:
+            return _observation(actions=tuple(f"click:{x}:{y}" for y in range(4) for x in range(4)))
+
+        def step(self, action: str) -> SimpleNamespace:
+            return SimpleNamespace(
+                observation=_observation(actions=tuple(f"click:{x}:{y}" for y in range(4) for x in range(4))),
+                reward=0.0,
+                terminated=False,
+                truncated=False,
+                info={},
+            )
+
+    trace_path = tmp_path / "rank_trace.jsonl"
+    agent = LearnedOnlineObjectEventAgent(seed=38, device="cpu", temperature=0.1, epsilon_floor=0.0)
+
+    result = run_episode(
+        agent,
+        Env(),
+        seed=0,
+        max_steps=1,
+        object_event_rank_trace_path=trace_path,
+        object_event_rank_trace_top_k=4,
+    )
+    rows = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    assert result["steps"] == 1
+    assert len(rows) == 1
+    assert rows[0]["rank_trace"]["runtime_rank_trace_diagnostics_only"] is True
+    assert rows[0]["rank_trace"]["runtime_rank_trace_controls_action"] is False
+    assert rows[0]["selected_action"] == result["diagnostics"]["selected_action"]
+    assert len(rows[0]["rank_trace"]["top_actions"]) == 4
 
 
 def test_harness_alias_loads_object_event_checkpoint(tmp_path: Path) -> None:

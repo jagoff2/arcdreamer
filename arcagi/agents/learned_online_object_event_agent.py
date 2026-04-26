@@ -9,11 +9,15 @@ import numpy as np
 import torch
 
 from arcagi.agents.base import BaseAgent
-from arcagi.core.action_schema import build_action_schema, build_action_schema_context, parse_click_action
+from arcagi.core.action_schema import build_action_schema, build_action_schema_context, click_action_to_grid_cell, parse_click_action
 from arcagi.core.types import ActionName, GridObservation, StructuredState, Transition
 from arcagi.learned_online.event_tokens import (
+    ACTION_FEATURE_CLICK_X,
+    ACTION_FEATURE_CLICK_Y,
     ACTION_FEATURE_GRID_COL,
+    ACTION_FEATURE_GRID_ROW,
     ACTION_FEATURE_HAS_GRID_CELL,
+    ACTION_FEATURE_IS_CLICK,
     OUT_ACTION_AVAIL_CHANGED,
     OUT_APPEARED_OR_DISAPPEARED,
     OUT_HARM,
@@ -405,6 +409,8 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             "runtime_rank_weight_effective": float(self.last_runtime_rank_weight_effective),
             "runtime_hygiene_diversity_diagnostics_only": True,
             "runtime_diversity_controller_active": False,
+            "runtime_rank_trace_diagnostics_only": True,
+            "runtime_rank_trace_controls_action": False,
             **self.last_rank_component_stats,
             "runtime_greedy_rank_selection": True,
             "runtime_trace_cursor": False,
@@ -878,6 +884,204 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
                 stats["relation_positive_prior_failed_column_mean"] = float(np.mean(relation_positive_prior[same_x_mask]))
                 stats["relation_prior_after_contradiction_failed_column_mean"] = float(np.mean(relation_prior_after[same_x_mask]))
         return stats
+
+    def object_event_rank_trace(self, actions: Sequence[ActionName] | None = None, *, top_k: int = 16) -> dict[str, object]:
+        state = getattr(self, "last_state", None)
+        if state is None:
+            return {
+                "runtime_rank_trace_diagnostics_only": True,
+                "runtime_rank_trace_controls_action": False,
+                "rank_trace_available": False,
+                "rank_trace_error": "no_last_state",
+            }
+        action_tuple = tuple(state.affordances if actions is None else actions)
+        if not action_tuple:
+            return {
+                "runtime_rank_trace_diagnostics_only": True,
+                "runtime_rank_trace_controls_action": False,
+                "rank_trace_available": False,
+                "rank_trace_error": "no_actions",
+            }
+        with torch.no_grad():
+            output, action_batch = self._forward_state_actions(state, action_tuple)
+            probabilities, scores, outcome_probs, values = self._calibrated_distribution(output, action_batch.mask)
+            mask_tensor = torch.as_tensor(action_batch.mask[None, :], dtype=torch.bool, device=output.outcome_logits.device)
+            rank_logits = policy_rank_logits_from_predictions(output, mask_tensor)[0].detach().cpu().numpy().astype(np.float64)
+        valid = np.asarray(action_batch.mask, dtype=bool)
+        rank_scores = _standardize_valid(rank_logits, valid)
+        diagnostic_raw = np.zeros_like(rank_scores, dtype=np.float64)
+        diagnostic_logits = getattr(output, "diagnostic_utility_logits", None)
+        if diagnostic_logits is not None:
+            diagnostic_raw = diagnostic_logits[0].detach().cpu().numpy().astype(np.float64)
+        diagnostic_standardized = _standardize_valid(diagnostic_raw, valid)
+        entropy_tiebreak = _standardize_valid(_binary_entropy(outcome_probs), valid)
+        diagnostic_utility = self.last_runtime_diagnostic_mix * diagnostic_standardized + self.entropy_tiebreak_weight * entropy_tiebreak
+        components = getattr(output, "rank_components", None)
+        top_count = min(max(int(top_k), 1), int(np.count_nonzero(valid)))
+        valid_indices = np.flatnonzero(valid)
+        ranked_indices = valid_indices[np.argsort(np.asarray(scores, dtype=np.float64)[valid])[-top_count:]][::-1] if top_count else []
+        selected_action = str(self.last_decision.action) if self.last_decision is not None else ""
+        selected_index = action_tuple.index(selected_action) if selected_action in action_tuple else -1
+        top_actions = [
+            self._rank_trace_action_record(
+                state=state,
+                action_tuple=action_tuple,
+                action_numeric=np.asarray(action_batch.numeric, dtype=np.float32),
+                output=output,
+                components=components,
+                index=int(index),
+                rank=rank + 1,
+                total_score=float(scores[int(index)]),
+                probability=float(probabilities[int(index)]),
+                policy_rank=float(rank_scores[int(index)]),
+                rank_logit=float(rank_logits[int(index)]),
+                diagnostic_utility=float(diagnostic_utility[int(index)]),
+                outcome_probs=outcome_probs,
+                value=float(values[int(index)]),
+            )
+            for rank, index in enumerate(ranked_indices)
+        ]
+        selected_record = (
+            self._rank_trace_action_record(
+                state=state,
+                action_tuple=action_tuple,
+                action_numeric=np.asarray(action_batch.numeric, dtype=np.float32),
+                output=output,
+                components=components,
+                index=int(selected_index),
+                rank=0,
+                total_score=float(scores[int(selected_index)]),
+                probability=float(probabilities[int(selected_index)]),
+                policy_rank=float(rank_scores[int(selected_index)]),
+                rank_logit=float(rank_logits[int(selected_index)]),
+                diagnostic_utility=float(diagnostic_utility[int(selected_index)]),
+                outcome_probs=outcome_probs,
+                value=float(values[int(selected_index)]),
+            )
+            if selected_index >= 0
+            else {}
+        )
+        return {
+            "runtime_rank_trace_diagnostics_only": True,
+            "runtime_rank_trace_controls_action": False,
+            "rank_trace_available": True,
+            "legal_action_count": int(len(action_tuple)),
+            "scored_action_count": int(np.count_nonzero(valid)),
+            "selected_action": selected_action,
+            "selected_action_index": int(selected_index),
+            "diagnostic_mix": float(self.last_runtime_diagnostic_mix),
+            "rank_weight": float(self.last_runtime_rank_weight_effective),
+            "selected_previous_noeffect_memory": {
+                "coordinate_noeffect_count": float(self.diagnostics().get("coordinate_noeffect_count", 0.0) or 0.0),
+                "axis_noeffect_count": float(self.diagnostics().get("axis_noeffect_count", 0.0) or 0.0),
+                "basis_noeffect_count": float(self.diagnostics().get("action_basis_noeffect_count", 0.0) or 0.0),
+            },
+            "selected_rank": selected_record,
+            "selected_action_token": selected_record.get("action_token", {}) if isinstance(selected_record, dict) else {},
+            "top_actions": top_actions,
+        }
+
+    def _rank_trace_action_record(
+        self,
+        *,
+        state: StructuredState,
+        action_tuple: Sequence[ActionName],
+        action_numeric: np.ndarray,
+        output,
+        components,
+        index: int,
+        rank: int,
+        total_score: float,
+        probability: float,
+        policy_rank: float,
+        rank_logit: float,
+        diagnostic_utility: float,
+        outcome_probs: np.ndarray,
+        value: float,
+    ) -> dict[str, object]:
+        action = str(action_tuple[index])
+        return {
+            "rank": int(rank),
+            "action": action,
+            "action_index": int(index),
+            "total_score": float(total_score),
+            "probability": float(probability),
+            "policy_rank": float(policy_rank),
+            "rank_logit": float(rank_logit),
+            "diagnostic_utility": float(diagnostic_utility),
+            "diagnostic_mix": float(self.last_runtime_diagnostic_mix),
+            "rank_weight": float(self.last_runtime_rank_weight_effective),
+            "component_total": self._rank_component_value(components, "total", index),
+            "component_base": self._rank_component_value(components, "base", index),
+            "component_relation": self._rank_component_value(components, "relation", index),
+            "component_failed_action": self._rank_component_value(components, "failed_action", index),
+            "component_coordinate_noeffect": self._rank_component_value(components, "coordinate_noeffect", index),
+            "component_axis_noeffect": self._rank_component_value(components, "axis_noeffect", index),
+            "component_base_raw": self._rank_component_value(components, "base_raw", index),
+            "component_relation_raw": self._rank_component_value(components, "relation_raw", index),
+            "component_failed_action_raw": self._rank_component_value(components, "failed_action_raw", index),
+            "component_coordinate_noeffect_raw": self._rank_component_value(components, "coordinate_noeffect_raw", index),
+            "component_axis_noeffect_raw": self._rank_component_value(components, "axis_noeffect_raw", index),
+            "relation_object_prior": self._rank_component_value(components, "relation_object_prior", index),
+            "relation_positive_prior": self._rank_component_value(components, "relation_positive_prior", index),
+            "relation_negative_prior": self._rank_component_value(components, "relation_negative_prior", index),
+            "relation_repeat_penalty": self._rank_component_value(components, "relation_repeat_penalty", index),
+            "relation_contradiction_gate": self._rank_component_value(components, "relation_contradiction_gate", index),
+            "out_no_effect_prob": float(outcome_probs[index, OUT_NO_EFFECT_NONPROGRESS]),
+            "value": float(value),
+            "action_token": self._decode_action_numeric_row(state, action, action_numeric[index]),
+            "family_mean_effect": self._posterior_value(output, "action_family_posterior_features", index, 0),
+            "family_uncertainty": self._posterior_value(output, "action_family_posterior_features", index, 1),
+            "family_count": self._posterior_value(output, "action_family_posterior_features", index, 2),
+            "family_noeffect": self._posterior_value(output, "action_family_posterior_features", index, 3),
+            "basis_mean_effect": self._posterior_value(output, "action_basis_posterior_features", index, 0),
+            "basis_uncertainty": self._posterior_value(output, "action_basis_posterior_features", index, 1),
+            "basis_count": self._posterior_value(output, "action_basis_posterior_features", index, 2),
+            "basis_noeffect": self._posterior_value(output, "action_basis_posterior_features", index, 3),
+        }
+
+    def _rank_component_value(self, components, name: str, index: int) -> float:
+        tensor = getattr(components, name, None) if components is not None else None
+        if tensor is None:
+            return 0.0
+        return float(tensor[0, int(index)].detach().cpu())
+
+    def _posterior_value(self, output, name: str, index: int, column: int) -> float:
+        tensor = getattr(output, name, None)
+        if tensor is None or tensor.shape[-1] <= int(column):
+            return 0.0
+        return float(tensor[0, int(index), int(column)].detach().cpu())
+
+    def _decode_action_numeric_row(self, state: StructuredState, action: str, row: np.ndarray) -> dict[str, object]:
+        row = np.asarray(row, dtype=np.float64)
+        click = parse_click_action(action)
+        mapped = click_action_to_grid_cell(action, grid_shape=state.grid_shape, inventory=state.inventory_dict())
+        token_cell: tuple[int, int] | None = None
+        if float(row[ACTION_FEATURE_HAS_GRID_CELL]) > 0.5:
+            height, width = state.grid_shape
+            token_row = int(round(float(row[ACTION_FEATURE_GRID_ROW]) * max(int(height) - 1, 1)))
+            token_col = int(round(float(row[ACTION_FEATURE_GRID_COL]) * max(int(width) - 1, 1)))
+            token_cell = (token_row, token_col)
+        decoded: dict[str, object] = {
+            "screen_x_raw": int(click[0]) if click is not None else None,
+            "screen_y_raw": int(click[1]) if click is not None else None,
+            "mapped_grid_cell_from_action": list(mapped) if mapped is not None else None,
+            "mapped_grid_cell_from_token": list(token_cell) if token_cell is not None else None,
+            "mapping_match": bool(mapped == token_cell) if mapped is not None and token_cell is not None else False,
+            "is_click": float(row[ACTION_FEATURE_IS_CLICK]),
+            "click_x": float(row[ACTION_FEATURE_CLICK_X]),
+            "click_y": float(row[ACTION_FEATURE_CLICK_Y]),
+            "has_grid_cell": float(row[ACTION_FEATURE_HAS_GRID_CELL]),
+            "grid_row": float(row[ACTION_FEATURE_GRID_ROW]),
+            "grid_col": float(row[ACTION_FEATURE_GRID_COL]),
+            "contains_object": float(row[11]) if row.shape[0] > 11 else 0.0,
+            "related_object_present": float(row[12]) if row.shape[0] > 12 else 0.0,
+            "related_object_color": float(row[13]) if row.shape[0] > 13 else 0.0,
+            "related_object_agent_tag": float(row[24]) if row.shape[0] > 24 else 0.0,
+        }
+        for index in range(min(int(row.shape[0]), 16)):
+            decoded[f"feature_{index}"] = float(row[index])
+        return decoded
 
     def _start_new_level(self) -> None:
         self.level_belief = torch.zeros_like(self.level_belief)
