@@ -5283,3 +5283,23 @@ Current interpretation:
   - real ARC exposes `447` legal actions
   - real diagnostic collapses to repeated high-score parametric clicks
 - next step should be reviewed with GPT-Pro before coding; likely direction is a non-scripted parameterized-action synthetic curriculum with larger real-like action surfaces and learned anti-repeat/uncertainty revision, not graph search, replay, fixed probes, or per-game code
+
+GPT-Pro consensus after pushed `81d96b4`:
+
+- diagnosis is correct
+- extracted-state runtime gate is valid
+- real ARC failure now points to a larger action-surface and no-effect revision gap
+- next commit should add an ARC-scale parameterized synthetic action surface, not trace bootstrap, graph/frontier search, per-game training, or language
+- first target should use `--action-surface arc_scale_parametric --action-surface-size 447 --coordinate-grid-size 64`
+- synthetic positives should become a mask/region, not one single `correct_action_index`
+- no-effect memory must be learned and evidence-updated, not a hard blacklist
+- next ARC diagnostic should be behavioral hygiene only: eliminate repeated no-effect click collapse, not require reward
+
+Crash recovery note on 2026-04-25:
+
+- after the PC crash, `git status --short` showed only `CONTEXT.MD` and `TASKS.MD` modified
+- branch `main` was still at pushed commit `81d96b4`
+- no parametric source implementation had been written before the crash
+- newest artifact was still `artifacts/object_event_extracted_runtime_probe.pkl`; no `object_event_parametric_runtime_probe.pkl` existed
+- remaining local Python processes were DuckDuckGo MCP server processes, not repo training or ARC eval jobs
+- resume point remains the GPT-Pro agreed ARC-scale parameterized action-surface curriculum and learned no-effect revision work
