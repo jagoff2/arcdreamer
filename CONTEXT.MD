@@ -6002,3 +6002,63 @@ Current interpretation:
 - this is not ARC-ready and no real ARC run should be made from this artifact
 - next step should not add a basis controller; it should calibrate the learned diagnostic influence or train recovery from diagnostic action back to true positives
 - likely knobs: lower action-basis diagnostic loss/margin weights, lower post-no-effect diagnostic mix target, require stronger evidence before high diagnostic mix, or add a learned exploit-after-diagnostic objective
+
+## 2026-04-26 Basis Recovery Calibration WIP
+
+GPT-Pro consensus after the failed fixed action-basis gate:
+
+- do not run real ARC from `artifacts/object_event_action_basis_runtime_probe.pkl`
+- do not add another representation mechanism or controller
+- next patch should calibrate action-basis diagnostic recovery
+- cap/shape diagnostic mix so it cannot dominate rank except under strong evidence
+- train post-diagnostic recovery so diagnostic action is valuable only if it improves the next decision
+- select the synthetic checkpoint with a composite competence/diversity score
+- keep all dense legal actions finite-scored and avoid forbidden search, sweeps, replay, or hard diversity controllers
+
+Implemented in current uncommitted WIP:
+
+- `LearnedOnlineObjectEventAgent` has bounded diagnostic mix defaults: `diagnostic_mix_max=0.35`, `diagnostic_mix_min_evidence=0.25`, `diagnostic_mix_slope=1.0`, `entropy_tiebreak_weight=0.05`
+- `_calibrated_distribution(...)` now combines rank scores and learned diagnostics with an evidence-gated effective mix rather than allowing the diagnostic term to dominate under weak evidence
+- runtime diagnostics report model mix, evidence gate, effective mix, max mix, and effective rank weight
+- trainer adds `--diagnostic-recovery-loss-weight` and `--diagnostic-recovery-margin-weight`
+- training simulates a non-positive diagnostic candidate, updates belief with its observed outcome, and trains the post-update policy back toward positive legal actions
+- trainer adds `runtime_agent_act_path_balanced_score` for save-best selection
+- verification already passed: `py_compile`, focused parametric/agent tests `47 passed`, full object-event suite `101 passed`, recurrent suite `31 passed`
+
+Important ARC budget note:
+
+- `48` real ARC steps is a harsh hygiene cutoff for detecting collapse/forbidden behavior only
+- do not treat failure at `48` steps as proof the learned online agent cannot infer the game
+- if synthetic gates pass, run a short `48` hygiene diagnostic first, then a longer online ARC run; prior real ARC success reportedly required roughly `300` steps
+
+Basis-recovery gate result:
+
+- command used the GPT-Pro-recommended 447-action extracted-state synthetic gate with `--steps 200`, `--max-steps-per-level 5`, `--action-basis-diagnostic-loss-weight 0.10`, `--action-basis-postfailure-margin-weight 0.05`, `--diagnostic-recovery-loss-weight 0.35`, `--diagnostic-recovery-margin-weight 0.20`, and `--selection-metric runtime_agent_act_path_balanced_score`
+- artifact: `artifacts/object_event_basis_recovery_runtime_probe.pkl`
+- checkpoint best step: `200`
+- selected metric: `runtime_agent_act_path_balanced_score = 1.0197727272727273`
+- result: failed full synthetic gate because competence recovered but diversity/concentration did not pass
+- full action surface and compliance:
+  - `extracted_num_legal_actions_mean = 447.0`
+  - `runtime_agent_act_path_num_legal_actions_mean = 447.0`
+  - `metadata_model_input_forbidden_count = 0.0`
+  - `object_event_action_surface_capped = false`
+  - `graph_controller_used = false`
+  - `trace_replay_used = false`
+- best/final act-path metrics:
+  - `runtime_agent_act_path_active_success_within_5 = 0.8958333333333334`
+  - `runtime_agent_act_path_active_success_within_3 = 0.8333333333333334`
+  - `runtime_agent_act_path_next_level_first_try_acc = 0.7916666666666666`
+  - `runtime_agent_act_path_runtime_diagnostic_mix_effective = 0.07618887486842353`
+  - `runtime_agent_act_path_runtime_rank_weight_effective = 0.9238111251315765`
+  - `action_basis_diag_top1_rate = 1.0`
+  - `action_basis_known_noeffect_top1_rate = 0.0`
+  - `runtime_agent_act_path_unique_action_count_mean = 1.8958333333333333`
+  - `runtime_agent_act_path_selected_unique_x_count = 1.8958333333333333`
+  - `runtime_agent_act_path_selected_unique_mapped_col_count = 1.7291666666666667`
+  - `runtime_agent_act_path_top_score_same_mapped_col_fraction = 0.7342171717171716`
+- interpretation:
+  - bounded diagnostic mix and recovery training fixed the competence regression from the previous action-basis probe
+  - the remaining blocker is low learned action diversity / residual mapped-column concentration
+  - this artifact is not ARC-ready because it fails the diversity/concentration gate
+  - next change should be made after GPT-Pro review of the pushed code and artifact; it must not become a hard diversity controller or scripted probe schedule

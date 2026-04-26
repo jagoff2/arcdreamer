@@ -1205,3 +1205,50 @@ Operator actions recorded for continuity:
    - current loss/mix makes diagnostic action choice dominate and destroys exploitation
    - this artifact is not ARC-ready and should not be used for a real ARC run
    - commit/push the failure honestly, then ask GPT-Pro whether to lower/calibrate diagnostic mix, add exploit-after-diagnostic supervision, or change the basis target
+
+## 2026-04-26 Basis Recovery Calibration WIP
+
+Operator actions recorded for continuity:
+
+1. Used GPT-Pro consensus from the pushed action-basis failure as the current action plan.
+2. Implemented bounded/evidence-gated diagnostic mix in `LearnedOnlineObjectEventAgent`.
+3. Implemented post-diagnostic recovery supervision in `scripts/train_learned_online_object_event.py`.
+4. Implemented balanced runtime checkpoint score combining within-5 competence, action/x/column diversity, and penalties for column concentration or excessive diagnostic mix.
+5. Verified:
+   - `py_compile` passed for trainer, agent, and model
+   - focused parametric/agent tests: `47 passed`
+   - full object-event suite: `101 passed`
+   - recurrent suite: `31 passed`
+6. Current execution rule:
+   - run the 447-action synthetic basis-recovery gate next
+   - do not stop the gate early
+   - do not run real ARC until the synthetic gate passes
+   - treat `48` real ARC steps as a hygiene/collapse detector only, not as an online-learning success budget; prior real ARC success reportedly took roughly `300` steps
+
+7. 447-action synthetic basis-recovery gate completed:
+   - command used `--steps 200`, full `447` action surface, extracted state source, bounded diagnostic mix, recovery losses, and save-best by `runtime_agent_act_path_balanced_score`
+   - artifact: `artifacts/object_event_basis_recovery_runtime_probe.pkl`
+   - checkpoint best step: `200`
+   - selection metric value: `1.0197727272727273`
+   - full `447` scoring and no metadata leakage
+   - no graph controller, trace replay, oracle support, or action cap flags
+8. Gate result:
+   - failed the full synthetic gate on diversity/concentration
+   - recovered competence:
+     - within-5 `0.8958333333333334`
+     - within-3 `0.8333333333333334`
+     - next-level first try `0.7916666666666666`
+     - effective diagnostic mix `0.07618887486842353`
+     - effective rank weight `0.9238111251315765`
+     - action-basis diagnostic top1 `1.0`
+     - known-no-effect basis top1 `0.0`
+   - failed diversity/concentration:
+     - unique actions `1.8958333333333333`
+     - selected unique x `1.8958333333333333`
+     - selected unique mapped columns `1.7291666666666667`
+     - top-score same mapped column fraction `0.7342171717171716`
+9. Current conclusion:
+   - the recovery patch is directionally useful because it restores rank/exploit competence without diagnostic domination
+   - it is not ARC-ready because selected action diversity remains below the gate
+   - commit and push the WIP plus artifact, then ask GPT-Pro for the next intervention
+   - do not run real ARC from this artifact unless explicitly labeled as a smoke/hygiene diagnostic

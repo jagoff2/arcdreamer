@@ -65,7 +65,10 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         temperature: float = 0.35,
         epsilon_floor: float = 0.01,
         diagnostic_utility_weight: float = 0.75,
-        entropy_tiebreak_weight: float = 0.10,
+        entropy_tiebreak_weight: float = 0.05,
+        diagnostic_mix_max: float = 0.35,
+        diagnostic_mix_min_evidence: float = 0.25,
+        diagnostic_mix_slope: float = 1.0,
     ) -> None:
         super().__init__(name="learned_online_object_event")
         self.seed = int(seed)
@@ -78,6 +81,9 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         self.epsilon_floor = float(epsilon_floor)
         self.diagnostic_utility_weight = float(diagnostic_utility_weight)
         self.entropy_tiebreak_weight = float(entropy_tiebreak_weight)
+        self.diagnostic_mix_max = min(max(float(diagnostic_mix_max), 0.0), 1.0)
+        self.diagnostic_mix_min_evidence = min(max(float(diagnostic_mix_min_evidence), 0.0), 1.0)
+        self.diagnostic_mix_slope = max(float(diagnostic_mix_slope), 1.0e-6)
         self.session_belief = torch.zeros((self.config.d_model,), dtype=torch.float32, device=self.device)
         self.level_belief = torch.zeros((self.config.d_model,), dtype=torch.float32, device=self.device)
         self.level_epoch = 0
@@ -109,6 +115,9 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         self.last_runtime_learned_diagnostic_utility_std = 0.0
         self.last_runtime_entropy_tiebreak_std = 0.0
         self.last_runtime_diagnostic_mix = 0.0
+        self.last_runtime_diagnostic_mix_model_value = 0.0
+        self.last_runtime_diagnostic_mix_evidence_gate = 0.0
+        self.last_runtime_rank_weight_effective = 1.0
         self.last_rank_component_stats: dict[str, object] = {}
         self.metadata = self.checkpoint_metadata()
 
@@ -145,6 +154,9 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         self.last_runtime_learned_diagnostic_utility_std = 0.0
         self.last_runtime_entropy_tiebreak_std = 0.0
         self.last_runtime_diagnostic_mix = 0.0
+        self.last_runtime_diagnostic_mix_model_value = 0.0
+        self.last_runtime_diagnostic_mix_evidence_gate = 0.0
+        self.last_runtime_rank_weight_effective = 1.0
         self.last_rank_component_stats = {}
 
     def reset_level(self) -> None:
@@ -386,6 +398,11 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             "runtime_learned_diagnostic_utility_std": float(self.last_runtime_learned_diagnostic_utility_std),
             "runtime_entropy_tiebreak_std": float(self.last_runtime_entropy_tiebreak_std),
             "runtime_diagnostic_mix": float(self.last_runtime_diagnostic_mix),
+            "runtime_diagnostic_mix_effective": float(self.last_runtime_diagnostic_mix),
+            "runtime_diagnostic_mix_model_value": float(self.last_runtime_diagnostic_mix_model_value),
+            "runtime_diagnostic_mix_evidence_gate": float(self.last_runtime_diagnostic_mix_evidence_gate),
+            "runtime_diagnostic_mix_max": float(self.diagnostic_mix_max),
+            "runtime_rank_weight_effective": float(self.last_runtime_rank_weight_effective),
             **self.last_rank_component_stats,
             "runtime_greedy_rank_selection": True,
             "runtime_trace_cursor": False,
@@ -472,6 +489,8 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             "runtime_uses_policy_rank_logits": True,
             "runtime_uses_learned_diagnostic_utility": True,
             "runtime_uncertainty_diagnostic_utility": True,
+            "runtime_bounded_diagnostic_mix": True,
+            "runtime_diagnostic_mix_max": 0.35,
             "runtime_greedy_rank_selection": True,
             "trace_bootstrap_used": bool(trace_bootstrap_used),
             "trace_bootstrap_transition_count": int(trace_bootstrap_transition_count),
@@ -541,13 +560,17 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         entropy_tiebreak = _standardize_valid(entropy, valid)
         mix_logit = getattr(output, "diagnostic_mix_logit", None)
         if mix_logit is None:
-            diagnostic_mix = 0.0
+            model_mix = 0.0
         else:
-            diagnostic_mix = float(torch.sigmoid(mix_logit[0]).detach().cpu())
+            model_mix = float(torch.sigmoid(mix_logit[0]).detach().cpu())
         evidence_strength = self._diagnostic_evidence_strength()
-        diagnostic_mix = min(max(diagnostic_mix, 0.0), 0.15 + 0.85 * evidence_strength)
+        denominator = max(1.0 - self.diagnostic_mix_min_evidence, 1.0e-6)
+        evidence_gate = np.clip((evidence_strength - self.diagnostic_mix_min_evidence) / denominator, 0.0, 1.0)
+        evidence_gate = float(evidence_gate ** self.diagnostic_mix_slope)
+        diagnostic_mix = self.diagnostic_mix_max * evidence_gate * min(max(model_mix, 0.0), 1.0)
         diagnostic_utility = diagnostic_mix * learned_diagnostic + self.entropy_tiebreak_weight * entropy_tiebreak
-        scores = (1.0 - diagnostic_mix) * rank_scores + diagnostic_utility
+        rank_weight = 1.0 - diagnostic_mix
+        scores = rank_weight * rank_scores + diagnostic_utility
         scores = np.asarray(scores, dtype=np.float64)
         logits = np.full_like(scores, -1.0e9, dtype=np.float64)
         logits[valid] = scores[valid] / max(self.temperature, 1.0e-6)
@@ -573,6 +596,9 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         )
         self.last_runtime_entropy_tiebreak_std = float(np.std(entropy_tiebreak[valid])) if valid.any() else 0.0
         self.last_runtime_diagnostic_mix = float(diagnostic_mix)
+        self.last_runtime_diagnostic_mix_model_value = float(model_mix)
+        self.last_runtime_diagnostic_mix_evidence_gate = float(evidence_gate)
+        self.last_runtime_rank_weight_effective = float(rank_weight)
         return probs, scores, outcome_probs, value
 
     def _diagnostic_evidence_strength(self) -> float:

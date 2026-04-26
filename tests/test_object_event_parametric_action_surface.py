@@ -32,6 +32,7 @@ from scripts.train_learned_online_object_event import (
     _information_gain_from_hypothesis_success,
     _near_action_indices,
     _selected_basis_overlap,
+    _with_balanced_runtime_score,
 )
 from arcagi.learned_online.object_event_curriculum import collate_object_event_examples
 
@@ -694,6 +695,23 @@ def test_selected_basis_overlap_keeps_same_basis_legal_and_finite() -> None:
     assert float(overlap[0, failed].detach()) > 0.99
     assert torch.isfinite(logits[tensors["action_mask"]]).all()
     assert bool(tensors["action_mask"][0, failed])
+
+
+def test_balanced_runtime_score_penalizes_diagnostic_mix_and_column_concentration() -> None:
+    base = {
+        "runtime_agent_act_path_active_success_within_5": 0.8,
+        "runtime_agent_act_path_unique_action_count_mean": 3.0,
+        "runtime_agent_act_path_selected_unique_mapped_col_count": 2.5,
+        "runtime_agent_act_path_top_score_same_mapped_col_fraction": 0.55,
+        "runtime_agent_act_path_runtime_diagnostic_mix_effective": 0.20,
+    }
+    worse = dict(base)
+    worse["runtime_agent_act_path_top_score_same_mapped_col_fraction"] = 0.85
+    worse["runtime_agent_act_path_runtime_diagnostic_mix_effective"] = 0.80
+
+    assert _with_balanced_runtime_score(base)["runtime_agent_act_path_balanced_score"] > _with_balanced_runtime_score(worse)[
+        "runtime_agent_act_path_balanced_score"
+    ]
 
 
 def test_family_assignment_regularization_penalizes_single_family_collapse() -> None:

@@ -381,6 +381,9 @@ def test_object_event_agent_parametric_no_effect_update_keeps_failed_action_scor
     assert "runtime_learned_diagnostic_utility_std" in diagnostics
     assert "runtime_entropy_tiebreak_std" in diagnostics
     assert "runtime_diagnostic_mix" in diagnostics
+    assert "runtime_diagnostic_mix_effective" in diagnostics
+    assert "runtime_diagnostic_mix_evidence_gate" in diagnostics
+    assert "runtime_rank_weight_effective" in diagnostics
     assert "learned_diagnostic_utility_std" in diagnostics
     assert "diagnostic_mix_model_value" in diagnostics
     assert "action_family_belief_uncertainty_mean" in diagnostics
@@ -399,6 +402,8 @@ def test_object_event_agent_parametric_no_effect_update_keeps_failed_action_scor
     assert np.isfinite(float(diagnostics["action_basis_belief_uncertainty_mean"]))
     assert np.isfinite(float(diagnostics["basis_assignment_effective_count"]))
     assert 0.0 <= float(diagnostics["runtime_diagnostic_mix"]) <= 1.0
+    assert 0.0 <= float(diagnostics["runtime_diagnostic_mix_effective"]) <= float(diagnostics["runtime_diagnostic_mix_max"])
+    assert float(diagnostics["runtime_rank_weight_effective"]) >= 1.0 - float(diagnostics["runtime_diagnostic_mix_max"])
     assert after[failed_action].score != before[failed_action].score
     for forbidden in (
         "tried_actions",
@@ -419,6 +424,40 @@ def test_object_event_agent_parametric_no_effect_update_keeps_failed_action_scor
         "visited_basis",
         "probe_counter",
     ):
+        assert not hasattr(agent, forbidden)
+
+
+def test_object_event_agent_diagnostic_mix_is_bounded_by_evidence_gate() -> None:
+    level = _parametric_level()
+    example = level.example
+    failed = next(
+        index
+        for index, value in enumerate(example.candidate_targets.value)
+        if float(value) == 0.0 and example.legal_actions[index].startswith("click:")
+    )
+    failed_action = example.legal_actions[failed]
+    agent = LearnedOnlineObjectEventAgent(seed=33, device="cpu", temperature=0.1, epsilon_floor=0.0)
+
+    agent.score_actions_for_state(example.state, example.legal_actions)
+    before = agent.diagnostics()
+    agent.on_transition(
+        Transition(
+            state=example.state,
+            action=failed_action,
+            reward=0.0,
+            next_state=example.state,
+            terminated=False,
+            info={"score_delta": 0.0},
+        )
+    )
+    agent.score_actions_for_state(example.state, example.legal_actions)
+    after = agent.diagnostics()
+
+    assert float(before["runtime_diagnostic_mix_effective"]) == 0.0
+    assert float(before["runtime_rank_weight_effective"]) == 1.0
+    assert 0.0 <= float(after["runtime_diagnostic_mix_effective"]) <= float(after["runtime_diagnostic_mix_max"])
+    assert float(after["runtime_rank_weight_effective"]) >= 1.0 - float(after["runtime_diagnostic_mix_max"])
+    for forbidden in ("least_visited", "untried", "tried_basis", "basis_blacklist", "coverage_queue", "frontier", "sweep_index"):
         assert not hasattr(agent, forbidden)
 
 

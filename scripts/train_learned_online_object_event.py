@@ -123,6 +123,8 @@ def main() -> None:
     parser.add_argument("--action-basis-diagnostic-cases", type=float, default=0.0)
     parser.add_argument("--action-basis-diagnostic-loss-weight", type=float, default=0.30)
     parser.add_argument("--action-basis-postfailure-margin-weight", type=float, default=0.20)
+    parser.add_argument("--diagnostic-recovery-loss-weight", type=float, default=0.0)
+    parser.add_argument("--diagnostic-recovery-margin-weight", type=float, default=0.0)
     args = parser.parse_args()
 
     mode = args.source or args.mode
@@ -308,6 +310,8 @@ def _run_synthetic_online_object_event(
     last_diagnostic_different_uncertain_basis_top1_rate = 0.0
     last_diagnostic_same_failed_basis_top1_rate = 0.0
     last_diagnostic_different_minus_same_failed_basis = 0.0
+    last_post_diagnostic_rank_loss = 0.0
+    last_diagnostic_recovery_margin_loss = 0.0
     best_metric_value = float("-inf")
     best_step = 0
     best_state: dict[str, torch.Tensor] | None = None
@@ -612,9 +616,42 @@ def _run_synthetic_online_object_event(
             diagnostic_same_failed_basis_top1 = torch.mean(
                 same_failed_basis_mask.gather(1, diag_selected[:, None]).squeeze(1).to(dtype=diag_logits.dtype)
             )
+            diagnostic_candidate_mask = self_retry_tensors["action_mask"].bool() & ~positive_mask
+            safe_diagnostic_candidate_mask = torch.where(
+                diagnostic_candidate_mask.any(dim=1, keepdim=True),
+                diagnostic_candidate_mask,
+                self_retry_tensors["action_mask"].bool(),
+            )
+            diagnostic_action_selected = torch.argmax(
+                diag_logits.detach().masked_fill(~safe_diagnostic_candidate_mask, -1.0e9),
+                dim=-1,
+            )
+            diagnostic_observed_tensors = _with_observed_candidate_targets(self_retry_tensors, diagnostic_action_selected)
+            diagnostic_deltas = _observed_belief_deltas(model, diagnostic_observed_tensors)
+            post_diagnostic_output = _forward_tensors(
+                model,
+                self_retry_tensors,
+                session_belief=self_deltas.session_delta + diagnostic_deltas.session_delta,
+                level_belief=self_deltas.level_delta + diagnostic_deltas.level_delta,
+            )
+            post_diagnostic_logits = policy_rank_logits_from_predictions(
+                post_diagnostic_output,
+                self_retry_tensors["action_mask"],
+            )
+            post_diagnostic_rank_loss = _masked_mean_loss(
+                _positive_rank_loss_per_row(post_diagnostic_logits, self_retry_tensors),
+                coord_failure_mask,
+            )
+            diagnostic_action_score_after = post_diagnostic_logits.gather(1, diagnostic_action_selected[:, None]).squeeze(1)
+            positive_after_diagnostic = torch.logsumexp(post_diagnostic_logits.masked_fill(~positive_mask, -1.0e9), dim=-1)
+            diagnostic_recovery_margin_loss = _masked_mean_loss(
+                F.relu(diagnostic_action_score_after - positive_after_diagnostic + 0.5),
+                coord_failure_mask,
+            )
             if self_retry_output.diagnostic_mix_logit is not None and support_output.diagnostic_mix_logit is not None:
                 ig_available = (diag_target.max(dim=1).values > 0.5).to(dtype=diag_logits.dtype)
-                mix_target = (coord_failure_mask * ig_available).clamp(0.0, 1.0)
+                mix_level = 0.35 if basis_diagnostic_scale > 0.0 else 1.0
+                mix_target = (mix_level * coord_failure_mask * ig_available).clamp(0.0, 1.0)
                 diagnostic_mix_after_loss = F.binary_cross_entropy_with_logits(
                     self_retry_output.diagnostic_mix_logit,
                     mix_target,
@@ -650,6 +687,8 @@ def _run_synthetic_online_object_event(
             diagnostic_different_uncertain_basis_top1 = support_logits.new_tensor(0.0)
             diagnostic_same_failed_basis_top1 = support_logits.new_tensor(0.0)
             diagnostic_different_minus_same_failed_basis = support_logits.new_tensor(0.0)
+            post_diagnostic_rank_loss = support_logits.new_tensor(0.0)
+            diagnostic_recovery_margin_loss = support_logits.new_tensor(0.0)
             diagnostic_mix_loss = support_logits.new_tensor(0.0)
             diagnostic_mix_after = support_logits.new_zeros((support_logits.shape[0],))
             diagnostic_mix_before = support_logits.new_zeros((support_logits.shape[0],))
@@ -681,6 +720,8 @@ def _run_synthetic_online_object_event(
             + basis_diagnostic_scale
             * max(float(args.action_basis_postfailure_margin_weight), 0.0)
             * action_basis_postfailure_margin_loss
+            + max(float(args.diagnostic_recovery_loss_weight), 0.0) * post_diagnostic_rank_loss
+            + max(float(args.diagnostic_recovery_margin_weight), 0.0) * diagnostic_recovery_margin_loss
             + max(float(args.family_balance_loss_weight), 0.0) * family_regularization["balance_loss"]
             + max(float(args.family_sharpness_loss_weight), 0.0) * family_regularization["sharpness_loss"]
             + max(float(args.family_contrastive_loss_weight), 0.0) * family_regularization["contrastive_loss"]
@@ -722,6 +763,8 @@ def _run_synthetic_online_object_event(
         last_diagnostic_different_uncertain_basis_top1_rate = float(diagnostic_different_uncertain_basis_top1.detach().cpu())
         last_diagnostic_same_failed_basis_top1_rate = float(diagnostic_same_failed_basis_top1.detach().cpu())
         last_diagnostic_different_minus_same_failed_basis = float(diagnostic_different_minus_same_failed_basis.detach().cpu())
+        last_post_diagnostic_rank_loss = float(post_diagnostic_rank_loss.detach().cpu())
+        last_diagnostic_recovery_margin_loss = float(diagnostic_recovery_margin_loss.detach().cpu())
         if step in eval_steps:
             eval_extra_metrics = dict(extraction_metrics)
             eval_extra_metrics.update(
@@ -754,6 +797,8 @@ def _run_synthetic_online_object_event(
                     "diagnostic_different_uncertain_basis_top1_rate": last_diagnostic_different_uncertain_basis_top1_rate,
                     "diagnostic_same_failed_basis_top1_rate": last_diagnostic_same_failed_basis_top1_rate,
                     "diagnostic_different_minus_same_failed_basis_mean": last_diagnostic_different_minus_same_failed_basis,
+                    "post_diagnostic_rank_loss": last_post_diagnostic_rank_loss,
+                    "diagnostic_recovery_margin_loss": last_diagnostic_recovery_margin_loss,
                     "diagnostic_mix_before_evidence_mean": last_diagnostic_mix_before_evidence,
                     "diagnostic_mix_after_noeffect_mean": last_diagnostic_mix_after_noeffect,
                 }
@@ -770,6 +815,7 @@ def _run_synthetic_online_object_event(
                 extra_metrics=eval_extra_metrics,
                 max_steps_per_level=int(args.max_steps_per_level),
             )
+            metrics = _with_balanced_runtime_score(metrics)
             if bool(args.save_best):
                 if selection_metric not in metrics:
                     available = ", ".join(sorted(str(key) for key in metrics))
@@ -805,6 +851,7 @@ def _run_synthetic_online_object_event(
             extra_metrics=extraction_metrics,
             max_steps_per_level=int(args.max_steps_per_level),
         )
+        summary = _with_balanced_runtime_score(summary)
         if bool(args.save_best):
             summary = {
                 **dict(summary),
@@ -852,6 +899,29 @@ def _online_selection_metric(args: argparse.Namespace, *, active: bool) -> str:
     if args.selection_metric:
         return str(args.selection_metric)
     return "heldout_active_post_self_update_top1_acc" if active else "heldout_post_update_top1_acc"
+
+
+def _with_balanced_runtime_score(metrics: dict[str, Any]) -> dict[str, Any]:
+    updated = dict(metrics)
+    within5 = float(updated.get("runtime_agent_act_path_active_success_within_5", 0.0) or 0.0)
+    unique_actions = float(updated.get("runtime_agent_act_path_unique_action_count_mean", 0.0) or 0.0)
+    mapped_cols = float(updated.get("runtime_agent_act_path_selected_unique_mapped_col_count", 0.0) or 0.0)
+    mapped_concentration = float(updated.get("runtime_agent_act_path_top_score_same_mapped_col_fraction", 0.0) or 0.0)
+    mix = float(
+        updated.get(
+            "runtime_agent_act_path_runtime_diagnostic_mix_effective",
+            updated.get("runtime_agent_act_path_runtime_diagnostic_mix", 0.0),
+        )
+        or 0.0
+    )
+    updated["runtime_agent_act_path_balanced_score"] = (
+        within5
+        + 0.10 * min(unique_actions / 3.0, 1.0)
+        + 0.10 * min(mapped_cols / 2.5, 1.0)
+        - 0.10 * max(mapped_concentration - 0.65, 0.0)
+        - 0.10 * max(mix - 0.40, 0.0)
+    )
+    return updated
 
 
 def _runtime_extracted_curriculum(split: OnlineObjectEventCurriculumSplit) -> OnlineObjectEventCurriculumSplit:
@@ -2294,6 +2364,9 @@ _RANK_DIAGNOSTIC_FLOAT_KEYS = (
     "runtime_learned_diagnostic_utility_std",
     "runtime_entropy_tiebreak_std",
     "runtime_diagnostic_mix",
+    "runtime_diagnostic_mix_effective",
+    "runtime_diagnostic_mix_evidence_gate",
+    "runtime_rank_weight_effective",
     "learned_diagnostic_utility_raw_std",
     "learned_diagnostic_utility_std",
     "diagnostic_mix_model_value",
