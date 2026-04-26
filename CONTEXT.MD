@@ -5152,3 +5152,134 @@ Current interpretation:
 - the deployed object-event agent now uses its trained rank head on the full legal ARC action surface and updates online from selected transitions
 - the real ARC failure is now more informative: the next blocker is missing real ARC state/action semantics and training coverage, not a silent train/runtime rank bypass
 - the new true-runtime synthetic metric is deliberately lower than the structured-state score-path metric, which exposes a real remaining representation gap between training examples with synthetic structured tags and raw-observation runtime extraction
+
+GPT-Pro consensus after pushed `57b8808`:
+
+- do not run more ARC attempts until the raw-observation synthetic gate is fixed
+- the runtime-rank fix is valid
+- the main blocker is now the interface mismatch:
+  - training/eval score path uses curated synthetic `StructuredState`
+  - deployed runtime uses `GridObservation -> BaseAgent.observe(...) -> extract_structured_state(...) -> act(...) -> update_after_step(...)`
+- next implementation should make extracted raw observations the primary training/eval state source
+- next milestone should be judged by true `act(...) -> update_after_step(...)` synthetic metrics, not by direct `score_actions_for_state(...)`
+- target next command should use `--state-source extracted`
+- do not add trace replay, graph/frontier search, fixed probes, real-ARC selected-transition training, or language scratchpad until extracted-state runtime training recovers
+
+## Entry 080: 2026-04-25 / Runtime-Extracted Object-Event Gate
+
+Implemented:
+
+- new `arcagi/learned_online/object_event_runtime_extraction.py`
+  - `ObjectEventRuntimeExtractor` reuses `BaseAgent.observe(...)` and `BaseAgent.update_after_step(...)`
+  - no action policy
+  - no graph/search/replay controller
+- `arcagi/learned_online/object_event_curriculum.py`
+  - added `state_to_grid_observation(...)`
+  - added `level_to_grid_observation(...)`
+  - added `apply_synthetic_object_event_action_to_grid(...)`
+  - added `rebuild_object_event_example_with_states(...)`
+  - public synthetic cell tags are limited to cue/agent style tags, not target/distractor/latent roles
+- `scripts/train_learned_online_object_event.py`
+  - added `--state-source structured|extracted|both`
+  - extracted mode rebuilds examples through raw `GridObservation` extraction
+  - runtime metrics now make the true `act(...) -> update_after_step(...)` path the primary gate
+  - added self-selected retry training on the model's own first-action failures
+- `arcagi/agents/learned_online_object_event_agent.py`
+  - action selection is greedy over learned runtime scores, with only explicit epsilon exploration
+  - transition targets strip internal `belief_*` inventory/flags so the agent does not label its own belief-state updates as environment visible changes
+
+Critical bug found and fixed:
+
+- before the fix, `BaseAgent.update_after_step(...)` made failed no-op synthetic actions look like `visible_only_nonprogress`
+- cause:
+  - non-public `score_delta` was not copied into visible transition info
+  - internal `belief_*` inventory/flags changed between before/after states
+  - `labels_from_transition(...)` interpreted those belief changes as visible state change
+- result:
+  - live act-path online update did not learn from no-effect failures
+- fixed by sanitizing only transition-target construction, not the model input state
+
+Extracted-state gate:
+
+- command:
+  - `python scripts/train_learned_online_object_event.py --mode synthetic_active_online_object_event --curriculum latent_rule_variable_palette --state-source extracted --seed 0 --steps 150 --batch-size 16 --train-sessions 48 --heldout-sessions 48 --levels-per-session 3 --max-distractors 1 --palette-size 8 --require-role-balanced-colors --eval-every 50 --eval-runtime-agent --save-best --selection-metric runtime_agent_act_path_active_success_within_3 --save-path artifacts/object_event_extracted_runtime_probe.pkl`
+- saved checkpoint:
+  - `checkpoint_best_step = 50`
+  - `checkpoint_selection_metric = runtime_agent_act_path_active_success_within_3`
+  - `checkpoint_selection_metric_value = 0.9166666666666666`
+- best metrics:
+  - `state_source = extracted`
+  - `extracted_num_legal_actions_mean = 68.0`
+  - `extracted_bridge_selected_action_match_rate = 1.0`
+  - `extracted_metadata_model_input_forbidden_count = 0.0`
+  - `runtime_agent_act_path_rank_logits_used = 1.0`
+  - `runtime_agent_act_path_num_legal_actions_mean = 68.0`
+  - `runtime_agent_act_path_active_success_within_2 = 0.8958333333333334`
+  - `runtime_agent_act_path_active_success_within_3 = 0.9166666666666666`
+  - `runtime_agent_act_path_next_level_first_try_acc = 0.9166666666666666`
+  - `runtime_agent_act_path_next_level_with_session_reset_acc = 0.4583333333333333`
+  - `runtime_agent_act_path_online_update_count_mean = 1.7291666666666667`
+  - `structured_vs_act_path_success_gap = 0.0`
+  - `level0_distractor_first_click_rate = 0.14583333333333334`
+  - `observed_distractor_failure_count = 7.0`
+  - `post_failure_candidate_switch_rate = 1.0`
+  - `post_failure_repeat_top1_rate = 0.0`
+
+Verification:
+
+- focused tests:
+  - `python -m pytest tests/test_learned_online_object_event_agent_contracts.py tests/test_object_event_active_variable_palette.py tests/test_object_event_runtime_extraction.py -q`
+  - `30 passed`
+- full object-event/extraction suite:
+  - `python -m pytest tests/test_object_event_tokens.py tests/test_object_event_curriculum.py tests/test_object_event_online_adaptation.py tests/test_object_event_model_learning.py tests/test_learned_online_object_event_agent_contracts.py tests/test_object_event_bridge_contracts.py tests/test_object_event_active_variable_palette.py tests/test_object_event_runtime_extraction.py -q`
+  - `64 passed`
+- recurrent regression:
+  - `python -m pytest tests/test_learned_online_recurrent_gates.py tests/test_learned_online_sequence_curriculum.py -q`
+  - `31 passed`
+
+Structured secondary regression:
+
+- command:
+  - `python scripts/train_learned_online_object_event.py --mode synthetic_active_online_object_event --curriculum latent_rule_variable_palette --state-source structured --seed 0 --steps 100 --batch-size 16 --train-sessions 48 --heldout-sessions 48 --levels-per-session 3 --max-distractors 1 --palette-size 8 --require-role-balanced-colors --eval-every 100 --eval-runtime-agent --no-save`
+- result:
+  - `runtime_agent_active_success_within_3 = 0.8958333333333334`
+  - `runtime_agent_act_path_active_success_within_3 = 0.875`
+  - no metadata leakage
+
+Real ARC diagnostic:
+
+- command:
+  - `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent learned_online_object_event --checkpoint-path artifacts/object_event_extracted_runtime_probe.pkl --mode offline --game-limit 1 --max-steps 32 --progress-every 8 --object-event-bridge-diagnostics`
+- result:
+  - no ARC success
+  - `success = false`
+  - `won = false`
+  - `levels_completed = 0`
+  - `return = 0.0`
+  - `legal_action_count = 447`
+  - `scored_action_count = 447`
+  - `object_event_action_surface_capped = false`
+  - `object_event_oracle_support_used = false`
+  - `object_event_trace_replay_used = false`
+  - `object_event_graph_controller_used = false`
+  - `object_event_metadata_input_forbidden_count = 0`
+  - `object_event_online_update_count = 32`
+  - `runtime_rank_logits_used = true`
+  - `runtime_greedy_rank_selection = true`
+  - `runtime_graph_search_solver = false`
+  - `runtime_action_pattern_enumerator = false`
+  - `runtime_external_api_or_knowledge = false`
+  - final `last_observed_outcome` is no-effect, not visible-only
+  - `session_belief_norm = 46.13078308105469`
+  - `level_belief_norm = 47.04045867919922`
+  - `max_same_action_streak = 14`
+
+Current interpretation:
+
+- extracted-state runtime training milestone is satisfied
+- real ARC still fails
+- the next blocker is now the action-surface/domain gap:
+  - synthetic gate uses `68` legal actions
+  - real ARC exposes `447` legal actions
+  - real diagnostic collapses to repeated high-score parametric clicks
+- next step should be reviewed with GPT-Pro before coding; likely direction is a non-scripted parameterized-action synthetic curriculum with larger real-like action surfaces and learned anti-repeat/uncertainty revision, not graph search, replay, fixed probes, or per-game code

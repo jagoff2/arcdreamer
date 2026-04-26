@@ -140,7 +140,10 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             raise ValueError("learned_online_object_event received an observation with no legal actions")
         actions = tuple(decisions)
         probabilities = np.asarray([decisions[action].probability for action in actions], dtype=np.float64)
-        selected_index = int(self.rng.choice(len(actions), p=probabilities / probabilities.sum()))
+        if self.epsilon_floor > 0.0 and float(self.rng.random()) < self.epsilon_floor:
+            selected_index = int(self.rng.integers(len(actions)))
+        else:
+            selected_index = int(np.argmax(probabilities))
         selected = decisions[actions[selected_index]]
         self.last_state = state
         self.last_action = selected.action
@@ -188,7 +191,8 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         actions = tuple(transition.state.affordances)
         if transition.action not in actions:
             return
-        targets = build_transition_targets(transition, actions=actions)
+        target_transition = _external_transition_for_targets(transition)
+        targets = build_transition_targets(target_transition, actions=actions)
         output, action_batch = self._forward_state_actions(transition.state, actions)
         device = self.device
         target_outcome = torch.as_tensor(targets.outcome[None, :], dtype=torch.float32, device=device)
@@ -300,6 +304,7 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             "runtime_rank_score_mean": float(self.last_runtime_rank_score_mean),
             "runtime_rank_score_std": float(self.last_runtime_rank_score_std),
             "runtime_diagnostic_utility_mean": float(self.last_runtime_diagnostic_utility_mean),
+            "runtime_greedy_rank_selection": True,
             "runtime_trace_cursor": False,
             "runtime_action_sequence_replay": False,
             "runtime_state_hash_to_action": False,
@@ -377,6 +382,7 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             "runtime_external_api_or_knowledge": False,
             "runtime_uses_policy_rank_logits": True,
             "runtime_uncertainty_diagnostic_utility": True,
+            "runtime_greedy_rank_selection": True,
             "trace_bootstrap_used": bool(trace_bootstrap_used),
             "trace_bootstrap_transition_count": int(trace_bootstrap_transition_count),
             "trace_bootstrap_runtime_replay": False,
@@ -496,6 +502,33 @@ def _standardize_valid(values: np.ndarray, valid: np.ndarray) -> np.ndarray:
     out[active_mask] = (active - float(np.mean(active))) / max(float(np.std(active)), 1.0e-6)
     out[~active_mask] = -1.0e9
     return out
+
+
+def _external_transition_for_targets(transition: Transition) -> Transition:
+    return Transition(
+        state=_strip_internal_belief_state(transition.state),
+        action=transition.action,
+        reward=float(transition.reward),
+        next_state=_strip_internal_belief_state(transition.next_state),
+        terminated=bool(transition.terminated),
+        info=dict(transition.info),
+    )
+
+
+def _strip_internal_belief_state(state: StructuredState) -> StructuredState:
+    return StructuredState(
+        task_id=state.task_id,
+        episode_id=state.episode_id,
+        step_index=state.step_index,
+        grid_shape=state.grid_shape,
+        grid_signature=state.grid_signature,
+        objects=state.objects,
+        relations=state.relations,
+        affordances=state.affordances,
+        action_roles=state.action_roles,
+        inventory=tuple((key, value) for key, value in state.inventory if not str(key).startswith("belief_")),
+        flags=tuple((key, value) for key, value in state.flags if not str(key).startswith("belief_")),
+    )
 
 
 def _entropy(probs: Sequence[float]) -> float:

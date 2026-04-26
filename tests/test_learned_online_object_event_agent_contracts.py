@@ -10,6 +10,7 @@ import torch
 from arcagi.agents.learned_online_object_event_agent import LearnedOnlineObjectEventAgent
 from arcagi.core.types import GridObservation, ObjectState, StructuredState, Transition
 from arcagi.evaluation.harness import build_agent
+from arcagi.learned_online.event_tokens import OUT_NO_EFFECT_NONPROGRESS, OUT_VISIBLE_CHANGE, OUT_VISIBLE_ONLY_NONPROGRESS
 from arcagi.learned_online.object_event_curriculum import (
     OnlineObjectEventCurriculumConfig,
     build_online_object_event_curriculum,
@@ -38,6 +39,7 @@ def test_object_event_agent_scores_all_legal_actions_and_reports_contract_diagno
     assert diagnostics["runtime_action_pattern_enumerator"] is False
     assert diagnostics["runtime_external_api_or_knowledge"] is False
     assert diagnostics["runtime_rank_logits_used"] is True
+    assert diagnostics["runtime_greedy_rank_selection"] is True
 
 
 def test_object_event_online_update_count_and_level_belief_boundary_semantics() -> None:
@@ -171,6 +173,40 @@ def test_object_event_agent_active_update_splits_session_and_level_belief() -> N
     assert reset_scores[failed_action].score > after_scores[failed_action].score
 
 
+def test_object_event_online_targets_ignore_internal_belief_inventory_changes() -> None:
+    agent = LearnedOnlineObjectEventAgent(seed=12, device="cpu")
+    before = _state(levels_completed=0)
+    after = StructuredState(
+        task_id=before.task_id,
+        episode_id=before.episode_id,
+        step_index=before.step_index + 1,
+        grid_shape=before.grid_shape,
+        grid_signature=before.grid_signature,
+        objects=before.objects,
+        relations=before.relations,
+        affordances=before.affordances,
+        action_roles=before.action_roles,
+        inventory=tuple(before.inventory) + (("belief_tested_sites", "1"),),
+        flags=tuple(before.flags) + (("belief_near_tested_site", "1"),),
+    )
+
+    agent.on_transition(
+        Transition(
+            state=before,
+            action=before.affordances[0],
+            reward=0.0,
+            next_state=after,
+            terminated=False,
+            info={},
+        )
+    )
+    observed = agent.diagnostics()["last_observed_outcome"]
+
+    assert observed[OUT_VISIBLE_CHANGE] == 0.0
+    assert observed[OUT_VISIBLE_ONLY_NONPROGRESS] == 0.0
+    assert observed[OUT_NO_EFFECT_NONPROGRESS] == 1.0
+
+
 def test_object_event_agent_runtime_uses_model_rank_logits_when_outcomes_are_flat() -> None:
     agent = LearnedOnlineObjectEventAgent(seed=6, device="cpu", temperature=0.1, epsilon_floor=0.0)
     state = _state(levels_completed=0)
@@ -208,6 +244,7 @@ def test_object_event_checkpoint_roundtrip_preserves_runtime_rank_policy(tmp_pat
     diagnostics = restored.diagnostics()
 
     assert restored.metadata["runtime_uses_policy_rank_logits"] is True
+    assert restored.metadata["runtime_greedy_rank_selection"] is True
     assert diagnostics["runtime_rank_logits_used"] is True
     assert diagnostics["full_dense_surface_scored"] is True
     assert diagnostics["runtime_trace_cursor"] is False

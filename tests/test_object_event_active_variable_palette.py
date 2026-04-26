@@ -18,6 +18,9 @@ from scripts.train_learned_online_object_event import (
     _active_rollout_metrics,
     _batch_to_tensors,
     _online_selection_metric,
+    _post_failure_retry_examples,
+    _runtime_extracted_curriculum,
+    _runtime_extraction_diagnostics,
     _runtime_agent_active_metrics,
     _with_observed_candidate_targets,
 )
@@ -142,6 +145,67 @@ def test_online_selection_metric_defaults_follow_active_mode() -> None:
     assert _online_selection_metric(SimpleNamespace(selection_metric=None), active=True) == "heldout_active_post_self_update_top1_acc"
     assert _online_selection_metric(SimpleNamespace(selection_metric=None), active=False) == "heldout_post_update_top1_acc"
     assert _online_selection_metric(SimpleNamespace(selection_metric="runtime_agent_rank_logits_used"), active=True) == "runtime_agent_rank_logits_used"
+
+
+def test_variable_palette_extracted_state_source_has_no_role_leakage() -> None:
+    split = build_active_online_object_event_curriculum(_config(seed=117, train_sessions=1, heldout_sessions=1))
+    extracted = _runtime_extracted_curriculum(split)
+    example = extracted.train[0].levels[0].example
+    text = " ".join(
+        [
+            repr(example.state.inventory).lower(),
+            repr(example.state.flags).lower(),
+            repr(example.state.action_roles).lower(),
+            repr(example.state_tokens.token_names).lower(),
+        ]
+    )
+
+    assert example.metadata["state_source"] == "extracted"
+    for forbidden in ("target", "distractor", "latent_rule", "correct_action", "teacher", "trace_cursor"):
+        assert forbidden not in text
+
+
+def test_variable_palette_extracted_state_source_keeps_color_role_balance() -> None:
+    split = build_active_online_object_event_curriculum(_config(seed=118, train_sessions=12, heldout_sessions=12))
+    extracted = _runtime_extracted_curriculum(split)
+    target_counts, distractor_counts = _role_counts(extracted.train + extracted.heldout)
+    palette = set(next(iter(extracted.train)).levels[0].example.metadata["palette_colors"])
+
+    assert min(target_counts[color] for color in palette) >= 1
+    assert min(distractor_counts[color] for color in palette) >= 1
+
+
+def test_variable_palette_extracted_state_source_reports_primary_runtime_metrics() -> None:
+    split = build_active_online_object_event_curriculum(_config(seed=119, train_sessions=0, heldout_sessions=2))
+    extracted = _runtime_extracted_curriculum(split)
+    diagnostics = _runtime_extraction_diagnostics(split, extracted)
+    model = ObjectEventModel(
+        ObjectEventModelConfig(d_model=32, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0, online_rank=4)
+    )
+    metrics = _runtime_agent_active_metrics(model, extracted.heldout, device=torch.device("cpu"), max_steps_per_level=1)
+
+    assert diagnostics["extracted_num_legal_actions_mean"] == 68.0
+    assert diagnostics["extracted_bridge_selected_action_match_rate"] == 1.0
+    assert diagnostics["extracted_metadata_model_input_forbidden_count"] == 0.0
+    assert metrics["runtime_agent_act_path_rank_logits_used"] == 1.0
+    assert metrics["runtime_agent_act_path_num_legal_actions_mean"] == 68.0
+    assert metrics["runtime_agent_act_path_bridge_selected_action_match_rate"] == 1.0
+
+
+def test_post_failure_retry_examples_use_runtime_updated_state() -> None:
+    split = build_active_online_object_event_curriculum(_config(seed=120, train_sessions=1, heldout_sessions=0))
+    extracted = _runtime_extracted_curriculum(split)
+    level = extracted.train[0].levels[0]
+    wrong = _distractor_action_index(level.example)
+
+    retry = _post_failure_retry_examples((level,), (wrong,))[0]
+
+    assert retry.metadata["retry_after_selected_action_index"] == wrong
+    assert retry.correct_action_index == level.example.correct_action_index
+    assert retry.legal_actions == level.example.legal_actions
+    assert retry.state.step_index == level.example.state.step_index + 1
+    assert retry.state_tokens.mask.sum() == level.example.state_tokens.mask.sum()
+    assert retry.action_tokens.mask.sum() == 68
 
 
 def _config(*, seed: int, train_sessions: int, heldout_sessions: int) -> ActiveOnlineObjectEventConfig:

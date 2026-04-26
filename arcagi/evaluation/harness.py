@@ -621,6 +621,7 @@ def _compact_diagnostics(diagnostics: Any) -> dict[str, Any]:
         "runtime_rank_score_mean",
         "runtime_rank_score_std",
         "runtime_diagnostic_utility_mean",
+        "runtime_greedy_rank_selection",
         "runtime_controller_active",
         "objective_stall_steps",
         "level_stall_steps",

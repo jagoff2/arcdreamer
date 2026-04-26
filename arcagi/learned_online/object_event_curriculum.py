@@ -5,7 +5,7 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from arcagi.core.types import ActionName, ObjectState, StructuredState, Transition
+from arcagi.core.types import ActionName, GridObservation, ObjectState, StructuredState, Transition
 from arcagi.learned_online.event_tokens import (
     OUT_NO_EFFECT_NONPROGRESS,
     OUT_OBJECTIVE_PROGRESS,
@@ -137,6 +137,9 @@ class ActiveStepResult:
     metadata: dict[str, Any]
 
 
+PUBLIC_SYNTHETIC_CELL_TAGS = frozenset({"agent", "clickable"})
+
+
 @dataclass(frozen=True)
 class ObjectEventBatch:
     state_numeric: np.ndarray
@@ -240,6 +243,86 @@ def apply_synthetic_object_event_action(
             "correct_action_index": int(example.correct_action_index),
             "oracle_support_used": False,
         },
+    )
+
+
+def state_to_grid_observation(
+    state: StructuredState,
+    actions: Sequence[ActionName] | None = None,
+    *,
+    step_index: int | None = None,
+) -> GridObservation:
+    action_tuple = tuple(state.affordances if actions is None else actions)
+    return GridObservation(
+        task_id=state.task_id,
+        episode_id=state.episode_id,
+        step_index=int(state.step_index if step_index is None else step_index),
+        grid=state.as_grid(),
+        available_actions=action_tuple,
+        extras={
+            "action_roles": dict(state.action_roles),
+            "cell_tags": _public_cell_tags(state),
+            "background_color": 0,
+        },
+    )
+
+
+def level_to_grid_observation(
+    level: OnlineObjectEventLevel,
+    *,
+    step_index: int = 0,
+) -> GridObservation:
+    return state_to_grid_observation(level.example.state, level.example.legal_actions, step_index=step_index)
+
+
+def apply_synthetic_object_event_action_to_grid(
+    level: OnlineObjectEventLevel,
+    selected_action_index: int,
+    *,
+    before_step_index: int,
+) -> tuple[GridObservation, GridObservation, ActiveStepResult]:
+    result = apply_synthetic_object_event_action(level, selected_action_index)
+    before = level_to_grid_observation(level, step_index=int(before_step_index))
+    after_state = level.example.next_state if bool(result.success) else level.example.state
+    after = state_to_grid_observation(after_state, level.example.legal_actions, step_index=int(before_step_index) + 1)
+    return before, after, result
+
+
+def rebuild_object_event_example_with_states(
+    example: ObjectEventExample,
+    *,
+    state: StructuredState,
+    next_state: StructuredState,
+    metadata_extra: dict[str, Any] | None = None,
+) -> ObjectEventExample:
+    transition = Transition(
+        state=state,
+        action=example.action,
+        reward=1.0,
+        next_state=next_state,
+        terminated=False,
+        info={"score_delta": 1.0},
+    )
+    transition_targets = build_transition_targets(transition, actions=example.legal_actions)
+    candidate_targets = _candidate_targets(
+        legal_actions=example.legal_actions,
+        correct_action_index=int(transition_targets.actual_action_index),
+        transition_targets=transition_targets,
+    )
+    metadata = dict(example.metadata)
+    if metadata_extra:
+        metadata.update(dict(metadata_extra))
+    return ObjectEventExample(
+        state=state,
+        next_state=next_state,
+        action=example.action,
+        legal_actions=example.legal_actions,
+        correct_action_index=int(transition_targets.actual_action_index),
+        state_tokens=encode_state_tokens(state),
+        action_tokens=encode_action_tokens(state, example.legal_actions),
+        transition_targets=transition_targets,
+        candidate_targets=candidate_targets,
+        metadata=metadata,
     )
 
 
@@ -747,6 +830,17 @@ def _object(name: str, color: int, cell: tuple[int, int], *, tags: tuple[str, ..
         area=1,
         tags=tags,
     )
+
+
+def _public_cell_tags(state: StructuredState) -> dict[tuple[int, int], tuple[str, ...]]:
+    cell_tags: dict[tuple[int, int], set[str]] = {}
+    for obj in state.objects:
+        public_tags = tuple(tag for tag in obj.tags if tag in PUBLIC_SYNTHETIC_CELL_TAGS)
+        if not public_tags:
+            continue
+        for row, col in obj.cells:
+            cell_tags.setdefault((int(row), int(col)), set()).update(public_tags)
+    return {cell: tuple(sorted(tags)) for cell, tags in cell_tags.items()}
 
 
 def _click_action(cell: tuple[int, int]) -> ActionName:

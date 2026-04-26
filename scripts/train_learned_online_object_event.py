@@ -25,15 +25,20 @@ from arcagi.learned_online.object_event_bridge import (
 from arcagi.learned_online.object_event_curriculum import (
     ActiveOnlineObjectEventConfig,
     OnlineObjectEventCurriculumConfig,
+    OnlineObjectEventCurriculumSplit,
     OnlineObjectEventSession,
+    OnlineObjectEventLevel,
     ObjectEventBatch,
     ObjectEventCurriculumConfig,
     ObjectEventExample,
     apply_synthetic_object_event_action,
+    apply_synthetic_object_event_action_to_grid,
     build_active_online_object_event_curriculum,
     build_online_object_event_curriculum,
     build_paired_color_click_curriculum,
     collate_object_event_examples,
+    rebuild_object_event_example_with_states,
+    state_to_grid_observation,
 )
 from arcagi.learned_online.event_tokens import (
     OUT_NO_EFFECT_NONPROGRESS,
@@ -44,6 +49,10 @@ from arcagi.learned_online.object_event_model import (
     ObjectEventModel,
     ObjectEventModelConfig,
     policy_rank_logits_from_predictions,
+)
+from arcagi.learned_online.object_event_runtime_extraction import (
+    ObjectEventRuntimeExtractor,
+    extract_selected_transition_from_grid,
 )
 
 LOSS_WEIGHTS = {"outcome": 1.0, "rank": 5.0, "inverse": 0.1, "value": 0.5, "delta": 0.0}
@@ -87,6 +96,7 @@ def main() -> None:
     parser.add_argument("--eval-runtime-agent", action="store_true")
     parser.add_argument("--save-best", action="store_true")
     parser.add_argument("--selection-metric", default=None)
+    parser.add_argument("--state-source", choices=("structured", "extracted", "both"), default="structured")
     args = parser.parse_args()
 
     mode = args.source or args.mode
@@ -218,6 +228,19 @@ def _run_synthetic_online_object_event(
         )
     model = ObjectEventModel(config).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=3.0e-3, weight_decay=1.0e-4)
+    state_source = str(args.state_source)
+    extraction_metrics: dict[str, float | str] = {"state_source": state_source}
+    if active and state_source in {"extracted", "both"}:
+        structured_curriculum = curriculum
+        extracted_curriculum = _runtime_extracted_curriculum(curriculum)
+        extraction_metrics.update(_runtime_extraction_diagnostics(structured_curriculum, extracted_curriculum))
+        if state_source == "extracted":
+            curriculum = extracted_curriculum
+        else:
+            curriculum = OnlineObjectEventCurriculumSplit(
+                train=tuple(structured_curriculum.train) + tuple(extracted_curriculum.train),
+                heldout=tuple(extracted_curriculum.heldout),
+            )
     last_loss = 0.0
     best_metric_value = float("-inf")
     best_step = 0
@@ -244,14 +267,50 @@ def _run_synthetic_online_object_event(
         next_loss = F.cross_entropy(next_logits, next_tensors["actual_action_index"])
         wrong_indices = _wrong_candidate_indices(support_examples, device=device)
         failure_support_tensors = _with_observed_candidate_targets(support_tensors, wrong_indices)
-        failure_belief = _observed_belief_delta(model, failure_support_tensors)
+        failure_deltas = _observed_belief_deltas(model, failure_support_tensors)
+        failure_belief = failure_deltas.session_delta
         failure_query_output = _forward_tensors(model, query_tensors, session_belief=failure_belief)
         failure_query_logits = policy_rank_logits_from_predictions(failure_query_output, query_tensors["action_mask"])
         failure_loss = F.cross_entropy(failure_query_logits, query_tensors["actual_action_index"])
+        retry_examples = _post_failure_retry_examples(
+            tuple(session.levels[0] for session in sessions),
+            tuple(int(index) for index in wrong_indices.detach().cpu().tolist()),
+        )
+        retry_tensors = _batch_to_tensors(collate_object_event_examples(retry_examples), device=device)
+        retry_output = _forward_tensors(
+            model,
+            retry_tensors,
+            session_belief=failure_deltas.session_delta,
+            level_belief=failure_deltas.level_delta,
+        )
+        retry_logits = policy_rank_logits_from_predictions(retry_output, retry_tensors["action_mask"])
+        retry_loss = F.cross_entropy(retry_logits, retry_tensors["actual_action_index"])
         support_output = _forward_tensors(model, support_tensors)
         support_logits = policy_rank_logits_from_predictions(support_output, support_tensors["action_mask"])
+        self_selected = torch.argmax(support_logits.detach(), dim=-1)
+        self_failure_mask = (self_selected != support_tensors["actual_action_index"]).float()
+        self_observed_tensors = _with_observed_candidate_targets(support_tensors, self_selected)
+        self_deltas = _observed_belief_deltas(model, self_observed_tensors)
+        self_retry_examples = _post_failure_retry_examples(
+            tuple(session.levels[0] for session in sessions),
+            tuple(int(index) for index in self_selected.detach().cpu().tolist()),
+        )
+        self_retry_tensors = _batch_to_tensors(collate_object_event_examples(self_retry_examples), device=device)
+        self_retry_output = _forward_tensors(
+            model,
+            self_retry_tensors,
+            session_belief=self_deltas.session_delta,
+            level_belief=self_deltas.level_delta,
+        )
+        self_retry_logits = policy_rank_logits_from_predictions(self_retry_output, self_retry_tensors["action_mask"])
+        self_retry_ce = F.cross_entropy(
+            self_retry_logits,
+            self_retry_tensors["actual_action_index"],
+            reduction="none",
+        )
+        self_retry_loss = torch.sum(self_retry_ce * self_failure_mask) / torch.clamp(torch.sum(self_failure_mask), min=1.0)
         plausible_loss = _plausible_red_blue_loss(support_logits, support_examples)
-        loss = query_loss + next_loss + 0.5 * failure_loss + 0.2 * plausible_loss
+        loss = query_loss + next_loss + 0.5 * failure_loss + 0.75 * retry_loss + 0.75 * self_retry_loss + 0.2 * plausible_loss
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -267,6 +326,7 @@ def _run_synthetic_online_object_event(
                 train_loss=last_loss,
                 active=active,
                 eval_runtime_agent=bool(args.eval_runtime_agent),
+                extra_metrics=extraction_metrics,
             )
             if bool(args.save_best):
                 if selection_metric not in metrics:
@@ -300,6 +360,7 @@ def _run_synthetic_online_object_event(
             train_loss=last_loss,
             active=active,
             eval_runtime_agent=bool(args.eval_runtime_agent),
+            extra_metrics=extraction_metrics,
         )
         if bool(args.save_best):
             summary = {
@@ -348,6 +409,135 @@ def _online_selection_metric(args: argparse.Namespace, *, active: bool) -> str:
     if args.selection_metric:
         return str(args.selection_metric)
     return "heldout_active_post_self_update_top1_acc" if active else "heldout_post_update_top1_acc"
+
+
+def _runtime_extracted_curriculum(split: OnlineObjectEventCurriculumSplit) -> OnlineObjectEventCurriculumSplit:
+    return OnlineObjectEventCurriculumSplit(
+        train=_runtime_extracted_sessions(split.train),
+        heldout=_runtime_extracted_sessions(split.heldout),
+    )
+
+
+def _runtime_extracted_sessions(sessions: Sequence[OnlineObjectEventSession]) -> tuple[OnlineObjectEventSession, ...]:
+    return tuple(_runtime_extracted_session(session) for session in sessions)
+
+
+def _runtime_extracted_session(session: OnlineObjectEventSession) -> OnlineObjectEventSession:
+    levels = tuple(_runtime_extracted_level(level) for level in session.levels)
+    return OnlineObjectEventSession(
+        session_index=int(session.session_index),
+        latent_rule=int(session.latent_rule),
+        levels=levels,
+    )
+
+
+def _runtime_extracted_level(level: OnlineObjectEventLevel) -> OnlineObjectEventLevel:
+    example = level.example
+    selected = int(example.correct_action_index)
+    before_observation, after_observation, result = apply_synthetic_object_event_action_to_grid(
+        level,
+        selected,
+        before_step_index=int(example.state.step_index),
+    )
+    extractor = ObjectEventRuntimeExtractor()
+    extracted = extract_selected_transition_from_grid(
+        extractor,
+        before_observation=before_observation,
+        selected_action=example.legal_actions[selected],
+        after_observation=after_observation,
+        reward=float(result.reward),
+        terminated=False,
+        info={
+            "score_delta": float(result.reward),
+            "level_boundary": bool(result.success),
+            "levels_completed_before": 0,
+            "levels_completed_after": int(result.levels_completed),
+        },
+    )
+    extracted_example = rebuild_object_event_example_with_states(
+        example,
+        state=extracted.before_state,
+        next_state=extracted.after_state,
+        metadata_extra={"state_source": "extracted"},
+    )
+    return OnlineObjectEventLevel(
+        session_index=int(level.session_index),
+        level_index=int(level.level_index),
+        geometry_seed=int(level.geometry_seed),
+        cue_mode=int(level.cue_mode),
+        latent_rule=int(level.latent_rule),
+        example=extracted_example,
+    )
+
+
+def _runtime_extraction_diagnostics(
+    structured: OnlineObjectEventCurriculumSplit,
+    extracted: OnlineObjectEventCurriculumSplit,
+) -> dict[str, float]:
+    structured_examples = tuple(level.example for session in structured.heldout for level in session.levels)
+    extracted_examples = tuple(level.example for session in extracted.heldout for level in session.levels)
+    if not structured_examples or not extracted_examples:
+        return {
+            "structured_state_object_count_mean": 0.0,
+            "extracted_state_object_count_mean": 0.0,
+            "structured_extracted_object_count_abs_delta_mean": 0.0,
+            "structured_extracted_state_token_l2_mean": 0.0,
+            "structured_extracted_action_token_l2_mean": 0.0,
+            "structured_extracted_affordance_match_rate": 0.0,
+            "structured_extracted_action_role_match_rate": 0.0,
+            "extracted_num_legal_actions_mean": 0.0,
+            "extracted_bridge_selected_action_match_rate": 0.0,
+            "extracted_metadata_model_input_forbidden_count": 0.0,
+        }
+    object_counts_structured: list[float] = []
+    object_counts_extracted: list[float] = []
+    object_count_delta: list[float] = []
+    state_l2: list[float] = []
+    action_l2: list[float] = []
+    affordance_matches: list[float] = []
+    role_matches: list[float] = []
+    legal_counts: list[float] = []
+    bridge_matches: list[float] = []
+    forbidden_count = 0
+    for structured_example, extracted_example in zip(structured_examples, extracted_examples):
+        object_counts_structured.append(float(len(structured_example.state.objects)))
+        object_counts_extracted.append(float(len(extracted_example.state.objects)))
+        object_count_delta.append(float(abs(len(structured_example.state.objects) - len(extracted_example.state.objects))))
+        state_l2.append(float(np.linalg.norm(structured_example.state_tokens.numeric - extracted_example.state_tokens.numeric)))
+        action_l2.append(float(np.linalg.norm(structured_example.action_tokens.numeric - extracted_example.action_tokens.numeric)))
+        affordance_matches.append(float(tuple(structured_example.legal_actions) == tuple(extracted_example.legal_actions)))
+        role_matches.append(float(dict(structured_example.state.action_roles) == dict(extracted_example.state.action_roles)))
+        selected = int(extracted_example.correct_action_index)
+        result = apply_synthetic_object_event_action(
+            OnlineObjectEventLevel(
+                session_index=0,
+                level_index=0,
+                geometry_seed=0,
+                cue_mode=0,
+                latent_rule=0,
+                example=extracted_example,
+            ),
+            selected,
+        )
+        bridge = _synthetic_bridge_observation(extracted_example, selected, result)
+        legal_counts.append(float(bridge.legal_action_count))
+        bridge_matches.append(float(int(bridge.selected_action_index) == selected))
+        try:
+            assert_no_forbidden_metadata_as_model_input(bridge.model_input_metadata())
+        except AssertionError:
+            forbidden_count += 1
+    return {
+        "structured_state_object_count_mean": float(np.mean(object_counts_structured)),
+        "extracted_state_object_count_mean": float(np.mean(object_counts_extracted)),
+        "structured_extracted_object_count_abs_delta_mean": float(np.mean(object_count_delta)),
+        "structured_extracted_state_token_l2_mean": float(np.mean(state_l2)),
+        "structured_extracted_action_token_l2_mean": float(np.mean(action_l2)),
+        "structured_extracted_affordance_match_rate": float(np.mean(affordance_matches)),
+        "structured_extracted_action_role_match_rate": float(np.mean(role_matches)),
+        "extracted_num_legal_actions_mean": float(np.mean(legal_counts)),
+        "extracted_bridge_selected_action_match_rate": float(np.mean(bridge_matches)),
+        "extracted_metadata_model_input_forbidden_count": float(forbidden_count),
+    }
 
 
 def _forward_tensors(
@@ -424,6 +614,48 @@ def _with_observed_candidate_targets(tensors: dict[str, Any], observed_indices: 
     return updated
 
 
+def _post_failure_retry_examples(
+    levels: Sequence[OnlineObjectEventLevel],
+    observed_indices: Sequence[int],
+) -> tuple[ObjectEventExample, ...]:
+    examples: list[ObjectEventExample] = []
+    for level, observed_index in zip(levels, observed_indices):
+        example = level.example
+        result = apply_synthetic_object_event_action(level, int(observed_index))
+        before_observation = state_to_grid_observation(
+            example.state,
+            example.legal_actions,
+            step_index=int(example.state.step_index),
+        )
+        after_state = example.next_state if bool(result.success) else example.state
+        after_observation = state_to_grid_observation(
+            after_state,
+            example.legal_actions,
+            step_index=int(example.state.step_index) + 1,
+        )
+        extracted = extract_selected_transition_from_grid(
+            ObjectEventRuntimeExtractor(),
+            before_observation=before_observation,
+            selected_action=example.legal_actions[int(observed_index)],
+            after_observation=after_observation,
+            reward=float(result.reward),
+            terminated=False,
+            info={"score_delta": float(result.reward), "level_boundary": bool(result.success)},
+        )
+        examples.append(
+            rebuild_object_event_example_with_states(
+                example,
+                state=extracted.after_state,
+                next_state=example.next_state,
+                metadata_extra={
+                    "state_source": str(example.metadata.get("state_source", "structured")),
+                    "retry_after_selected_action_index": int(observed_index),
+                },
+            )
+        )
+    return tuple(examples)
+
+
 def _plausible_red_blue_loss(rank_logits: torch.Tensor, examples: Sequence[ObjectEventExample]) -> torch.Tensor:
     mask = torch.zeros_like(rank_logits, dtype=torch.bool)
     for row, example in enumerate(examples):
@@ -444,6 +676,7 @@ def _online_training_metrics(
     train_loss: float,
     active: bool = False,
     eval_runtime_agent: bool = False,
+    extra_metrics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     train_metrics = _evaluate_online_sessions(model, train, device=device)
     heldout_metrics = _evaluate_online_sessions(model, heldout, device=device)
@@ -534,6 +767,13 @@ def _online_training_metrics(
         metrics.update(_color_role_balance_metrics(train=train, heldout=heldout))
         if eval_runtime_agent:
             metrics.update(_runtime_agent_active_metrics(model, heldout, device=device))
+        if "runtime_agent_active_success_within_3" in metrics and "runtime_agent_act_path_active_success_within_3" in metrics:
+            metrics["structured_vs_act_path_success_gap"] = (
+                float(metrics["runtime_agent_active_success_within_3"])
+                - float(metrics["runtime_agent_act_path_active_success_within_3"])
+            )
+    if extra_metrics:
+        metrics.update(extra_metrics)
     return metrics
 
 
@@ -1121,14 +1361,7 @@ def _grid_observation_from_state(
     *,
     step_index: int,
 ) -> GridObservation:
-    return GridObservation(
-        task_id=state.task_id,
-        episode_id=state.episode_id,
-        step_index=int(step_index),
-        grid=state.as_grid(),
-        available_actions=tuple(actions),
-        extras={"action_roles": dict(state.action_roles)},
-    )
+    return state_to_grid_observation(state, actions, step_index=int(step_index))
 
 
 def _model_policy_top1(model: ObjectEventModel, example: ObjectEventExample, *, device: torch.device) -> int:
