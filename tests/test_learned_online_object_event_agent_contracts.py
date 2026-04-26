@@ -278,6 +278,8 @@ def test_object_event_checkpoint_roundtrip_contains_anti_replay_metadata(tmp_pat
     assert metadata["runtime_per_game_behavior"] is False
     assert metadata["runtime_graph_search_solver"] is False
     assert metadata["runtime_action_pattern_enumerator"] is False
+    assert metadata["runtime_learned_noeffect_contradiction_gate"] is True
+    assert metadata["runtime_noeffect_contradiction_controller"] is False
     assert metadata["trace_bootstrap_runtime_replay"] is False
     assert metadata["stores_teacher_action_sequence"] is False
     assert metadata["stores_state_hash_to_action"] is False
@@ -609,7 +611,15 @@ def test_noeffect_contradiction_diagnostics_are_model_scores_not_controller_stat
         assert np.isfinite(float(diagnostics[key]))
     assert trace["top_actions"][0]["noeffect_contradiction_gate"] >= 0.0
     assert trace["top_actions"][0]["noeffect_contradiction_penalty"] >= 0.0
-    for forbidden in ("tried_actions", "blocked_actions", "action_blacklist", "avoid_column", "frontier", "coverage_queue"):
+    for forbidden in (
+        "tried_actions",
+        "blocked_actions",
+        "action_blacklist",
+        "noeffect_contradiction_blacklist",
+        "avoid_column",
+        "frontier",
+        "coverage_queue",
+    ):
         assert not hasattr(agent, forbidden)
 
 

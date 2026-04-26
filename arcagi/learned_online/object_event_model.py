@@ -59,6 +59,7 @@ class ObjectEventModelConfig:
     action_basis_coordinate_centers: int = 3
     action_basis_mapped_centers: int = 2
     action_basis_object_bases: bool = True
+    noeffect_contradiction_penalty_max: float = 6.0
     outcome_dim: int = OUTCOME_DIM
     delta_dim: int = STATE_DELTA_DIM
 
@@ -1062,10 +1063,11 @@ class ActionFamilyDiagnosticUtility(nn.Module):
 
 
 class NoEffectContradictionGate(nn.Module):
-    def __init__(self, *, d_model: int, dropout: float) -> None:
+    def __init__(self, *, d_model: int, dropout: float, penalty_max: float = 6.0) -> None:
         super().__init__()
         input_dim = 15
         hidden = max(int(d_model) // 2, 32)
+        self.penalty_max = float(penalty_max)
         self.net = nn.Sequential(
             nn.LayerNorm(input_dim),
             nn.Linear(input_dim, hidden),
@@ -1073,7 +1075,7 @@ class NoEffectContradictionGate(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(hidden, 2),
         )
-        self.penalty_scale_raw = nn.Parameter(torch.tensor(1.0))
+        self.penalty_scale_raw = nn.Parameter(torch.tensor(0.0))
         nn.init.zeros_(self.net[-1].weight)
         nn.init.zeros_(self.net[-1].bias)
 
@@ -1120,7 +1122,7 @@ class NoEffectContradictionGate(nn.Module):
             family_features[..., 3].clamp(0.0, 1.0),
         )
         evidence = (no_effect_prob.squeeze(-1).clamp(0.0, 1.0) * posterior_noeffect).clamp(0.0, 1.0)
-        penalty = _bounded_scale(self.penalty_scale_raw, 4.0) * gate * penalty_fraction * (0.25 + 0.75 * evidence)
+        penalty = _bounded_scale(self.penalty_scale_raw, self.penalty_max) * gate * penalty_fraction * (0.25 + 0.75 * evidence)
         return gate, penalty
 
 
@@ -1549,6 +1551,7 @@ class ObjectEventModel(nn.Module):
         self.noeffect_contradiction_gate = NoEffectContradictionGate(
             d_model=d_model,
             dropout=float(self.config.dropout),
+            penalty_max=float(self.config.noeffect_contradiction_penalty_max),
         )
         self.diagnostic_mix_head = nn.Sequential(
             nn.LayerNorm((2 * d_model) + 8),

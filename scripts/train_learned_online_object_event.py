@@ -128,6 +128,8 @@ def main() -> None:
     parser.add_argument("--noeffect-contradiction-cases", type=float, default=0.0)
     parser.add_argument("--noeffect-contradiction-loss-weight", type=float, default=0.20)
     parser.add_argument("--noeffect-contradiction-margin-weight", type=float, default=0.20)
+    parser.add_argument("--noeffect-contradiction-penalty-weight", type=float, default=0.0)
+    parser.add_argument("--noeffect-contradiction-mass-weight", type=float, default=0.0)
     args = parser.parse_args()
 
     mode = args.source or args.mode
@@ -317,6 +319,10 @@ def _run_synthetic_online_object_event(
     last_diagnostic_recovery_margin_loss = 0.0
     last_noeffect_contradiction_gate_loss = 0.0
     last_noeffect_contradiction_margin_loss = 0.0
+    last_noeffect_contradiction_penalty_min_loss = 0.0
+    last_noeffect_contradiction_policy_mass = 0.0
+    last_noeffect_known_contradicted_top1_rate = 0.0
+    last_noeffect_broad_contradicted_top1_rate = 0.0
     last_noeffect_contradicted_top1_rate = 0.0
     last_noeffect_contradiction_gate_mean = 0.0
     last_noeffect_contradiction_penalty_mean = 0.0
@@ -454,69 +460,31 @@ def _run_synthetic_online_object_event(
         noeffect_contradiction_gate = getattr(self_retry_output, "noeffect_contradiction_gate", None)
         noeffect_contradiction_penalty = getattr(self_retry_output, "noeffect_contradiction_penalty", None)
         if noeffect_contradiction_gate is not None and noeffect_contradiction_penalty is not None:
-            no_effect_prob = torch.sigmoid(self_retry_output.outcome_logits[..., OUT_NO_EFFECT_NONPROGRESS])
-            target_noeffect = self_retry_tensors["candidate_outcome_targets"][..., OUT_NO_EFFECT_NONPROGRESS] > 0.5
-            basis_features = getattr(self_retry_output, "action_basis_posterior_features", None)
-            family_features = getattr(self_retry_output, "action_family_posterior_features", None)
-            basis_noeffect = (
-                basis_features[..., 3].to(dtype=no_effect_prob.dtype)
-                if basis_features is not None
-                else torch.zeros_like(no_effect_prob)
+            contradiction_losses = _noeffect_contradiction_training_losses(
+                self_retry_output,
+                self_retry_tensors,
+                logits=self_retry_logits,
+                positive_mask=positive_mask,
+                relation_failed_mask=relation_failed_mask,
+                coord_failure_mask=coord_failure_mask,
+                positive_after=positive_after,
             )
-            family_noeffect = (
-                family_features[..., 3].to(dtype=no_effect_prob.dtype)
-                if family_features is not None
-                else torch.zeros_like(no_effect_prob)
-            )
-            evidence_mask = (
-                (basis_noeffect >= 0.45)
-                | (family_noeffect >= 0.45)
-                | relation_failed_mask
-            )
-            contradicted_mask = (
-                self_retry_tensors["action_mask"].bool()
-                & ~positive_mask
-                & ((no_effect_prob >= 0.70) | target_noeffect)
-                & evidence_mask
-                & (coord_failure_mask[:, None] > 0.0)
-            )
-            contradicted_rows = (
-                contradicted_mask.any(dim=1).to(dtype=self_retry_logits.dtype)
-                * coord_failure_mask
-            )
-            contradicted_logit = torch.logsumexp(self_retry_logits.masked_fill(~contradicted_mask, -1.0e9), dim=-1)
-            noeffect_contradiction_margin_loss = _masked_mean_loss(
-                F.relu(contradicted_logit - positive_after + 1.0),
-                contradicted_rows,
-            )
-            gate_target = contradicted_mask.to(dtype=noeffect_contradiction_gate.dtype)
-            valid_weight = self_retry_tensors["action_mask"].to(dtype=noeffect_contradiction_gate.dtype)
-            positive_weight = 1.0 + 3.0 * gate_target
-            gate_loss_raw = F.binary_cross_entropy(
-                noeffect_contradiction_gate.clamp(1.0e-6, 1.0 - 1.0e-6),
-                gate_target,
-                reduction="none",
-            )
-            noeffect_contradiction_gate_loss = torch.sum(gate_loss_raw * valid_weight * positive_weight) / torch.clamp(
-                torch.sum(valid_weight * positive_weight),
-                min=1.0,
-            )
-            retry_top = torch.argmax(self_retry_logits.masked_fill(~self_retry_tensors["action_mask"].bool(), -1.0e9), dim=-1)
-            noeffect_contradicted_top1 = _masked_mean_loss(
-                contradicted_mask.gather(1, retry_top[:, None]).squeeze(1).to(dtype=self_retry_logits.dtype),
-                contradicted_rows,
-            )
-            noeffect_contradiction_gate_mean = _masked_mean_loss(
-                _masked_action_mean(noeffect_contradiction_gate, contradicted_mask),
-                contradicted_rows,
-            )
-            noeffect_contradiction_penalty_mean = _masked_mean_loss(
-                _masked_action_mean(noeffect_contradiction_penalty, contradicted_mask),
-                contradicted_rows,
-            )
+            noeffect_contradiction_gate_loss = contradiction_losses["known_gate_loss"]
+            noeffect_contradiction_margin_loss = contradiction_losses["known_margin_loss"]
+            noeffect_contradiction_penalty_min_loss = contradiction_losses["known_penalty_min_loss"]
+            noeffect_contradiction_policy_mass = contradiction_losses["known_policy_mass"]
+            noeffect_known_contradicted_top1 = contradiction_losses["known_top1_rate"]
+            noeffect_broad_contradicted_top1 = contradiction_losses["broad_top1_rate"]
+            noeffect_contradicted_top1 = contradiction_losses["broad_top1_rate"]
+            noeffect_contradiction_gate_mean = contradiction_losses["known_gate_mean"]
+            noeffect_contradiction_penalty_mean = contradiction_losses["known_penalty_mean"]
         else:
             noeffect_contradiction_gate_loss = support_logits.new_tensor(0.0)
             noeffect_contradiction_margin_loss = support_logits.new_tensor(0.0)
+            noeffect_contradiction_penalty_min_loss = support_logits.new_tensor(0.0)
+            noeffect_contradiction_policy_mass = support_logits.new_tensor(0.0)
+            noeffect_known_contradicted_top1 = support_logits.new_tensor(0.0)
+            noeffect_broad_contradicted_top1 = support_logits.new_tensor(0.0)
             noeffect_contradicted_top1 = support_logits.new_tensor(0.0)
             noeffect_contradiction_gate_mean = support_logits.new_tensor(0.0)
             noeffect_contradiction_penalty_mean = support_logits.new_tensor(0.0)
@@ -797,6 +765,12 @@ def _run_synthetic_online_object_event(
             + noeffect_contradiction_scale
             * max(float(args.noeffect_contradiction_margin_weight), 0.0)
             * noeffect_contradiction_margin_loss
+            + noeffect_contradiction_scale
+            * max(float(args.noeffect_contradiction_penalty_weight), 0.0)
+            * noeffect_contradiction_penalty_min_loss
+            + noeffect_contradiction_scale
+            * max(float(args.noeffect_contradiction_mass_weight), 0.0)
+            * noeffect_contradiction_policy_mass
             + diagnostic_scale * diagnostic_utility_loss_scale * diagnostic_utility_loss
             + diagnostic_scale * 0.20 * diagnostic_margin_loss
             + diagnostic_scale * 0.15 * F.relu(0.25 - diagnostic_uncertain_minus_noeffect)
@@ -851,6 +825,10 @@ def _run_synthetic_online_object_event(
         last_diagnostic_recovery_margin_loss = float(diagnostic_recovery_margin_loss.detach().cpu())
         last_noeffect_contradiction_gate_loss = float(noeffect_contradiction_gate_loss.detach().cpu())
         last_noeffect_contradiction_margin_loss = float(noeffect_contradiction_margin_loss.detach().cpu())
+        last_noeffect_contradiction_penalty_min_loss = float(noeffect_contradiction_penalty_min_loss.detach().cpu())
+        last_noeffect_contradiction_policy_mass = float(noeffect_contradiction_policy_mass.detach().cpu())
+        last_noeffect_known_contradicted_top1_rate = float(noeffect_known_contradicted_top1.detach().cpu())
+        last_noeffect_broad_contradicted_top1_rate = float(noeffect_broad_contradicted_top1.detach().cpu())
         last_noeffect_contradicted_top1_rate = float(noeffect_contradicted_top1.detach().cpu())
         last_noeffect_contradiction_gate_mean = float(noeffect_contradiction_gate_mean.detach().cpu())
         last_noeffect_contradiction_penalty_mean = float(noeffect_contradiction_penalty_mean.detach().cpu())
@@ -892,6 +870,10 @@ def _run_synthetic_online_object_event(
                     "diagnostic_mix_after_noeffect_mean": last_diagnostic_mix_after_noeffect,
                     "noeffect_contradiction_gate_loss": last_noeffect_contradiction_gate_loss,
                     "noeffect_contradiction_margin_loss": last_noeffect_contradiction_margin_loss,
+                    "noeffect_contradiction_penalty_min_loss": last_noeffect_contradiction_penalty_min_loss,
+                    "noeffect_contradiction_policy_mass": last_noeffect_contradiction_policy_mass,
+                    "known_noeffect_contradicted_top1_rate": last_noeffect_known_contradicted_top1_rate,
+                    "broad_noeffect_contradicted_top1_rate": last_noeffect_broad_contradicted_top1_rate,
                     "noeffect_contradicted_top1_rate": last_noeffect_contradicted_top1_rate,
                     "noeffect_contradiction_gate_mean": last_noeffect_contradiction_gate_mean,
                     "noeffect_contradiction_penalty_mean": last_noeffect_contradiction_penalty_mean,
@@ -1015,18 +997,34 @@ def _with_balanced_runtime_score(metrics: dict[str, Any]) -> dict[str, Any]:
         )
         or 0.0
     )
-    contradicted_top1 = float(updated.get("runtime_agent_act_path_contradicted_top1_rate", 0.0) or 0.0)
-    contradiction_gate = float(updated.get("runtime_agent_act_path_noeffect_contradiction_gate_top_mean", 0.0) or 0.0)
-    contradiction_penalty = float(updated.get("runtime_agent_act_path_noeffect_contradiction_penalty_top_mean", 0.0) or 0.0)
+    known_contradicted = float(updated.get("runtime_agent_act_path_known_contradicted_top1_rate", 0.0) or 0.0)
+    broad_contradicted = float(
+        updated.get(
+            "runtime_agent_act_path_broad_contradicted_top1_rate",
+            updated.get("runtime_agent_act_path_contradicted_top1_rate", 0.0),
+        )
+        or 0.0
+    )
+    known_mass = float(updated.get("runtime_agent_act_path_known_contradiction_policy_mass", 0.0) or 0.0)
+    known_margin = float(updated.get("runtime_agent_act_path_known_contradiction_margin_loss", 0.0) or 0.0)
+    known_penalty_min = float(updated.get("runtime_agent_act_path_known_contradiction_penalty_min_loss", 0.0) or 0.0)
+    counted_rate = float(updated.get("runtime_agent_act_path_noeffect_contradiction_counted_rate", 0.0) or 0.0)
+    known_available_rate = float(updated.get("runtime_agent_act_path_known_contradiction_available_rate", 0.0) or 0.0)
+    contradiction_coverage_penalty = 0.0
+    if failed_level_count > 0.0:
+        contradiction_coverage_penalty = 0.05 * max(0.50 - counted_rate, 0.0) + 0.05 * max(0.50 - known_available_rate, 0.0)
     updated["runtime_agent_act_path_balanced_score"] = (
         within5
         + 0.10 * min(unique_actions / 3.0, 1.0)
         + 0.10 * min(mapped_cols / 2.5, 1.0)
-        + 0.05 * min(contradiction_gate / 0.50, 1.0)
-        + 0.05 * min(contradiction_penalty / 0.10, 1.0)
         - 0.10 * max(mapped_concentration - 0.65, 0.0)
         - 0.10 * max(mix - 0.40, 0.0)
-        - 0.10 * contradicted_top1
+        - 0.30 * known_contradicted
+        - 0.10 * broad_contradicted
+        - 0.20 * known_mass
+        - 0.05 * min(known_margin / 1.5, 1.0)
+        - 0.05 * min(known_penalty_min / 1.75, 1.0)
+        - contradiction_coverage_penalty
     )
     return updated
 
@@ -1404,6 +1402,136 @@ def _action_basis_known_noeffect_mask(
         return torch.zeros_like(action_mask, dtype=torch.bool)
     posterior = features.to(dtype=torch.float32)
     return action_mask & (posterior[..., 3] >= 0.20)
+
+
+def _noeffect_contradiction_masks(
+    output: Any,
+    tensors: dict[str, Any],
+    *,
+    positive_mask: torch.Tensor,
+    relation_failed_mask: torch.Tensor,
+    coord_failure_mask: torch.Tensor,
+) -> dict[str, torch.Tensor]:
+    action_mask = tensors["action_mask"].bool()
+    no_effect_prob = torch.sigmoid(output.outcome_logits[..., OUT_NO_EFFECT_NONPROGRESS])
+    target_noeffect = tensors["candidate_outcome_targets"][..., OUT_NO_EFFECT_NONPROGRESS] > 0.5
+    basis_features = getattr(output, "action_basis_posterior_features", None)
+    family_features = getattr(output, "action_family_posterior_features", None)
+    basis_noeffect = (
+        basis_features[..., 3].to(dtype=no_effect_prob.dtype)
+        if basis_features is not None
+        else torch.zeros_like(no_effect_prob)
+    )
+    family_noeffect = (
+        family_features[..., 3].to(dtype=no_effect_prob.dtype)
+        if family_features is not None
+        else torch.zeros_like(no_effect_prob)
+    )
+    posterior_noeffect = torch.maximum(basis_noeffect, family_noeffect)
+    coord_failure_row = coord_failure_mask[:, None].to(dtype=torch.float32) > 0.0
+    known_mask = (
+        action_mask
+        & ~positive_mask.bool()
+        & ((no_effect_prob >= 0.90) | target_noeffect)
+        & (posterior_noeffect >= 0.80)
+        & coord_failure_row
+    )
+    broad_mask = (
+        action_mask
+        & ~positive_mask.bool()
+        & ((no_effect_prob >= 0.70) | target_noeffect)
+        & ((posterior_noeffect >= 0.45) | relation_failed_mask.bool())
+        & coord_failure_row
+    )
+    known_rows = known_mask.any(dim=1).to(dtype=no_effect_prob.dtype) * coord_failure_mask.to(dtype=no_effect_prob.dtype)
+    broad_rows = broad_mask.any(dim=1).to(dtype=no_effect_prob.dtype) * coord_failure_mask.to(dtype=no_effect_prob.dtype)
+    return {
+        "known_mask": known_mask,
+        "broad_mask": broad_mask,
+        "known_rows": known_rows,
+        "broad_rows": broad_rows,
+        "posterior_noeffect": posterior_noeffect,
+        "no_effect_prob": no_effect_prob,
+    }
+
+
+def _noeffect_contradiction_training_losses(
+    output: Any,
+    tensors: dict[str, Any],
+    *,
+    logits: torch.Tensor,
+    positive_mask: torch.Tensor,
+    relation_failed_mask: torch.Tensor,
+    coord_failure_mask: torch.Tensor,
+    positive_after: torch.Tensor | None = None,
+) -> dict[str, torch.Tensor]:
+    gate = getattr(output, "noeffect_contradiction_gate", None)
+    penalty = getattr(output, "noeffect_contradiction_penalty", None)
+    if gate is None or penalty is None:
+        zero = logits.sum() * 0.0
+        return {
+            "known_gate_loss": zero,
+            "known_margin_loss": zero,
+            "known_penalty_min_loss": zero,
+            "known_policy_mass": zero,
+            "known_top1_rate": zero,
+            "broad_top1_rate": zero,
+            "known_gate_mean": zero,
+            "known_penalty_mean": zero,
+        }
+    masks = _noeffect_contradiction_masks(
+        output,
+        tensors,
+        positive_mask=positive_mask,
+        relation_failed_mask=relation_failed_mask,
+        coord_failure_mask=coord_failure_mask,
+    )
+    known_mask = masks["known_mask"]
+    broad_mask = masks["broad_mask"]
+    known_rows = masks["known_rows"]
+    broad_rows = masks["broad_rows"]
+    valid_weight = tensors["action_mask"].to(dtype=gate.dtype)
+    gate_target = known_mask.to(dtype=gate.dtype)
+    positive_weight = 1.0 + 5.0 * gate_target
+    gate_loss_raw = F.binary_cross_entropy(
+        gate.clamp(1.0e-6, 1.0 - 1.0e-6),
+        gate_target,
+        reduction="none",
+    )
+    per_row_gate_loss = torch.sum(gate_loss_raw * valid_weight * positive_weight, dim=-1) / torch.clamp(
+        torch.sum(valid_weight * positive_weight, dim=-1),
+        min=1.0,
+    )
+    known_gate_loss = _masked_mean_loss(per_row_gate_loss, known_rows)
+    if positive_after is None:
+        positive_after = torch.logsumexp(logits.masked_fill(~positive_mask.bool(), -1.0e9), dim=-1)
+    known_logit = torch.logsumexp(logits.masked_fill(~known_mask, -1.0e9), dim=-1)
+    known_margin_loss = _masked_mean_loss(F.relu(known_logit - positive_after + 1.5), known_rows)
+    known_penalty_mean_per_row = _masked_action_mean(penalty, known_mask)
+    known_penalty_min_loss = _masked_mean_loss(F.relu(1.75 - known_penalty_mean_per_row), known_rows)
+    probs = torch.softmax(logits.masked_fill(~tensors["action_mask"].bool(), -1.0e9), dim=-1)
+    known_policy_mass = _masked_mean_loss(torch.sum(probs * known_mask.to(dtype=probs.dtype), dim=-1), known_rows)
+    retry_top = torch.argmax(logits.masked_fill(~tensors["action_mask"].bool(), -1.0e9), dim=-1)
+    known_top1_rate = _masked_mean_loss(
+        known_mask.gather(1, retry_top[:, None]).squeeze(1).to(dtype=logits.dtype),
+        known_rows,
+    )
+    broad_top1_rate = _masked_mean_loss(
+        broad_mask.gather(1, retry_top[:, None]).squeeze(1).to(dtype=logits.dtype),
+        broad_rows,
+    )
+    known_gate_mean = _masked_mean_loss(_masked_action_mean(gate, known_mask), known_rows)
+    known_penalty_mean = _masked_mean_loss(known_penalty_mean_per_row, known_rows)
+    return {
+        "known_gate_loss": known_gate_loss,
+        "known_margin_loss": known_margin_loss,
+        "known_penalty_min_loss": known_penalty_min_loss,
+        "known_policy_mass": known_policy_mass,
+        "known_top1_rate": known_top1_rate,
+        "broad_top1_rate": broad_top1_rate,
+        "known_gate_mean": known_gate_mean,
+        "known_penalty_mean": known_penalty_mean,
+    }
 
 
 def _selected_basis_overlap(
@@ -2449,6 +2577,106 @@ def _post_noeffect_window_metrics(
     }
 
 
+def _rank_trace_noeffect_contradiction_metrics(
+    example: ObjectEventExample,
+    *,
+    failed_action: str,
+    records: Sequence[dict[str, object]],
+) -> dict[str, float | bool]:
+    if failed_action not in example.legal_actions or parse_click_action(failed_action) is None:
+        return _empty_rank_trace_contradiction_metrics(counted=False)
+    failed_index = int(example.legal_actions.index(failed_action))
+    failed_outcome = np.asarray(example.candidate_targets.outcome, dtype=np.float32)[failed_index]
+    if float(failed_outcome[OUT_NO_EFFECT_NONPROGRESS]) <= 0.5:
+        return _empty_rank_trace_contradiction_metrics(counted=False)
+    positive_indices = {
+        int(index)
+        for index, value in enumerate(np.asarray(example.candidate_targets.value, dtype=np.float32))
+        if float(value) > 0.5
+    }
+    top = records[0] if records else {}
+    top_action = str(top.get("action", "")) if isinstance(top, dict) else ""
+    known_records: list[dict[str, object]] = []
+    broad_records: list[dict[str, object]] = []
+    positive_scores: list[float] = []
+    for record in records:
+        action = str(record.get("action", ""))
+        raw_index = record.get("action_index", -1)
+        try:
+            action_index = int(raw_index)
+        except (TypeError, ValueError):
+            action_index = int(example.legal_actions.index(action)) if action in example.legal_actions else -1
+        total_score = float(record.get("total_score", 0.0) or 0.0)
+        if action_index in positive_indices:
+            positive_scores.append(total_score)
+            continue
+        if action_index < 0 or action_index >= len(example.legal_actions):
+            continue
+        target_noeffect = (
+            float(np.asarray(example.candidate_targets.outcome, dtype=np.float32)[action_index, OUT_NO_EFFECT_NONPROGRESS])
+            > 0.5
+        )
+        no_effect = float(record.get("out_no_effect_prob", 0.0) or 0.0)
+        posterior_noeffect = max(
+            float(record.get("basis_noeffect", 0.0) or 0.0),
+            float(record.get("family_noeffect", 0.0) or 0.0),
+        )
+        relation_failed = _is_same_click_x_action(failed_action, action) or _is_same_mapped_col_action(
+            failed_action,
+            action,
+            example,
+        )
+        if (no_effect >= 0.90 or target_noeffect) and posterior_noeffect >= 0.80:
+            known_records.append(record)
+        if (no_effect >= 0.70 or target_noeffect) and (posterior_noeffect >= 0.45 or relation_failed):
+            broad_records.append(record)
+    known_actions = {str(record.get("action", "")) for record in known_records}
+    broad_actions = {str(record.get("action", "")) for record in broad_records}
+    known_gate = [float(record.get("noeffect_contradiction_gate", 0.0) or 0.0) for record in known_records]
+    known_penalty = [float(record.get("noeffect_contradiction_penalty", 0.0) or 0.0) for record in known_records]
+    known_scores = [float(record.get("total_score", 0.0) or 0.0) for record in known_records]
+    known_policy_mass = sum(float(record.get("probability", 0.0) or 0.0) for record in known_records)
+    positive_lse = _logsumexp_float(positive_scores)
+    known_lse = _logsumexp_float(known_scores)
+    margin_loss = max(known_lse - positive_lse + 1.5, 0.0) if known_scores and positive_scores else 0.0
+    penalty_mean = float(np.mean(known_penalty)) if known_penalty else 0.0
+    return {
+        "counted": True,
+        "known_available": bool(known_records),
+        "broad_available": bool(broad_records),
+        "known_top1": float(top_action in known_actions),
+        "broad_top1": float(top_action in broad_actions),
+        "known_gate_mean": float(np.mean(known_gate)) if known_gate else 0.0,
+        "known_penalty_mean": penalty_mean,
+        "known_policy_mass": float(known_policy_mass),
+        "known_margin_loss": float(margin_loss),
+        "known_penalty_min_loss": float(max(1.75 - penalty_mean, 0.0)) if known_records else 0.0,
+    }
+
+
+def _empty_rank_trace_contradiction_metrics(*, counted: bool) -> dict[str, float | bool]:
+    return {
+        "counted": bool(counted),
+        "known_available": False,
+        "broad_available": False,
+        "known_top1": 0.0,
+        "broad_top1": 0.0,
+        "known_gate_mean": 0.0,
+        "known_penalty_mean": 0.0,
+        "known_policy_mass": 0.0,
+        "known_margin_loss": 0.0,
+        "known_penalty_min_loss": 0.0,
+    }
+
+
+def _logsumexp_float(values: Sequence[float]) -> float:
+    if not values:
+        return float("-inf")
+    array = np.asarray(values, dtype=np.float64)
+    max_value = float(np.max(array))
+    return float(max_value + np.log(np.sum(np.exp(array - max_value))))
+
+
 def _is_near_repeat_action(first: str, second: str, example: ObjectEventExample) -> bool:
     if first == second:
         return True
@@ -2703,6 +2931,16 @@ def _runtime_agent_active_metrics(
             "runtime_agent_act_path_post_noeffect_next_action_same_x_rate": 0.0,
             "runtime_agent_act_path_post_noeffect_rank_recovery_success_rate": 0.0,
             "runtime_agent_act_path_contradicted_top1_rate": 0.0,
+            "runtime_agent_act_path_known_contradicted_top1_rate": 0.0,
+            "runtime_agent_act_path_broad_contradicted_top1_rate": 0.0,
+            "runtime_agent_act_path_known_contradiction_gate_mean": 0.0,
+            "runtime_agent_act_path_known_contradiction_penalty_mean": 0.0,
+            "runtime_agent_act_path_known_contradiction_policy_mass": 0.0,
+            "runtime_agent_act_path_known_contradiction_margin_loss": 0.0,
+            "runtime_agent_act_path_known_contradiction_penalty_min_loss": 0.0,
+            "runtime_agent_act_path_noeffect_contradiction_counted_rate": 0.0,
+            "runtime_agent_act_path_known_contradiction_available_rate": 0.0,
+            "runtime_agent_act_path_broad_contradiction_available_rate": 0.0,
             "runtime_agent_act_path_noeffect_contradiction_gate_top_mean": 0.0,
             "runtime_agent_act_path_noeffect_contradiction_penalty_top_mean": 0.0,
         }
@@ -2856,6 +3094,16 @@ def _runtime_agent_act_path_metrics(
     unique_basis_counts: list[float] = []
     basis_entropies: list[float] = []
     contradicted_top1_hits: list[float] = []
+    known_contradicted_top1_hits: list[float] = []
+    broad_contradicted_top1_hits: list[float] = []
+    known_contradiction_gate_values: list[float] = []
+    known_contradiction_penalty_values: list[float] = []
+    known_contradiction_policy_mass_values: list[float] = []
+    known_contradiction_margin_losses: list[float] = []
+    known_contradiction_penalty_min_losses: list[float] = []
+    contradiction_counted_hits: list[float] = []
+    known_contradiction_available_hits: list[float] = []
+    broad_contradiction_available_hits: list[float] = []
     contradiction_gate_top_values: list[float] = []
     contradiction_penalty_top_values: list[float] = []
     failed_level_records: list[tuple[ObjectEventExample, Sequence[str], Sequence[float]]] = []
@@ -2925,21 +3173,31 @@ def _runtime_agent_act_path_metrics(
                 retry_scores = agent.score_actions_for_state(first_example.state, first_example.legal_actions)
                 _append_rank_diagnostics(diag_series, agent.diagnostics())
                 retry_selected_action = max(retry_scores.values(), key=lambda decision: decision.score).action
-                retry_rank_trace = agent.object_event_rank_trace(first_example.legal_actions, top_k=1)
+                retry_rank_trace = agent.object_event_rank_trace(
+                    first_example.legal_actions,
+                    top_k=len(first_example.legal_actions),
+                )
                 retry_top_records = retry_rank_trace.get("top_actions", []) if isinstance(retry_rank_trace, dict) else []
                 retry_top_record = retry_top_records[0] if retry_top_records and isinstance(retry_top_records[0], dict) else {}
                 retry_top_action = str(retry_top_record.get("action", retry_selected_action))
-                retry_top_index = int(first_example.legal_actions.index(retry_top_action)) if retry_top_action in first_example.legal_actions else -1
-                retry_top_contradicted = (
-                    retry_top_index >= 0
-                    and not _is_positive_index(first_example, retry_top_index)
-                    and float(retry_top_record.get("out_no_effect_prob", 0.0) or 0.0) >= 0.70
-                    and (
-                        float(retry_top_record.get("basis_noeffect", 0.0) or 0.0) >= 0.45
-                        or float(retry_top_record.get("family_noeffect", 0.0) or 0.0) >= 0.45
-                    )
+                trace_contradiction = _rank_trace_noeffect_contradiction_metrics(
+                    first_example,
+                    failed_action=first_failed_action,
+                    records=tuple(record for record in retry_top_records if isinstance(record, dict)),
                 )
-                contradicted_top1_hits.append(float(retry_top_contradicted))
+                contradiction_counted_hits.append(float(bool(trace_contradiction["counted"])))
+                if bool(trace_contradiction["counted"]):
+                    known_contradiction_available_hits.append(float(bool(trace_contradiction["known_available"])))
+                    broad_contradiction_available_hits.append(float(bool(trace_contradiction["broad_available"])))
+                    known_contradicted_top1_hits.append(float(trace_contradiction["known_top1"]))
+                    broad_contradicted_top1_hits.append(float(trace_contradiction["broad_top1"]))
+                    contradicted_top1_hits.append(float(trace_contradiction["broad_top1"]))
+                    known_contradiction_policy_mass_values.append(float(trace_contradiction["known_policy_mass"]))
+                    known_contradiction_margin_losses.append(float(trace_contradiction["known_margin_loss"]))
+                    known_contradiction_penalty_min_losses.append(float(trace_contradiction["known_penalty_min_loss"]))
+                    if bool(trace_contradiction["known_available"]):
+                        known_contradiction_gate_values.append(float(trace_contradiction["known_gate_mean"]))
+                        known_contradiction_penalty_values.append(float(trace_contradiction["known_penalty_mean"]))
                 contradiction_gate_top_values.append(float(retry_top_record.get("noeffect_contradiction_gate", 0.0) or 0.0))
                 contradiction_penalty_top_values.append(float(retry_top_record.get("noeffect_contradiction_penalty", 0.0) or 0.0))
                 exact_repeat_hits.append(float(retry_selected_action == first_failed_action))
@@ -3057,6 +3315,36 @@ def _runtime_agent_act_path_metrics(
         "runtime_agent_act_path_selected_unique_basis_count": float(np.mean(unique_basis_counts)) if unique_basis_counts else 0.0,
         "runtime_agent_act_path_selected_basis_entropy": float(np.mean(basis_entropies)) if basis_entropies else 0.0,
         "runtime_agent_act_path_contradicted_top1_rate": float(np.mean(contradicted_top1_hits)) if contradicted_top1_hits else 0.0,
+        "runtime_agent_act_path_known_contradicted_top1_rate": (
+            float(np.mean(known_contradicted_top1_hits)) if known_contradicted_top1_hits else 0.0
+        ),
+        "runtime_agent_act_path_broad_contradicted_top1_rate": (
+            float(np.mean(broad_contradicted_top1_hits)) if broad_contradicted_top1_hits else 0.0
+        ),
+        "runtime_agent_act_path_known_contradiction_gate_mean": (
+            float(np.mean(known_contradiction_gate_values)) if known_contradiction_gate_values else 0.0
+        ),
+        "runtime_agent_act_path_known_contradiction_penalty_mean": (
+            float(np.mean(known_contradiction_penalty_values)) if known_contradiction_penalty_values else 0.0
+        ),
+        "runtime_agent_act_path_known_contradiction_policy_mass": (
+            float(np.mean(known_contradiction_policy_mass_values)) if known_contradiction_policy_mass_values else 0.0
+        ),
+        "runtime_agent_act_path_known_contradiction_margin_loss": (
+            float(np.mean(known_contradiction_margin_losses)) if known_contradiction_margin_losses else 0.0
+        ),
+        "runtime_agent_act_path_known_contradiction_penalty_min_loss": (
+            float(np.mean(known_contradiction_penalty_min_losses)) if known_contradiction_penalty_min_losses else 0.0
+        ),
+        "runtime_agent_act_path_noeffect_contradiction_counted_rate": (
+            float(np.mean(contradiction_counted_hits)) if contradiction_counted_hits else 0.0
+        ),
+        "runtime_agent_act_path_known_contradiction_available_rate": (
+            float(np.mean(known_contradiction_available_hits)) if known_contradiction_available_hits else 0.0
+        ),
+        "runtime_agent_act_path_broad_contradiction_available_rate": (
+            float(np.mean(broad_contradiction_available_hits)) if broad_contradiction_available_hits else 0.0
+        ),
         "runtime_agent_act_path_noeffect_contradiction_gate_top_mean": (
             float(np.mean(contradiction_gate_top_values)) if contradiction_gate_top_values else 0.0
         ),

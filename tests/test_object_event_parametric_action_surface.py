@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import torch
 
 from arcagi.core.action_schema import click_action_to_grid_cell
 from arcagi.core.types import ObjectState, StructuredState
-from arcagi.learned_online.event_tokens import ACTION_CLICK, OUT_NO_EFFECT_NONPROGRESS, encode_action_tokens
+from arcagi.learned_online.event_tokens import ACTION_CLICK, OUT_NO_EFFECT_NONPROGRESS, OUTCOME_DIM, encode_action_tokens
 from arcagi.learned_online.object_event_bridge import (
     SelectedActionObservation,
     assert_no_forbidden_metadata_as_model_input,
@@ -32,7 +34,10 @@ from scripts.train_learned_online_object_event import (
     _failure_contingent_action_diversity_metrics,
     _information_gain_from_hypothesis_success,
     _near_action_indices,
+    _noeffect_contradiction_masks,
+    _noeffect_contradiction_training_losses,
     _post_noeffect_window_metrics,
+    _rank_trace_noeffect_contradiction_metrics,
     _selected_basis_overlap,
     _with_balanced_runtime_score,
 )
@@ -555,6 +560,166 @@ def test_noeffect_contradiction_penalty_subtracts_from_rank_without_action_mask(
         assert not hasattr(model, forbidden)
 
 
+def test_known_contradiction_mask_excludes_generic_noeffect_without_posterior_evidence() -> None:
+    output, tensors, positive_mask, relation_failed_mask, coord_failure_mask = _toy_noeffect_contradiction_inputs(
+        no_effect_prob=0.97,
+        posterior_noeffect=0.0,
+    )
+
+    masks = _noeffect_contradiction_masks(
+        output,
+        tensors,
+        positive_mask=positive_mask,
+        relation_failed_mask=relation_failed_mask,
+        coord_failure_mask=coord_failure_mask,
+    )
+
+    assert not bool(masks["known_mask"][0, 1])
+    assert not bool(masks["broad_mask"][0, 1])
+
+
+def test_known_contradiction_mask_includes_high_posterior_noeffect_candidate() -> None:
+    output, tensors, positive_mask, relation_failed_mask, coord_failure_mask = _toy_noeffect_contradiction_inputs(
+        no_effect_prob=0.97,
+        posterior_noeffect=0.85,
+    )
+
+    masks = _noeffect_contradiction_masks(
+        output,
+        tensors,
+        positive_mask=positive_mask,
+        relation_failed_mask=relation_failed_mask,
+        coord_failure_mask=coord_failure_mask,
+    )
+
+    assert bool(masks["known_mask"][0, 1])
+    assert bool(masks["broad_mask"][0, 1])
+
+
+def test_runtime_contradiction_metrics_use_synthetic_noeffect_target_when_prediction_is_low() -> None:
+    level = _parametric_level(seed=230)
+    example = level.example
+    failed = _failed_click_index(example)
+    positive = int(example.positive_action_indices[0])
+    assert float(example.candidate_targets.outcome[failed, OUT_NO_EFFECT_NONPROGRESS]) > 0.5
+
+    metrics = _rank_trace_noeffect_contradiction_metrics(
+        example,
+        failed_action=example.legal_actions[failed],
+        records=(
+            {
+                "action": example.legal_actions[failed],
+                "action_index": failed,
+                "total_score": 3.0,
+                "probability": 0.80,
+                "out_no_effect_prob": 0.01,
+                "basis_noeffect": 0.90,
+                "family_noeffect": 0.0,
+                "noeffect_contradiction_gate": 0.70,
+                "noeffect_contradiction_penalty": 2.0,
+            },
+            {
+                "action": example.legal_actions[positive],
+                "action_index": positive,
+                "total_score": 1.0,
+                "probability": 0.20,
+                "out_no_effect_prob": 0.01,
+                "basis_noeffect": 0.0,
+                "family_noeffect": 0.0,
+                "noeffect_contradiction_gate": 0.0,
+                "noeffect_contradiction_penalty": 0.0,
+            },
+        ),
+    )
+
+    assert metrics["counted"] is True
+    assert metrics["known_available"] is True
+    assert metrics["known_top1"] == 1.0
+    assert metrics["broad_top1"] == 1.0
+    assert metrics["known_policy_mass"] == 0.80
+
+
+def test_known_contradiction_penalty_min_loss_rewards_larger_known_penalty() -> None:
+    output, tensors, positive_mask, relation_failed_mask, coord_failure_mask = _toy_noeffect_contradiction_inputs(
+        no_effect_prob=0.97,
+        posterior_noeffect=0.85,
+        known_penalty=0.25,
+    )
+    logits = torch.tensor([[2.0, 4.0, 0.0]], dtype=torch.float32)
+    low_penalty = _noeffect_contradiction_training_losses(
+        output,
+        tensors,
+        logits=logits,
+        positive_mask=positive_mask,
+        relation_failed_mask=relation_failed_mask,
+        coord_failure_mask=coord_failure_mask,
+    )
+    output.noeffect_contradiction_penalty[0, 1] = 2.25
+    high_penalty = _noeffect_contradiction_training_losses(
+        output,
+        tensors,
+        logits=logits,
+        positive_mask=positive_mask,
+        relation_failed_mask=relation_failed_mask,
+        coord_failure_mask=coord_failure_mask,
+    )
+
+    assert float(low_penalty["known_penalty_min_loss"]) > float(high_penalty["known_penalty_min_loss"])
+    assert float(high_penalty["known_penalty_mean"]) > 1.75
+
+
+def test_known_contradiction_policy_mass_loss_tracks_known_probability() -> None:
+    output, tensors, positive_mask, relation_failed_mask, coord_failure_mask = _toy_noeffect_contradiction_inputs(
+        no_effect_prob=0.97,
+        posterior_noeffect=0.85,
+    )
+    high_known_logits = torch.tensor([[0.0, 4.0, 0.0]], dtype=torch.float32)
+    low_known_logits = torch.tensor([[4.0, -4.0, 0.0]], dtype=torch.float32)
+
+    high_mass = _noeffect_contradiction_training_losses(
+        output,
+        tensors,
+        logits=high_known_logits,
+        positive_mask=positive_mask,
+        relation_failed_mask=relation_failed_mask,
+        coord_failure_mask=coord_failure_mask,
+    )
+    low_mass = _noeffect_contradiction_training_losses(
+        output,
+        tensors,
+        logits=low_known_logits,
+        positive_mask=positive_mask,
+        relation_failed_mask=relation_failed_mask,
+        coord_failure_mask=coord_failure_mask,
+    )
+
+    assert float(high_mass["known_policy_mass"]) > float(low_mass["known_policy_mass"])
+    assert float(high_mass["known_top1_rate"]) == 1.0
+    assert float(low_mass["known_top1_rate"]) == 0.0
+
+
+def test_known_contradiction_penalty_leaves_known_action_legal_and_finite_scored() -> None:
+    output, tensors, positive_mask, relation_failed_mask, coord_failure_mask = _toy_noeffect_contradiction_inputs(
+        no_effect_prob=0.97,
+        posterior_noeffect=0.85,
+        known_penalty=2.0,
+    )
+    logits = torch.tensor([[1.0, 3.0, -1.0]], dtype=torch.float32) - output.noeffect_contradiction_penalty
+
+    losses = _noeffect_contradiction_training_losses(
+        output,
+        tensors,
+        logits=logits,
+        positive_mask=positive_mask,
+        relation_failed_mask=relation_failed_mask,
+        coord_failure_mask=coord_failure_mask,
+    )
+
+    assert bool(tensors["action_mask"][0, 1])
+    assert torch.isfinite(logits[tensors["action_mask"]]).all()
+    assert float(losses["known_penalty_mean"]) == 2.0
+
+
 def test_diagnostic_utility_logits_present_and_full_surface() -> None:
     level = _parametric_level(seed=218)
     tensors = _batch_to_tensors(collate_object_event_examples((level.example,)), device=torch.device("cpu"))
@@ -967,6 +1132,45 @@ def test_diagnostic_mix_can_change_after_noeffect_evidence() -> None:
     assert before.diagnostic_mix_logit is not None
     assert after.diagnostic_mix_logit is not None
     assert float(torch.abs(after.diagnostic_mix_logit - before.diagnostic_mix_logit).detach()) > 0.0
+
+
+def _toy_noeffect_contradiction_inputs(
+    *,
+    no_effect_prob: float,
+    posterior_noeffect: float,
+    known_gate: float = 0.8,
+    known_penalty: float = 0.5,
+):
+    outcome_logits = torch.zeros((1, 3, OUTCOME_DIM), dtype=torch.float32)
+    outcome_logits[..., OUT_NO_EFFECT_NONPROGRESS] = -4.0
+    outcome_logits[0, 1, OUT_NO_EFFECT_NONPROGRESS] = torch.logit(
+        torch.tensor(float(no_effect_prob), dtype=torch.float32).clamp(1.0e-4, 1.0 - 1.0e-4)
+    )
+    basis_features = torch.zeros((1, 3, 4), dtype=torch.float32)
+    family_features = torch.zeros((1, 3, 4), dtype=torch.float32)
+    basis_features[0, 1, 3] = float(posterior_noeffect)
+    gate = torch.full((1, 3), 0.1, dtype=torch.float32)
+    gate[0, 1] = float(known_gate)
+    penalty = torch.zeros((1, 3), dtype=torch.float32)
+    penalty[0, 1] = float(known_penalty)
+    output = SimpleNamespace(
+        outcome_logits=outcome_logits,
+        action_basis_posterior_features=basis_features,
+        action_family_posterior_features=family_features,
+        noeffect_contradiction_gate=gate,
+        noeffect_contradiction_penalty=penalty,
+    )
+    candidate_outcome_targets = torch.zeros((1, 3, OUTCOME_DIM), dtype=torch.float32)
+    candidate_outcome_targets[0, 1, OUT_NO_EFFECT_NONPROGRESS] = 1.0
+    tensors = {
+        "action_mask": torch.ones((1, 3), dtype=torch.bool),
+        "candidate_value_targets": torch.tensor([[1.0, 0.0, 0.0]], dtype=torch.float32),
+        "candidate_outcome_targets": candidate_outcome_targets,
+    }
+    positive_mask = tensors["candidate_value_targets"] > 0.5
+    relation_failed_mask = torch.zeros((1, 3), dtype=torch.bool)
+    coord_failure_mask = torch.ones((1,), dtype=torch.float32)
+    return output, tensors, positive_mask, relation_failed_mask, coord_failure_mask
 
 
 def _parametric_level(*, seed: int):

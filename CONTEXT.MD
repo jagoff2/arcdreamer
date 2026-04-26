@@ -6263,3 +6263,86 @@ Result:
   - do not run real ARC from this artifact
   - the mechanism is active and does not break the older synthetic gate, but the top selected action can still be contradicted by no-effect evidence too often
   - next likely issue is loss/selection pressure or where the gate is applied, but consult GPT-Pro again before changing model/training
+
+## 2026-04-26 Refined No-Effect Contradiction Gate WIP
+
+GPT-Pro consensus after failed first gate:
+
+- keep `NoEffectContradictionGate`; do not discard it and do not move it deeper before fixing the target
+- current target was too broad and mixed generic no-effect with known same-session contradicted evidence
+- split targets into:
+  - `known_contradicted`: non-positive, high predicted/target no-effect, high basis/family no-effect posterior, only after the agent's own no-effect click failure
+  - `broad_contradicted`: non-positive suspicious no-effect candidates with weaker posterior or relation-failed evidence, diagnostics/selection pressure only
+- add direct known losses:
+  - gate BCE weighted toward known positives
+  - margin against positive candidates
+  - minimum known penalty target
+  - policy probability mass on known contradicted candidates
+- checkpoint selection must penalize known/broad contradicted top-1; do not reward the gate just for being nonzero
+- do not run real ARC from `artifacts/object_event_noeffect_contradiction_runtime_probe.pkl`
+
+Implemented WIP:
+
+- `ObjectEventModelConfig.noeffect_contradiction_penalty_max = 6.0`
+- `NoEffectContradictionGate` now accepts `penalty_max`, initializes `penalty_scale_raw` at `0.0`, and uses the configurable max
+- trainer flags:
+  - `--noeffect-contradiction-penalty-weight`
+  - `--noeffect-contradiction-mass-weight`
+- trainer helpers:
+  - `_noeffect_contradiction_masks`
+  - `_noeffect_contradiction_training_losses`
+  - `_rank_trace_noeffect_contradiction_metrics`
+- runtime metrics added:
+  - `runtime_agent_act_path_known_contradicted_top1_rate`
+  - `runtime_agent_act_path_broad_contradicted_top1_rate`
+  - `runtime_agent_act_path_known_contradiction_gate_mean`
+  - `runtime_agent_act_path_known_contradiction_penalty_mean`
+  - `runtime_agent_act_path_known_contradiction_policy_mass`
+  - `runtime_agent_act_path_known_contradiction_margin_loss`
+  - `runtime_agent_act_path_known_contradiction_penalty_min_loss`
+- balanced score now subtracts `0.30 * known` and `0.10 * broad`, while retaining competence/diversity/mix terms
+- contract tests added for:
+  - generic no-effect without posterior evidence is not known contradicted
+  - high-posterior no-effect candidate is known contradicted
+  - penalty-min loss rewards larger known penalties
+  - policy-mass loss tracks known candidate probability
+  - known actions remain legal and finite-scored
+  - metadata marks the gate as learned scoring, not a contradiction controller
+
+Verification so far:
+
+- `python -m py_compile arcagi\learned_online\object_event_model.py scripts\train_learned_online_object_event.py tests\test_object_event_parametric_action_surface.py tests\test_learned_online_object_event_agent_contracts.py`
+- initial focused test result: `65 passed`, `43 warnings`
+
+Kant review found metric/selection false-positive risks:
+
+- runtime metrics could miss known synthetic no-effect candidates if the model underpredicted no-effect probability
+- balanced score ignored known policy mass, margin loss, and weak penalty
+- gate BCE trained dense negatives even when no known positive existed
+- gate/penalty means could look clean by dropping no-known cases
+
+Post-review fixes:
+
+- runtime contradiction metrics now use synthetic target no-effect as well as predicted no-effect probability
+- gate BCE is averaged only over rows with known positives
+- runtime metrics include contradiction counted rate, known available rate, and broad available rate
+- balanced score also penalizes known policy mass, known margin loss, known penalty-min loss, and low contradiction coverage when failed levels exist
+- added regression coverage for underpredicted no-effect target bypass
+
+Verification after fixes:
+
+- `python -m py_compile scripts\train_learned_online_object_event.py tests\test_object_event_parametric_action_surface.py`
+- `python -m pytest tests\test_object_event_parametric_action_surface.py tests\test_learned_online_object_event_agent_contracts.py -q`
+- focused result: `66 passed`, `43 warnings`
+- full object-event suite: `120 passed`, `53 warnings`
+- recurrent suite: `31 passed`
+- 2-step full-447 smoke completed:
+  - full `447` legal/scored actions
+  - no metadata leakage/action cap/oracle/replay/graph controller
+  - broad contradiction metric is active early
+  - known contradiction remains stricter and may need the full 240-step run to determine whether posterior evidence crosses threshold
+
+Next:
+
+- run the GPT-Pro 240-step refined synthetic gate
+- only if the refined synthetic gate passes, run one labeled 48-step real ARC hygiene trace; 48 steps is a harsh collapse detector, not a fair proof of online ARC competence

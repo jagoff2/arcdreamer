@@ -1419,3 +1419,43 @@ Operator actions recorded for continuity:
    - do not run real ARC from `artifacts/object_event_noeffect_contradiction_runtime_probe.pkl`
    - the gate is active and did not break the older synthetic gate, but it did not suppress contradicted top actions enough
    - commit/push the failed attempt honestly, then ask GPT-Pro whether to retune loss weights, change checkpoint selection pressure, or move the gate deeper into rank-component composition
+
+## 2026-04-26 Refined Contradiction Gate WIP
+
+1. GPT-Pro consultation after the failed first gate:
+   - keep the learned gate
+   - fix the target before moving the gate deeper
+   - separate `known_contradicted` from broad suspicious no-effect candidates
+   - add direct known penalty/mass/margin losses
+   - penalize known/broad contradicted top-1 in checkpoint selection
+   - do not run real ARC from the failed first artifact
+2. Code changes started:
+   - configurable `noeffect_contradiction_penalty_max=6.0`
+   - no-effect contradiction penalty scale initialized at zero
+   - trainer flags for known penalty and known policy-mass losses
+   - known/broad contradiction masks and losses
+   - runtime known/broad contradiction metrics
+   - balanced score now penalizes known/broad contradictions and no longer rewards gate/penalty magnitude directly
+3. Verification so far:
+   - compile passed for the edited model/trainer/tests
+   - focused parametric/agent tests: `65 passed`
+4. Active caution:
+   - `48` real ARC steps is only a harsh hygiene/collapse detector
+   - no real ARC run until the refined synthetic gate passes
+   - no ARC success claim from this WIP
+5. Side-agent review:
+   - Faraday found no forbidden-control leakage: the patch is a soft learned score penalty plus training/diagnostic masks, not an action filter/controller.
+   - Kant found metric/selection risks: runtime metrics could be gamed by low predicted no-effect, balanced selection ignored known mass/margin/weak penalty, and gate BCE trained dense negatives without known positives.
+6. Follow-up fixes:
+   - runtime metrics now respect synthetic target no-effect in addition to predicted no-effect
+   - gate BCE only contributes on rows with known positives
+   - balanced score penalizes known policy mass, known margin loss, known penalty-min loss, and low contradiction coverage
+   - added a regression test for the low-predicted-no-effect bypass
+7. Verification after fixes:
+   - compile passed
+   - focused parametric/agent tests: `66 passed`
+   - full object-event suite: `120 passed`
+   - recurrent suite: `31 passed`
+   - 2-step full-447 smoke completed with full scoring and no forbidden flags
+8. Next action:
+   - commit/push this verified WIP before the long 240-step refined synthetic gate
