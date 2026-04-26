@@ -110,6 +110,7 @@ def main() -> None:
     parser.add_argument("--empty-click-fraction", type=float, default=0.80)
     parser.add_argument("--positive-region-radius", type=int, default=1)
     parser.add_argument("--max-steps-per-level", type=int, default=3)
+    parser.add_argument("--axis-noeffect-cases", type=float, default=0.0)
     args = parser.parse_args()
 
     mode = args.source or args.mode
@@ -334,6 +335,10 @@ def _run_synthetic_online_object_event(
         positive_after = torch.logsumexp(self_retry_logits.masked_fill(~positive_mask, -1.0e9), dim=-1)
         exact_failed_mask = F.one_hot(self_selected, num_classes=support_logits.shape[1]).bool() & support_tensors["action_mask"].bool()
         near_failed_mask = _near_failed_mask_from_tensors(support_tensors, self_selected) & ~positive_mask
+        axis_failed_masks = {
+            key: mask & ~positive_mask
+            for key, mask in _axis_failed_masks_from_tensors(support_tensors, self_selected).items()
+        }
         self_noeffect_click_mask = _selected_noeffect_click_mask(support_tensors, self_selected).float()
         coord_failure_mask = self_failure_mask * self_noeffect_click_mask
         near_after = torch.logsumexp(self_retry_logits.masked_fill(~near_failed_mask, -1.0e9), dim=-1)
@@ -360,6 +365,16 @@ def _run_synthetic_online_object_event(
             F.relu(near_after - near_before + 0.25),
             coord_failure_mask,
         )
+        axis_margin_terms = []
+        axis_drop_terms = []
+        for axis_mask in axis_failed_masks.values():
+            axis_after = torch.logsumexp(self_retry_logits.masked_fill(~axis_mask, -1.0e9), dim=-1)
+            axis_before = torch.logsumexp(support_logits.masked_fill(~axis_mask, -1.0e9), dim=-1)
+            axis_margin_terms.append(_masked_mean_loss(F.relu(axis_after - positive_after + 0.35), coord_failure_mask))
+            axis_drop_terms.append(_masked_mean_loss(F.relu(axis_after - axis_before + 0.20), coord_failure_mask))
+        axis_margin_loss = torch.stack(axis_margin_terms).mean() if axis_margin_terms else support_logits.new_tensor(0.0)
+        axis_drop_loss = torch.stack(axis_drop_terms).mean() if axis_drop_terms else support_logits.new_tensor(0.0)
+        axis_loss_scale = 1.0 + max(float(args.axis_noeffect_cases), 0.0)
         plausible_loss = _plausible_red_blue_loss(support_logits, support_examples)
         loss = (
             query_loss
@@ -372,6 +387,8 @@ def _run_synthetic_online_object_event(
             + 0.35 * near_margin_loss
             + 0.25 * exact_coord_drop_loss
             + 0.15 * near_drop_loss
+            + axis_loss_scale * 0.25 * axis_margin_loss
+            + axis_loss_scale * 0.15 * axis_drop_loss
             + 0.2 * plausible_loss
         )
         optimizer.zero_grad(set_to_none=True)
@@ -692,6 +709,30 @@ def _near_failed_mask_from_tensors(tensors: dict[str, Any], selected_indices: to
     near_grid = has_grid & (grid_l1 <= 0.15)
     selected_click = selected_is_click.unsqueeze(1)
     return valid & is_click & selected_click & (near_screen | near_grid)
+
+
+def _axis_failed_masks_from_tensors(tensors: dict[str, Any], selected_indices: torch.Tensor) -> dict[str, torch.Tensor]:
+    actions = tensors["inputs"]["action_numeric"]
+    valid = tensors["action_mask"].bool()
+    row = torch.arange(selected_indices.shape[0], device=selected_indices.device)
+    selected = actions[row, selected_indices]
+    selected_is_click = selected[:, ACTION_FEATURE_IS_CLICK] > 0.5
+    is_click = actions[..., ACTION_FEATURE_IS_CLICK] > 0.5
+    selected_click = selected_is_click.unsqueeze(1)
+    screen_xy = actions[..., ACTION_FEATURE_CLICK_X : ACTION_FEATURE_CLICK_Y + 1]
+    selected_xy = selected[:, ACTION_FEATURE_CLICK_X : ACTION_FEATURE_CLICK_Y + 1].unsqueeze(1)
+    mapped_rc = actions[..., ACTION_FEATURE_GRID_ROW : ACTION_FEATURE_GRID_COL + 1]
+    selected_rc = selected[:, ACTION_FEATURE_GRID_ROW : ACTION_FEATURE_GRID_COL + 1].unsqueeze(1)
+    has_grid = (actions[..., ACTION_FEATURE_HAS_GRID_CELL] > 0.5) & (
+        selected[:, ACTION_FEATURE_HAS_GRID_CELL].unsqueeze(1) > 0.5
+    )
+    base = valid & is_click & selected_click
+    return {
+        "same_x": base & (torch.abs(screen_xy[..., 0] - selected_xy[..., 0]) <= 0.02),
+        "same_y": base & (torch.abs(screen_xy[..., 1] - selected_xy[..., 1]) <= 0.02),
+        "same_mapped_col": base & has_grid & (torch.abs(mapped_rc[..., 1] - selected_rc[..., 1]) <= 0.15),
+        "same_mapped_row": base & has_grid & (torch.abs(mapped_rc[..., 0] - selected_rc[..., 0]) <= 0.15),
+    }
 
 
 def _masked_mean_loss(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -1147,8 +1188,14 @@ def _active_rollout_metrics(
             "failed_far_score_delta_mean": 0.0,
             "failed_neighborhood_top1_rate": 0.0,
             "failed_same_mapped_cell_top1_rate": 0.0,
+            "failed_same_x_top1_rate": 0.0,
+            "failed_same_y_top1_rate": 0.0,
+            "failed_same_x_score_delta_mean": 0.0,
+            "failed_same_y_score_delta_mean": 0.0,
             "coordinate_noeffect_memory_norm": 0.0,
             "coordinate_noeffect_count_mean": 0.0,
+            "axis_noeffect_memory_norm": 0.0,
+            "axis_noeffect_count_mean": 0.0,
             "max_same_action_streak_mean": 0.0,
             "max_same_action_streak_max": 0.0,
             "unique_action_count_mean": 0.0,
@@ -1180,6 +1227,10 @@ def _active_rollout_metrics(
     failed_far_deltas: list[float] = []
     failed_neighborhood_top1_hits: list[float] = []
     failed_same_mapped_cell_top1_hits: list[float] = []
+    failed_same_x_hits: list[float] = []
+    failed_same_y_hits: list[float] = []
+    failed_same_x_deltas: list[float] = []
+    failed_same_y_deltas: list[float] = []
     same_streaks: list[float] = []
     unique_counts: list[float] = []
     no_effect_count = 0
@@ -1201,6 +1252,8 @@ def _active_rollout_metrics(
     level_norms: list[float] = []
     coordinate_norms: list[float] = []
     coordinate_counts: list[float] = []
+    axis_norms: list[float] = []
+    axis_counts: list[float] = []
     for session in sessions:
         session_belief = torch.zeros((1, model.config.d_model), dtype=torch.float32, device=device)
         for level in session.levels[:1]:
@@ -1247,6 +1300,11 @@ def _active_rollout_metrics(
                         coord_memory = level_belief[:, coord_start:coord_stop]
                         coordinate_norms.append(float(torch.linalg.vector_norm(coord_memory).detach().cpu()))
                         coordinate_counts.append(float(coord_memory[0, 0].detach().cpu()) if coord_memory.numel() else 0.0)
+                        axis_start = int(model.axis_noeffect_memory_rank.start)
+                        axis_stop = int(model.axis_noeffect_memory_rank.stop)
+                        axis_memory = level_belief[:, axis_start:axis_stop]
+                        axis_norms.append(float(torch.linalg.vector_norm(axis_memory).detach().cpu()))
+                        axis_counts.append(float(axis_memory[0, 0].detach().cpu()) if axis_memory.numel() else 0.0)
                         step_success = step
                         break
                     level_belief = level_belief + deltas.level_delta
@@ -1256,6 +1314,11 @@ def _active_rollout_metrics(
                     coord_memory = level_belief[:, coord_start:coord_stop]
                     coordinate_norms.append(float(torch.linalg.vector_norm(coord_memory).detach().cpu()))
                     coordinate_counts.append(float(coord_memory[0, 0].detach().cpu()) if coord_memory.numel() else 0.0)
+                    axis_start = int(model.axis_noeffect_memory_rank.start)
+                    axis_stop = int(model.axis_noeffect_memory_rank.stop)
+                    axis_memory = level_belief[:, axis_start:axis_stop]
+                    axis_norms.append(float(torch.linalg.vector_norm(axis_memory).detach().cpu()))
+                    axis_counts.append(float(axis_memory[0, 0].detach().cpu()) if axis_memory.numel() else 0.0)
                     if failed_index is None:
                         no_effect_count += 1
                         failed_index = selected
@@ -1278,6 +1341,12 @@ def _active_rollout_metrics(
                         failed_same_mapped_cell_top1_hits.append(
                             float(_is_same_mapped_cell_action(level.example.legal_actions[selected], level.example.legal_actions[retry_selected], level.example))
                         )
+                        same_x_indices = _same_x_action_indices(level.example, level.example.legal_actions[selected])
+                        same_y_indices = _same_y_action_indices(level.example, level.example.legal_actions[selected])
+                        failed_same_x_hits.append(float(retry_selected in same_x_indices))
+                        failed_same_y_hits.append(float(retry_selected in same_y_indices))
+                        failed_same_x_deltas.append(_score_delta_for_indices(logits[0], retry_logits[0], same_x_indices))
+                        failed_same_y_deltas.append(_score_delta_for_indices(logits[0], retry_logits[0], same_y_indices))
                         if _is_distractor_action(level.example, selected, action_row=action_row):
                             observed_distractor_failures += 1
             same_streaks.append(float(_max_same_action_streak(selected_actions_for_level)))
@@ -1331,6 +1400,12 @@ def _active_rollout_metrics(
                     failed_same_mapped_cell_top1_hits.append(
                         float(_is_same_mapped_cell_action(query.legal_actions[query_selected], query.legal_actions[query_retry_selected], query))
                     )
+                    same_x_indices = _same_x_action_indices(query, query.legal_actions[query_selected])
+                    same_y_indices = _same_y_action_indices(query, query.legal_actions[query_selected])
+                    failed_same_x_hits.append(float(query_retry_selected in same_x_indices))
+                    failed_same_y_hits.append(float(query_retry_selected in same_y_indices))
+                    failed_same_x_deltas.append(_score_delta_for_indices(query_logits[0], query_retry_logits[0], same_x_indices))
+                    failed_same_y_deltas.append(_score_delta_for_indices(query_logits[0], query_retry_logits[0], same_y_indices))
     values = np.asarray(success_steps, dtype=np.float32)
     total_clicks = max(total_actions, 1)
     return {
@@ -1349,8 +1424,14 @@ def _active_rollout_metrics(
         "failed_far_score_delta_mean": float(np.mean(failed_far_deltas)) if failed_far_deltas else 0.0,
         "failed_neighborhood_top1_rate": float(np.mean(failed_neighborhood_top1_hits)) if failed_neighborhood_top1_hits else 0.0,
         "failed_same_mapped_cell_top1_rate": float(np.mean(failed_same_mapped_cell_top1_hits)) if failed_same_mapped_cell_top1_hits else 0.0,
+        "failed_same_x_top1_rate": float(np.mean(failed_same_x_hits)) if failed_same_x_hits else 0.0,
+        "failed_same_y_top1_rate": float(np.mean(failed_same_y_hits)) if failed_same_y_hits else 0.0,
+        "failed_same_x_score_delta_mean": float(np.mean(failed_same_x_deltas)) if failed_same_x_deltas else 0.0,
+        "failed_same_y_score_delta_mean": float(np.mean(failed_same_y_deltas)) if failed_same_y_deltas else 0.0,
         "coordinate_noeffect_memory_norm": float(np.mean(coordinate_norms)) if coordinate_norms else 0.0,
         "coordinate_noeffect_count_mean": float(np.mean(coordinate_counts)) if coordinate_counts else 0.0,
+        "axis_noeffect_memory_norm": float(np.mean(axis_norms)) if axis_norms else 0.0,
+        "axis_noeffect_count_mean": float(np.mean(axis_counts)) if axis_counts else 0.0,
         "max_same_action_streak_mean": float(np.mean(same_streaks)) if same_streaks else 0.0,
         "max_same_action_streak_max": float(np.max(same_streaks)) if same_streaks else 0.0,
         "unique_action_count_mean": float(np.mean(unique_counts)) if unique_counts else 0.0,
@@ -1426,6 +1507,34 @@ def _is_same_mapped_cell_action(first: str, second: str, example: ObjectEventExa
     first_cell = click_action_to_grid_cell(first, grid_shape=example.state.grid_shape, inventory=inventory)
     second_cell = click_action_to_grid_cell(second, grid_shape=example.state.grid_shape, inventory=inventory)
     return first_cell is not None and first_cell == second_cell
+
+
+def _is_same_click_x_action(first: str, second: str) -> bool:
+    first_click = parse_click_action(first)
+    second_click = parse_click_action(second)
+    return first_click is not None and second_click is not None and int(first_click[0]) == int(second_click[0])
+
+
+def _is_same_click_y_action(first: str, second: str) -> bool:
+    first_click = parse_click_action(first)
+    second_click = parse_click_action(second)
+    return first_click is not None and second_click is not None and int(first_click[1]) == int(second_click[1])
+
+
+def _same_x_action_indices(example: ObjectEventExample, selected_action: str) -> tuple[int, ...]:
+    return tuple(
+        index
+        for index, action in enumerate(example.legal_actions)
+        if _is_same_click_x_action(selected_action, action)
+    )
+
+
+def _same_y_action_indices(example: ObjectEventExample, selected_action: str) -> tuple[int, ...]:
+    return tuple(
+        index
+        for index, action in enumerate(example.legal_actions)
+        if _is_same_click_y_action(selected_action, action)
+    )
 
 
 def _near_action_indices(example: ObjectEventExample, selected_action: str) -> tuple[int, ...]:
@@ -1521,6 +1630,8 @@ def _runtime_agent_active_metrics(
     reset_hits: list[float] = []
     rank_used: list[float] = []
     legal_counts: list[float] = []
+    axis_component_stds: list[float] = []
+    relation_component_stds: list[float] = []
     match_hits: list[float] = []
     repeat_hits: list[float] = []
     bridge_matches: list[float] = []
@@ -1546,6 +1657,8 @@ def _runtime_agent_active_metrics(
             diagnostics = agent.diagnostics()
             rank_used.append(float(bool(diagnostics.get("runtime_rank_logits_used", False))))
             legal_counts.append(float(diagnostics.get("legal_action_count", 0) or 0))
+            axis_component_stds.append(float(diagnostics.get("rank_component_axis_noeffect_std", 0.0) or 0.0))
+            relation_component_stds.append(float(diagnostics.get("rank_component_relation_std", 0.0) or 0.0))
             if step == 1:
                 model_top1 = _model_policy_top1(model, first_example, device=device)
                 match_hits.append(float(selected == model_top1))
@@ -1597,6 +1710,8 @@ def _runtime_agent_active_metrics(
         "runtime_agent_post_failure_repeat_top1_rate": float(np.mean(repeat_hits)) if repeat_hits else 0.0,
         "runtime_agent_bridge_selected_action_match_rate": float(np.mean(bridge_matches)) if bridge_matches else 0.0,
         "runtime_agent_metadata_model_input_forbidden_count": float(forbidden_count),
+        "runtime_agent_rank_component_axis_noeffect_std": float(np.mean(axis_component_stds)) if axis_component_stds else 0.0,
+        "runtime_agent_rank_component_relation_std": float(np.mean(relation_component_stds)) if relation_component_stds else 0.0,
     }
     metrics.update(
         _runtime_agent_act_path_metrics(
@@ -1627,6 +1742,10 @@ def _runtime_agent_act_path_metrics(
     online_counts: list[float] = []
     coordinate_norms: list[float] = []
     coordinate_counts: list[float] = []
+    axis_norms: list[float] = []
+    axis_counts: list[float] = []
+    axis_component_stds: list[float] = []
+    relation_component_stds: list[float] = []
     exact_repeat_hits: list[float] = []
     near_repeat_hits: list[float] = []
     failed_deltas: list[float] = []
@@ -1634,6 +1753,10 @@ def _runtime_agent_act_path_metrics(
     failed_far_deltas: list[float] = []
     failed_neighborhood_top1_hits: list[float] = []
     failed_same_mapped_cell_top1_hits: list[float] = []
+    failed_same_x_hits: list[float] = []
+    failed_same_y_hits: list[float] = []
+    failed_same_x_deltas: list[float] = []
+    failed_same_y_deltas: list[float] = []
     same_streaks: list[float] = []
     unique_counts: list[float] = []
     no_effect_count = 0
@@ -1662,6 +1785,8 @@ def _runtime_agent_act_path_metrics(
             diagnostics = agent.diagnostics()
             rank_used.append(float(bool(diagnostics.get("runtime_rank_logits_used", False))))
             legal_counts.append(float(diagnostics.get("legal_action_count", 0) or 0))
+            axis_component_stds.append(float(diagnostics.get("rank_component_axis_noeffect_std", 0.0) or 0.0))
+            relation_component_stds.append(float(diagnostics.get("rank_component_relation_std", 0.0) or 0.0))
             result = apply_synthetic_object_event_action(first_level, selected)
             bridge = _synthetic_bridge_observation(first_example, selected, result)
             bridge_matches.append(float(int(bridge.selected_action_index) == selected))
@@ -1680,6 +1805,8 @@ def _runtime_agent_act_path_metrics(
             post_update_diag = agent.diagnostics()
             coordinate_norms.append(float(post_update_diag.get("coordinate_noeffect_memory_norm", 0.0) or 0.0))
             coordinate_counts.append(float(post_update_diag.get("coordinate_noeffect_count", 0.0) or 0.0))
+            axis_norms.append(float(post_update_diag.get("axis_noeffect_memory_norm", 0.0) or 0.0))
+            axis_counts.append(float(post_update_diag.get("axis_noeffect_count", 0.0) or 0.0))
             if result.success:
                 step_success = step
                 break
@@ -1707,6 +1834,18 @@ def _runtime_agent_act_path_metrics(
                 failed_same_mapped_cell_top1_hits.append(
                     float(_is_same_mapped_cell_action(first_failed_action, retry_selected_action, first_example))
                 )
+                same_x_actions = tuple(first_example.legal_actions[index] for index in _same_x_action_indices(first_example, first_failed_action))
+                same_y_actions = tuple(first_example.legal_actions[index] for index in _same_y_action_indices(first_example, first_failed_action))
+                failed_same_x_hits.append(float(retry_selected_action in same_x_actions))
+                failed_same_y_hits.append(float(retry_selected_action in same_y_actions))
+                if same_x_actions:
+                    failed_same_x_deltas.append(
+                        float(np.mean([retry_scores[action].score - before_score_snapshot.get(action, 0.0) for action in same_x_actions]))
+                    )
+                if same_y_actions:
+                    failed_same_y_deltas.append(
+                        float(np.mean([retry_scores[action].score - before_score_snapshot.get(action, 0.0) for action in same_y_actions]))
+                    )
         success_steps.append(step_success)
         same_streaks.append(float(_max_same_action_streak(selected_actions_for_level)))
         unique_counts.append(float(len(set(selected_actions_for_level))))
@@ -1741,6 +1880,10 @@ def _runtime_agent_act_path_metrics(
         "runtime_agent_act_path_online_update_count_mean": float(np.mean(online_counts)) if online_counts else 0.0,
         "runtime_agent_act_path_coordinate_noeffect_memory_norm": float(np.mean(coordinate_norms)) if coordinate_norms else 0.0,
         "runtime_agent_act_path_coordinate_noeffect_count_mean": float(np.mean(coordinate_counts)) if coordinate_counts else 0.0,
+        "runtime_agent_act_path_axis_noeffect_memory_norm": float(np.mean(axis_norms)) if axis_norms else 0.0,
+        "runtime_agent_act_path_axis_noeffect_count_mean": float(np.mean(axis_counts)) if axis_counts else 0.0,
+        "runtime_agent_act_path_rank_component_axis_noeffect_std": float(np.mean(axis_component_stds)) if axis_component_stds else 0.0,
+        "runtime_agent_act_path_rank_component_relation_std": float(np.mean(relation_component_stds)) if relation_component_stds else 0.0,
         "runtime_agent_act_path_self_selected_no_effect_count": float(no_effect_count),
         "runtime_agent_act_path_failed_exact_repeat_top1_rate": float(np.mean(exact_repeat_hits)) if exact_repeat_hits else 0.0,
         "runtime_agent_act_path_failed_near_repeat_top1_rate": float(np.mean(near_repeat_hits)) if near_repeat_hits else 0.0,
@@ -1749,6 +1892,10 @@ def _runtime_agent_act_path_metrics(
         "runtime_agent_act_path_failed_far_score_delta_mean": float(np.mean(failed_far_deltas)) if failed_far_deltas else 0.0,
         "runtime_agent_act_path_failed_neighborhood_top1_rate": float(np.mean(failed_neighborhood_top1_hits)) if failed_neighborhood_top1_hits else 0.0,
         "runtime_agent_act_path_failed_same_mapped_cell_top1_rate": float(np.mean(failed_same_mapped_cell_top1_hits)) if failed_same_mapped_cell_top1_hits else 0.0,
+        "runtime_agent_act_path_failed_same_x_top1_rate": float(np.mean(failed_same_x_hits)) if failed_same_x_hits else 0.0,
+        "runtime_agent_act_path_failed_same_y_top1_rate": float(np.mean(failed_same_y_hits)) if failed_same_y_hits else 0.0,
+        "runtime_agent_act_path_failed_same_x_score_delta_mean": float(np.mean(failed_same_x_deltas)) if failed_same_x_deltas else 0.0,
+        "runtime_agent_act_path_failed_same_y_score_delta_mean": float(np.mean(failed_same_y_deltas)) if failed_same_y_deltas else 0.0,
         "runtime_agent_act_path_post_failure_candidate_switch_rate": float(1.0 - np.mean(exact_repeat_hits)) if exact_repeat_hits else 0.0,
         "runtime_agent_act_path_max_same_action_streak_mean": float(np.mean(same_streaks)) if same_streaks else 0.0,
         "runtime_agent_act_path_max_same_action_streak_max": float(np.max(same_streaks)) if same_streaks else 0.0,

@@ -356,6 +356,10 @@ def test_object_event_agent_parametric_no_effect_update_keeps_failed_action_scor
     assert diagnostics["scored_action_count"] == 447
     assert float(diagnostics["coordinate_noeffect_memory_norm"]) > 0.0
     assert float(diagnostics["coordinate_noeffect_count"]) > 0.0
+    assert float(diagnostics["axis_noeffect_memory_norm"]) > 0.0
+    assert float(diagnostics["axis_noeffect_count"]) > 0.0
+    assert "rank_component_axis_noeffect_std" in diagnostics
+    assert "rank_component_relation_std" in diagnostics
     assert after[failed_action].score != before[failed_action].score
     for forbidden in (
         "tried_actions",

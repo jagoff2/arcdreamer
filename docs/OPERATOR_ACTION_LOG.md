@@ -909,3 +909,57 @@ Operator actions recorded for continuity:
    - commit and push this patch
    - ask GPT-Pro for the next mechanism before coding
    - do not run a 320-step ARC probe until the short-run column-collapse hygiene issue is addressed
+
+## 2026-04-25 GPT-Pro Axis No-Effect Consensus
+
+Operator actions recorded for continuity:
+
+1. Pushed commit `0ffda61` before consulting GPT-Pro.
+2. Asked GPT-Pro about the coordinate-memory result:
+   - synthetic 447 gate passed with failed near repeat `0.037037037037037035`
+   - real 48-step AR25 probe improved max same-action streak from `11` to `5`
+   - real failure remained same-column collapse: `click:31:1=33` and top scores dominated by `click:31:*`
+3. GPT-Pro consensus:
+   - next patch should add learned axis/stripe no-effect memory
+   - add rank-component diagnostics/gating at the same time to detect relation/object-prior swamping
+   - add synthetic same-axis no-effect training cases
+   - do not run a 320-step acquisition probe until the 48-step hygiene run no longer shows severe same-x/same-column collapse
+4. Forbidden boundary remains:
+   - allowed: level-local tensor memory, learned rank deltas, learned gates, all actions legal/finite
+   - forbidden: tried-action sets, blacklists, deterministic avoid-x rules, column sweeps, coverage/frontier controllers, pruning actions before scoring
+
+## 2026-04-25 Axis Patch Results
+
+Operator actions recorded for continuity:
+
+1. Implemented axis no-effect memory and diagnostics:
+   - `AxisNoEffectMemoryRank`
+   - `RankComponentOutput`
+   - learned component gates
+   - runtime rank-component diagnostics
+   - same-x/same-y axis losses and metrics
+2. Verification:
+   - focused tests: `39 passed`
+   - full object-event suite: `81 passed`
+   - recurrent suite: `31 passed`
+3. Ran the 447-action axis gate:
+   - command included `--axis-noeffect-cases 0.25 --steps 180 --eval-every 45`
+   - artifact: `artifacts/object_event_axis_noeffect_runtime_probe.pkl`
+   - best early eval at step `45`: true runtime within-5 `0.8541666666666666`, next-level first try `0.6875`, failed same-x top1 `0.0`, failed same-y top1 `0.0`, full `447` scoring, no leakage
+   - later steps kept axis suppression but reduced competence
+4. Ran dense 68 regression:
+   - final true runtime within-3 `0.9375`
+   - within-5 `1.0`
+   - next-level first try `0.7916666666666666`
+   - no leakage
+5. Ran real ARC 48-step hygiene:
+   - no win, no level completion
+   - full `447/447` scoring
+   - no forbidden controller/oracle/replay/metadata leakage
+   - action histogram worsened: `click:31:1=38`, `click:31:10=6`
+   - `max_same_action_streak=18`
+   - diagnostics show relation swamping: `rank_component_relation_std=8.122642056265777`, `rank_component_axis_noeffect_std=0.09436048847714928`, `top_score_same_x_fraction=1.0`, `rank_component_relation_minus_axis_failed_column_mean=26.462218625116208`
+6. Current conclusion:
+   - axis memory works synthetically but real ARC remains dominated by relation/object priors
+   - do not run 320-step ARC
+   - push this diagnostic patch and ask GPT-Pro about relation-prior damping/component normalization before coding further

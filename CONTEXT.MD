@@ -5551,3 +5551,86 @@ Next execution slice:
 - commit and push this coordinate no-effect patch so GPT-Pro can inspect the exact code
 - ask GPT-Pro for the next mechanism-level step using the real `click:31:*` histogram and high coordinate memory norm/count
 - do not run a 320-step ARC acquisition probe until the short-run column-collapse hygiene issue is addressed
+
+## Entry 083: 2026-04-25 / Axis No-Effect Memory Exposes Relation-Prior Swamping
+
+Iteration objective:
+
+- address persistent real ARC same-column `click:31:*` collapse by adding learned axis/stripe no-effect evidence and rank-component diagnostics, without adding hard no-repeat masks, blacklists, sweeps, graph/frontier control, replay, or per-game behavior
+
+GPT-Pro consensus:
+
+- add learned level-local axis/stripe no-effect memory
+- add rank-component diagnostics/gating at the same time
+- add same-axis synthetic loss/metrics
+- do not run 320-step acquisition probes until the 48-step hygiene run no longer shows severe same-x/same-column collapse
+
+Implemented:
+
+- `AxisNoEffectMemoryRank`, `RankComponentOutput`, and learned rank-component gates in `arcagi/learned_online/object_event_model.py`
+- axis no-effect memory writes selected no-effect click evidence into level-local belief only
+- runtime diagnostics now expose axis memory norm/count, rank-component std/mean/top actions, top-score same-x fraction, and relation-minus-axis failed-column diagnostics
+- trainer now accepts `--axis-noeffect-cases` and trains same-x/same-y axis score revision losses
+- tests cover no-effect-only level-local axis writes, finite same-column scoring, reset behavior, and component diagnostics
+
+Verification:
+
+- focused axis/object-event tests: `39 passed`
+- full object-event suite: `81 passed`
+- recurrent suite: `31 passed`
+- dense 68-action regression remains healthy: final true runtime within-3 `0.9375`, within-5 `1.0`, next-level first try `0.7916666666666666`, no leakage
+
+447-action axis gate:
+
+- command:
+  - `python scripts\train_learned_online_object_event.py --mode synthetic_active_online_object_event --curriculum latent_rule_variable_palette --state-source extracted --action-surface arc_scale_parametric --action-surface-size 447 --coordinate-grid-size 64 --empty-click-fraction 0.80 --positive-region-radius 1 --seed 0 --steps 180 --batch-size 8 --train-sessions 48 --heldout-sessions 48 --levels-per-session 3 --max-distractors 2 --palette-size 8 --require-role-balanced-colors --max-steps-per-level 5 --axis-noeffect-cases 0.25 --eval-every 45 --eval-runtime-agent --save-best --selection-metric runtime_agent_act_path_active_success_within_5 --save-path artifacts/object_event_axis_noeffect_runtime_probe.pkl`
+- best early eval at step `45`:
+  - `runtime_agent_act_path_num_legal_actions_mean = 447.0`
+  - `runtime_agent_act_path_active_success_within_5 = 0.8541666666666666`
+  - `runtime_agent_act_path_next_level_first_try_acc = 0.6875`
+  - `runtime_agent_act_path_failed_exact_repeat_top1_rate = 0.0`
+  - `runtime_agent_act_path_failed_near_repeat_top1_rate = 0.03225806451612903`
+  - `runtime_agent_act_path_failed_same_x_top1_rate = 0.0`
+  - `runtime_agent_act_path_failed_same_y_top1_rate = 0.0`
+  - `runtime_agent_act_path_failed_same_x_score_delta_mean = -1.360618438105235`
+  - `runtime_agent_act_path_failed_same_y_score_delta_mean = -1.5623770178428213`
+  - `runtime_agent_act_path_rank_component_axis_noeffect_std = 0.13376536263730238`
+  - `runtime_agent_act_path_rank_component_relation_std = 3.476890063380552`
+  - no metadata leakage
+
+Real ARC hygiene probe:
+
+- command:
+  - `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent learned_online_object_event --checkpoint-path artifacts/object_event_axis_noeffect_runtime_probe.pkl --mode offline --game-limit 1 --max-steps 48 --progress-every 8 --object-event-bridge-diagnostics`
+- result:
+  - `success = false`
+  - `won = false`
+  - `levels_completed = 0`
+  - `return = 0.0`
+  - full `447/447` scoring
+  - no action-surface cap, oracle support, trace replay, graph controller, or metadata leakage
+  - `object_event_online_update_count = 48`
+  - `coordinate_noeffect_memory_norm = 61.41889953613281`
+  - `axis_noeffect_memory_norm = 81.40718841552734`
+  - final observed outcome is no-effect
+  - action histogram: `click:31:1 = 38`, `click:31:10 = 6`, one-offs `click:22:16`, `click:52:46`, `click:31:7`, `click:7:25`
+  - `max_same_action_streak = 18`
+- key diagnostic:
+  - `rank_component_relation_std = 8.122642056265777`
+  - `rank_component_axis_noeffect_std = 0.09436048847714928`
+  - `top_score_same_x_fraction = 1.0`
+  - `rank_component_relation_minus_axis_failed_column_mean = 26.462218625116208`
+
+Current interpretation:
+
+- axis memory and same-axis losses work synthetically but do not fix real ARC
+- real ARC still collapses because the relation/object prior dominates total rank by orders of magnitude
+- a 320-step acquisition run remains inappropriate
+- next mechanism should target learned/evidence-updated relation-prior damping or component normalization under repeated contradictory no-effect evidence
+- this must not become a procedural "avoid x/column" rule; all actions must remain legal and finite-scored
+
+Next execution slice:
+
+- push this axis diagnostic patch
+- ask GPT-Pro whether to add contradiction-gated relation-prior reliability, component normalization, or stronger learned component gates next
+- include the exact relation-vs-axis diagnostic values above

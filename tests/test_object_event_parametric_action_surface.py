@@ -299,6 +299,85 @@ def test_coordinate_noeffect_rank_changes_nearby_click_scores_without_hard_maski
     assert torch.allclose(reset, before)
 
 
+def test_axis_noeffect_memory_is_level_local_and_noeffect_only() -> None:
+    level = _parametric_level(seed=213)
+    example = level.example
+    failed = _failed_click_index(example)
+    success = int(example.positive_action_indices[0])
+    model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
+    model.eval()
+    tensors = _batch_to_tensors(collate_object_event_examples((example,)), device=torch.device("cpu"))
+    base = model(**tensors["inputs"])
+    failed_deltas = model.observed_event_belief_deltas(
+        base,
+        target_outcome=tensors["candidate_outcome_targets"][:, failed],
+        target_delta=tensors["candidate_delta_targets"][:, failed],
+        actual_action_index=torch.as_tensor([failed], dtype=torch.long),
+        state_numeric=tensors["inputs"]["state_numeric"],
+        state_type_ids=tensors["inputs"]["state_type_ids"],
+        state_mask=tensors["inputs"]["state_mask"],
+        action_numeric=tensors["inputs"]["action_numeric"],
+    )
+    success_deltas = model.observed_event_belief_deltas(
+        base,
+        target_outcome=tensors["candidate_outcome_targets"][:, success],
+        target_delta=tensors["candidate_delta_targets"][:, success],
+        actual_action_index=torch.as_tensor([success], dtype=torch.long),
+        state_numeric=tensors["inputs"]["state_numeric"],
+        state_type_ids=tensors["inputs"]["state_type_ids"],
+        state_mask=tensors["inputs"]["state_mask"],
+        action_numeric=tensors["inputs"]["action_numeric"],
+    )
+    start = model.axis_noeffect_memory_rank.start
+    stop = model.axis_noeffect_memory_rank.stop
+
+    assert torch.linalg.vector_norm(failed_deltas.level_delta[:, start:stop]) > 0.0
+    assert torch.linalg.vector_norm(failed_deltas.session_delta[:, start:stop]) == 0.0
+    assert torch.linalg.vector_norm(success_deltas.level_delta[:, start:stop]) == 0.0
+
+
+def test_axis_noeffect_rank_changes_same_column_scores_without_hard_mask() -> None:
+    level = _parametric_level(seed=214)
+    example = level.example
+    failed_a, failed_b = _two_failed_clicks_same_x(example)
+    failed_action = example.legal_actions[failed_a]
+    same_x = tuple(index for index, action in enumerate(example.legal_actions) if action.startswith("click:") and action.split(":")[1] == failed_action.split(":")[1])
+    far = tuple(index for index, action in enumerate(example.legal_actions) if action.startswith("click:") and action.split(":")[1] != failed_action.split(":")[1])
+    assert same_x
+    assert far
+    model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
+    model.eval()
+    with torch.no_grad():
+        model.axis_noeffect_memory_rank.rank_mlp[-1].weight.fill_(-0.25)
+        model.axis_noeffect_memory_rank.rank_mlp[-1].bias.zero_()
+    tensors = _batch_to_tensors(collate_object_event_examples((example,)), device=torch.device("cpu"))
+    zero = torch.zeros((1, model.config.d_model), dtype=torch.float32)
+    before = policy_rank_logits_from_predictions(model(**tensors["inputs"], level_belief=zero), tensors["action_mask"])
+    level_belief = zero.clone()
+    for failed in (failed_a, failed_b):
+        output = model(**tensors["inputs"], level_belief=level_belief)
+        deltas = model.observed_event_belief_deltas(
+            output,
+            target_outcome=tensors["candidate_outcome_targets"][:, failed],
+            target_delta=tensors["candidate_delta_targets"][:, failed],
+            actual_action_index=torch.as_tensor([failed], dtype=torch.long),
+            state_numeric=tensors["inputs"]["state_numeric"],
+            state_type_ids=tensors["inputs"]["state_type_ids"],
+            state_mask=tensors["inputs"]["state_mask"],
+            action_numeric=tensors["inputs"]["action_numeric"],
+        )
+        level_belief = level_belief + deltas.level_delta
+    after = policy_rank_logits_from_predictions(model(**tensors["inputs"], level_belief=level_belief), tensors["action_mask"])
+
+    assert before.shape[-1] == 447
+    assert after.shape[-1] == 447
+    assert torch.isfinite(after[0, list(same_x)]).all()
+    assert torch.isfinite(after[0, list(far)]).all()
+    assert torch.mean(torch.abs(after[0, list(same_x)] - before[0, list(same_x)])) > 0.0
+    reset = policy_rank_logits_from_predictions(model(**tensors["inputs"], level_belief=zero), tensors["action_mask"])
+    assert torch.allclose(reset, before)
+
+
 def _parametric_level(*, seed: int):
     split = build_active_online_object_event_curriculum(
         ActiveOnlineObjectEventConfig(
@@ -326,6 +405,18 @@ def _failed_click_index(example) -> int:
         for index, value in enumerate(example.candidate_targets.value)
         if float(value) == 0.0 and example.legal_actions[index].startswith("click:")
     )
+
+
+def _two_failed_clicks_same_x(example) -> tuple[int, int]:
+    by_x: dict[str, list[int]] = {}
+    for index, value in enumerate(example.candidate_targets.value):
+        action = example.legal_actions[index]
+        if float(value) != 0.0 or not action.startswith("click:"):
+            continue
+        x = action.split(":")[1]
+        by_x.setdefault(x, []).append(index)
+    pair = next(indices for indices in by_x.values() if len(indices) >= 2)
+    return int(pair[0]), int(pair[1])
 
 
 def _display_state() -> StructuredState:

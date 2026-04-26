@@ -9,7 +9,7 @@ import numpy as np
 import torch
 
 from arcagi.agents.base import BaseAgent
-from arcagi.core.action_schema import build_action_schema, build_action_schema_context
+from arcagi.core.action_schema import build_action_schema, build_action_schema_context, parse_click_action
 from arcagi.core.types import ActionName, GridObservation, StructuredState, Transition
 from arcagi.learned_online.event_tokens import (
     OUT_ACTION_AVAIL_CHANGED,
@@ -98,6 +98,7 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         self.last_runtime_rank_score_mean = 0.0
         self.last_runtime_rank_score_std = 0.0
         self.last_runtime_diagnostic_utility_mean = 0.0
+        self.last_rank_component_stats: dict[str, object] = {}
         self.metadata = self.checkpoint_metadata()
 
     def reset_episode(self) -> None:
@@ -128,6 +129,7 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         self.last_runtime_rank_score_mean = 0.0
         self.last_runtime_rank_score_std = 0.0
         self.last_runtime_diagnostic_utility_mean = 0.0
+        self.last_rank_component_stats = {}
 
     def reset_level(self) -> None:
         BaseAgent.reset_level(self)
@@ -167,6 +169,7 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         with torch.no_grad():
             output, action_batch = self._forward_state_actions(state, action_tuple)
             probabilities, scores, outcomes, values = self._calibrated_distribution(output, action_batch.mask)
+            component_stats = self._rank_component_diagnostics(output, action_tuple, action_batch.mask)
         decisions: dict[ActionName, ObjectEventDecision] = {}
         for index, action in enumerate(action_tuple):
             outcome_tuple = tuple(float(value) for value in outcomes[index].tolist())
@@ -185,6 +188,7 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         self.last_scored_action_count = len(decisions)
         self.last_score_entropy = _entropy(tuple(decision.probability for decision in decisions.values()))
         self.last_effective_action_support = float(np.exp(self.last_score_entropy))
+        self.last_rank_component_stats = component_stats
         return decisions
 
     def on_transition(self, transition: Transition) -> None:
@@ -267,6 +271,11 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         coord_memory = self.level_belief[coord_start:coord_stop] if coord_stop > coord_start else self.level_belief[:0]
         coord_count = float(coord_memory[0].detach().cpu()) if coord_memory.numel() > 0 else 0.0
         coord_norm = float(torch.linalg.vector_norm(coord_memory).detach().cpu()) if coord_memory.numel() > 0 else 0.0
+        axis_start = int(getattr(self.model.axis_noeffect_memory_rank, "start", 0))
+        axis_stop = int(getattr(self.model.axis_noeffect_memory_rank, "stop", axis_start))
+        axis_memory = self.level_belief[axis_start:axis_stop] if axis_stop > axis_start else self.level_belief[:0]
+        axis_count = float(axis_memory[0].detach().cpu()) if axis_memory.numel() > 0 else 0.0
+        axis_norm = float(torch.linalg.vector_norm(axis_memory).detach().cpu()) if axis_memory.numel() > 0 else 0.0
         return {
             "controller_kind": self.controller_kind,
             "claim_eligible_arc_controller": bool(self.claim_eligible_arc_controller),
@@ -283,6 +292,8 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             "object_event_level_belief_norm": float(torch.linalg.vector_norm(self.level_belief).detach().cpu()),
             "object_event_coordinate_noeffect_memory_norm": coord_norm,
             "object_event_coordinate_noeffect_count": coord_count,
+            "object_event_axis_noeffect_memory_norm": axis_norm,
+            "object_event_axis_noeffect_count": axis_count,
             "object_event_action_surface_capped": False,
             "object_event_oracle_support_used": False,
             "object_event_trace_replay_used": False,
@@ -305,6 +316,8 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             "level_belief_norm": float(torch.linalg.vector_norm(self.level_belief).detach().cpu()),
             "coordinate_noeffect_memory_norm": coord_norm,
             "coordinate_noeffect_count": coord_count,
+            "axis_noeffect_memory_norm": axis_norm,
+            "axis_noeffect_count": axis_count,
             "level_epoch": int(self.level_epoch),
             "level_step": int(self.level_step),
             "last_predicted_outcome": tuple(self.last_predicted_outcome),
@@ -313,6 +326,7 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             "runtime_rank_score_mean": float(self.last_runtime_rank_score_mean),
             "runtime_rank_score_std": float(self.last_runtime_rank_score_std),
             "runtime_diagnostic_utility_mean": float(self.last_runtime_diagnostic_utility_mean),
+            **self.last_rank_component_stats,
             "runtime_greedy_rank_selection": True,
             "runtime_trace_cursor": False,
             "runtime_action_sequence_replay": False,
@@ -406,6 +420,7 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
                 "fast_value_head",
                 "observed_event_belief_encoder",
                 "level_belief_coordinate_noeffect_slots",
+                "level_belief_axis_noeffect_slots",
                 "session_belief",
                 "level_belief",
             ],
@@ -471,6 +486,52 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         self.last_runtime_rank_score_std = float(np.std(rank_scores[valid])) if valid.any() else 0.0
         self.last_runtime_diagnostic_utility_mean = float(np.mean(diagnostic_utility[valid])) if valid.any() else 0.0
         return probs, scores, outcome_probs, value
+
+    def _rank_component_diagnostics(self, output, actions: Sequence[ActionName], action_mask: np.ndarray) -> dict[str, object]:
+        components = getattr(output, "rank_components", None)
+        valid = np.asarray(action_mask, dtype=bool)
+        if components is None or not np.any(valid):
+            return {}
+        action_tuple = tuple(actions)
+
+        def values(name: str) -> np.ndarray:
+            tensor = getattr(components, name)
+            return tensor[0].detach().cpu().numpy().astype(np.float64)
+
+        stats: dict[str, object] = {}
+        for name in ("base", "relation", "failed_action", "coordinate_noeffect", "axis_noeffect", "total"):
+            raw = values(name)
+            active = raw[valid]
+            stats[f"rank_component_{name}_std"] = float(np.std(active)) if active.size else 0.0
+            stats[f"rank_component_{name}_mean"] = float(np.mean(active)) if active.size else 0.0
+            if active.size:
+                valid_indices = np.flatnonzero(valid)
+                top_index = int(valid_indices[int(np.argmax(active))])
+                stats[f"rank_component_{name}_top_action"] = action_tuple[top_index]
+        selected = self.last_decision.action if self.last_decision is not None else ""
+        reference = selected or str(stats.get("rank_component_total_top_action", ""))
+        click = parse_click_action(reference)
+        if click is not None:
+            same_x = []
+            for index, action in enumerate(action_tuple):
+                parsed = parse_click_action(action)
+                same_x.append(bool(valid[index] and parsed is not None and int(parsed[0]) == int(click[0])))
+            same_x_mask = np.asarray(same_x, dtype=bool)
+            total = values("total")
+            axis = values("axis_noeffect")
+            relation = values("relation")
+            top_count = min(12, int(np.count_nonzero(valid)))
+            if top_count > 0:
+                top_indices = np.argsort(total[valid])[-top_count:]
+                valid_indices = np.flatnonzero(valid)
+                actual_top = valid_indices[top_indices]
+                stats["top_score_same_x_fraction"] = float(np.mean(same_x_mask[actual_top]))
+            if np.any(same_x_mask):
+                stats["rank_component_axis_failed_column_delta_mean"] = float(np.mean(axis[same_x_mask]))
+                stats["rank_component_relation_minus_axis_failed_column_mean"] = float(
+                    np.mean(relation[same_x_mask] - axis[same_x_mask])
+                )
+        return stats
 
     def _start_new_level(self) -> None:
         self.level_belief = torch.zeros_like(self.level_belief)
