@@ -5634,3 +5634,91 @@ Next execution slice:
 - push this axis diagnostic patch
 - ask GPT-Pro whether to add contradiction-gated relation-prior reliability, component normalization, or stronger learned component gates next
 - include the exact relation-vs-axis diagnostic values above
+
+## Entry 084: 2026-04-26 / Rank-Gated Relation Components Improve Hygiene But Do Not Solve ARC
+
+Iteration objective:
+
+- fix the real ARC failure where relation/object priors numerically swamped coordinate and axis no-effect evidence, while preserving full-surface learned finite scoring and avoiding hard no-repeat, blacklist, avoid-column, sweep, graph/frontier, replay, or per-game behavior
+
+GPT-Pro consensus:
+
+- combine bounded relation-prior components, contradiction gating, component standardization, learned component gates, and a narrow synthetic contradiction loss
+- do not run long `320`-step ARC acquisition probes until a short hygiene run no longer shows pathological same-column collapse
+- treat `48` steps as a collapse detector, not as proof of ARC competence or incompetence
+
+Implemented:
+
+- decomposed relation rank into learned, object-prior, positive-prior, negative-prior, repeat-penalty, and contradiction-gate subcomponents
+- replaced old raw relation constants (`12`, `40`, `120`) with bounded trainable scales
+- standardized base/relation/failed-action/coordinate-no-effect/axis-no-effect components across the full legal action surface before gated summation
+- added continuous no-effect memory boost, raw/normalized component diagnostics, relation scale diagnostics, contradiction-gate diagnostics, and relation-minus-no-effect failed-column metrics
+- added `--relation-contradiction-cases` and a contradiction/component-balance training loss
+- kept all legal actions finite-scored; no action blacklist, tried-action set, hard no-repeat rule, sweep cursor, frontier, coverage queue, or graph controller was added
+
+Verification:
+
+- focused parametric/agent tests: `31 passed`
+- full object-event suite: `85 passed`
+- recurrent suite: `31 passed`
+
+447-action rank-gated synthetic gate:
+
+- command:
+  - `python scripts\train_learned_online_object_event.py --mode synthetic_active_online_object_event --curriculum latent_rule_variable_palette --state-source extracted --action-surface arc_scale_parametric --action-surface-size 447 --coordinate-grid-size 64 --empty-click-fraction 0.80 --positive-region-radius 1 --seed 0 --steps 180 --batch-size 8 --train-sessions 48 --heldout-sessions 48 --levels-per-session 3 --max-distractors 2 --palette-size 8 --require-role-balanced-colors --max-steps-per-level 5 --axis-noeffect-cases 0.25 --relation-contradiction-cases 0.25 --eval-every 45 --eval-runtime-agent --save-best --selection-metric runtime_agent_act_path_active_success_within_5 --save-path artifacts\object_event_rank_gated_runtime_probe.pkl`
+- saved artifact:
+  - `artifacts/object_event_rank_gated_runtime_probe.pkl`
+  - saved checkpoint step `135`
+  - full `447` action scoring
+  - no metadata leakage
+  - `runtime_agent_act_path_active_success_within_5 = 0.8541666666666666`
+  - `runtime_agent_act_path_active_success_within_3 = 0.7708333333333334`
+  - `runtime_agent_act_path_next_level_first_try_acc = 0.7291666666666666`
+  - `runtime_agent_act_path_failed_exact_repeat_top1_rate = 0.0`
+  - `runtime_agent_act_path_failed_near_repeat_top1_rate = 0.0`
+  - `runtime_agent_act_path_max_same_action_streak_max = 3.0`
+  - `runtime_agent_act_path_rank_component_relation_std = 1.0000000044312713`
+  - `runtime_agent_act_path_rank_component_axis_noeffect_std = 0.9999999990876234`
+  - `runtime_agent_act_path_rank_component_relation_minus_noeffect_failed_column_mean = 1.6962674923428591`
+  - `runtime_agent_act_path_top_score_same_x_fraction = 0.14807692307692308`
+  - `runtime_agent_act_path_top_score_same_mapped_col_fraction = 0.7685897435897435`
+- final step `180` note:
+  - lower saved metric, so not retained by `--save-best`
+  - cleaner concentration: `runtime_agent_act_path_top_score_same_mapped_col_fraction = 0.7480916030534351`
+  - `runtime_agent_act_path_max_same_action_streak_max = 2.0`
+  - `runtime_agent_act_path_active_success_within_5 = 0.8333333333333334`
+
+Real ARC 48-step hygiene probe:
+
+- command:
+  - `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent learned_online_object_event --checkpoint-path artifacts\object_event_rank_gated_runtime_probe.pkl --mode offline --game-limit 1 --max-steps 48 --progress-every 8 --object-event-bridge-diagnostics`
+- result on `ar25-0c556536`:
+  - `success = false`
+  - `won = false`
+  - `levels_completed = 0`
+  - `return = 0.0`
+  - full `447/447` scoring
+  - no action-surface cap, oracle support, trace replay, graph controller, or metadata leakage
+  - `object_event_online_update_count = 48`
+  - `coordinate_noeffect_memory_norm = 62.186614990234375`
+  - `axis_noeffect_memory_norm = 81.51248931884766`
+  - `rank_component_relation_std = 1.0000000362661303`
+  - `rank_component_axis_noeffect_std = 0.9999999701152954`
+  - `top_score_same_x_fraction = 0.5833333333333334`
+  - `top_score_same_mapped_col_fraction = 0.5833333333333334`
+  - `rank_component_relation_minus_noeffect_failed_column_mean = 3.259751149852361`
+  - `max_same_action_streak = 3`
+  - action histogram: `click:31:1 = 28`, `click:31:25 = 10`, `click:31:22 = 4`, `click:31:4 = 3`, one each for `click:25:16`, `click:40:22`, `click:7:25`
+
+Current interpretation:
+
+- relation-component swamping is fixed: normalized relation and no-effect components now have comparable standard deviations, and the old `relation_minus_axis` value near `26` is gone
+- short-run exact repetition is fixed: `max_same_action_streak` dropped from `18` to `3`
+- this is still not ARC success: no level completion and action diversity is still too low, with only `7` unique actions and persistent preference for the `x=31` click family
+- do not run `320` steps yet; the next issue is online diversification/diagnostic action value under dense clicks, not raw component-scale swamping
+
+Next execution slice:
+
+- commit and push the rank-gated patch and docs
+- consult GPT-Pro with the pushed code and the real ARC hygiene result before implementing another code change
+- ask specifically whether the next patch should target learned diagnostic-utility/value under repeated no-effect, learned uncertainty over click regions, richer belief state over action parameter families, or a different mechanism

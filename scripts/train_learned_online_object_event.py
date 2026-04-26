@@ -111,6 +111,7 @@ def main() -> None:
     parser.add_argument("--positive-region-radius", type=int, default=1)
     parser.add_argument("--max-steps-per-level", type=int, default=3)
     parser.add_argument("--axis-noeffect-cases", type=float, default=0.0)
+    parser.add_argument("--relation-contradiction-cases", type=float, default=0.0)
     args = parser.parse_args()
 
     mode = args.source or args.mode
@@ -375,6 +376,26 @@ def _run_synthetic_online_object_event(
         axis_margin_loss = torch.stack(axis_margin_terms).mean() if axis_margin_terms else support_logits.new_tensor(0.0)
         axis_drop_loss = torch.stack(axis_drop_terms).mean() if axis_drop_terms else support_logits.new_tensor(0.0)
         axis_loss_scale = 1.0 + max(float(args.axis_noeffect_cases), 0.0)
+        relation_failed_mask = (
+            axis_failed_masks.get("same_x", torch.zeros_like(exact_failed_mask))
+            | axis_failed_masks.get("same_mapped_col", torch.zeros_like(exact_failed_mask))
+        ) & ~positive_mask
+        contradiction_scale = max(float(args.relation_contradiction_cases), 0.0)
+        if self_retry_output.rank_components is not None:
+            relation_column_after = torch.logsumexp(self_retry_logits.masked_fill(~relation_failed_mask, -1.0e9), dim=-1)
+            contradiction_margin_loss = _masked_mean_loss(
+                F.relu(relation_column_after - positive_after + 0.5),
+                coord_failure_mask,
+            )
+            components = self_retry_output.rank_components
+            relation_minus_noeffect = components.relation - (
+                components.failed_action + components.coordinate_noeffect + components.axis_noeffect
+            )
+            relation_balance = _masked_action_mean(relation_minus_noeffect, relation_failed_mask)
+            component_balance_loss = _masked_mean_loss(F.relu(relation_balance - 2.0), coord_failure_mask)
+        else:
+            contradiction_margin_loss = support_logits.new_tensor(0.0)
+            component_balance_loss = support_logits.new_tensor(0.0)
         plausible_loss = _plausible_red_blue_loss(support_logits, support_examples)
         loss = (
             query_loss
@@ -389,6 +410,8 @@ def _run_synthetic_online_object_event(
             + 0.15 * near_drop_loss
             + axis_loss_scale * 0.25 * axis_margin_loss
             + axis_loss_scale * 0.15 * axis_drop_loss
+            + contradiction_scale * 0.25 * contradiction_margin_loss
+            + contradiction_scale * 0.10 * component_balance_loss
             + 0.2 * plausible_loss
         )
         optimizer.zero_grad(set_to_none=True)
@@ -738,6 +761,11 @@ def _axis_failed_masks_from_tensors(tensors: dict[str, Any], selected_indices: t
 def _masked_mean_loss(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     weights = mask.to(dtype=values.dtype)
     return torch.sum(values * weights) / torch.clamp(torch.sum(weights), min=1.0)
+
+
+def _masked_action_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    weights = mask.to(dtype=values.dtype)
+    return torch.sum(values * weights, dim=-1) / torch.clamp(torch.sum(weights, dim=-1), min=1.0)
 
 
 def _is_positive_index(example: ObjectEventExample, index: int) -> bool:
@@ -1560,6 +1588,55 @@ def _score_delta_for_indices(before: torch.Tensor, after: torch.Tensor, indices:
     return float(torch.mean(after[index_tensor] - before[index_tensor]).detach().cpu())
 
 
+_RANK_DIAGNOSTIC_FLOAT_KEYS = (
+    "rank_component_relation_raw_std",
+    "rank_component_relation_std",
+    "rank_component_axis_noeffect_raw_std",
+    "rank_component_axis_noeffect_std",
+    "rank_component_coordinate_noeffect_raw_std",
+    "rank_component_coordinate_noeffect_std",
+    "rank_component_failed_action_raw_std",
+    "rank_component_failed_action_std",
+    "rank_component_gate_base",
+    "rank_component_gate_relation",
+    "rank_component_gate_failed_action",
+    "rank_component_gate_coordinate_noeffect",
+    "rank_component_gate_axis_noeffect",
+    "rank_component_noeffect_boost_mean",
+    "relation_object_prior_scale",
+    "relation_positive_prior_scale",
+    "relation_negative_prior_scale",
+    "relation_repeat_penalty_scale",
+    "relation_contradiction_gate_mean",
+    "relation_contradiction_gate_failed_column_mean",
+    "relation_object_prior_failed_column_mean",
+    "relation_positive_prior_failed_column_mean",
+    "relation_prior_after_contradiction_failed_column_mean",
+    "rank_component_relation_minus_axis_failed_column_mean",
+    "rank_component_relation_minus_noeffect_failed_column_mean",
+    "top_score_same_x_fraction",
+    "top_score_same_mapped_col_fraction",
+)
+
+
+def _new_rank_diagnostic_series() -> dict[str, list[float]]:
+    return {key: [] for key in _RANK_DIAGNOSTIC_FLOAT_KEYS}
+
+
+def _append_rank_diagnostics(series: dict[str, list[float]], diagnostics: dict[str, Any]) -> None:
+    for key in _RANK_DIAGNOSTIC_FLOAT_KEYS:
+        value = diagnostics.get(key)
+        if isinstance(value, (int, float, np.integer, np.floating)) and np.isfinite(float(value)):
+            series[key].append(float(value))
+
+
+def _mean_rank_diagnostic_metrics(prefix: str, series: dict[str, list[float]]) -> dict[str, float]:
+    return {
+        f"{prefix}{key}": float(np.mean(values)) if values else 0.0
+        for key, values in series.items()
+    }
+
+
 def _is_distractor_action(
     example: ObjectEventExample,
     selected: int,
@@ -1632,6 +1709,7 @@ def _runtime_agent_active_metrics(
     legal_counts: list[float] = []
     axis_component_stds: list[float] = []
     relation_component_stds: list[float] = []
+    diag_series = _new_rank_diagnostic_series()
     match_hits: list[float] = []
     repeat_hits: list[float] = []
     bridge_matches: list[float] = []
@@ -1659,6 +1737,7 @@ def _runtime_agent_active_metrics(
             legal_counts.append(float(diagnostics.get("legal_action_count", 0) or 0))
             axis_component_stds.append(float(diagnostics.get("rank_component_axis_noeffect_std", 0.0) or 0.0))
             relation_component_stds.append(float(diagnostics.get("rank_component_relation_std", 0.0) or 0.0))
+            _append_rank_diagnostics(diag_series, diagnostics)
             if step == 1:
                 model_top1 = _model_policy_top1(model, first_example, device=device)
                 match_hits.append(float(selected == model_top1))
@@ -1713,6 +1792,7 @@ def _runtime_agent_active_metrics(
         "runtime_agent_rank_component_axis_noeffect_std": float(np.mean(axis_component_stds)) if axis_component_stds else 0.0,
         "runtime_agent_rank_component_relation_std": float(np.mean(relation_component_stds)) if relation_component_stds else 0.0,
     }
+    metrics.update(_mean_rank_diagnostic_metrics("runtime_agent_", diag_series))
     metrics.update(
         _runtime_agent_act_path_metrics(
             model_state=base_state,
@@ -1746,6 +1826,7 @@ def _runtime_agent_act_path_metrics(
     axis_counts: list[float] = []
     axis_component_stds: list[float] = []
     relation_component_stds: list[float] = []
+    diag_series = _new_rank_diagnostic_series()
     exact_repeat_hits: list[float] = []
     near_repeat_hits: list[float] = []
     failed_deltas: list[float] = []
@@ -1787,6 +1868,7 @@ def _runtime_agent_act_path_metrics(
             legal_counts.append(float(diagnostics.get("legal_action_count", 0) or 0))
             axis_component_stds.append(float(diagnostics.get("rank_component_axis_noeffect_std", 0.0) or 0.0))
             relation_component_stds.append(float(diagnostics.get("rank_component_relation_std", 0.0) or 0.0))
+            _append_rank_diagnostics(diag_series, diagnostics)
             result = apply_synthetic_object_event_action(first_level, selected)
             bridge = _synthetic_bridge_observation(first_example, selected, result)
             bridge_matches.append(float(int(bridge.selected_action_index) == selected))
@@ -1816,6 +1898,7 @@ def _runtime_agent_act_path_metrics(
                 first_failed_score = float(agent.last_scores.get(selected_action, 0.0))
                 before_score_snapshot = dict(agent.last_scores)
                 retry_scores = agent.score_actions_for_state(first_example.state, first_example.legal_actions)
+                _append_rank_diagnostics(diag_series, agent.diagnostics())
                 retry_selected_action = max(retry_scores.values(), key=lambda decision: decision.score).action
                 exact_repeat_hits.append(float(retry_selected_action == first_failed_action))
                 near_repeat_hits.append(float(_is_near_repeat_action(first_failed_action, retry_selected_action, first_example)))
@@ -1866,7 +1949,7 @@ def _runtime_agent_act_path_metrics(
             reset_action = reset_agent.act(query_observation)
             reset_hits.append(float(_is_positive_index(query, int(query.legal_actions.index(reset_action)))))
     values = np.asarray(success_steps, dtype=np.float32)
-    return {
+    metrics = {
         "runtime_agent_act_path_rank_logits_used": float(np.mean(rank_used)) if rank_used else 0.0,
         "runtime_agent_act_path_num_legal_actions_mean": float(np.mean(legal_counts)) if legal_counts else 0.0,
         "runtime_agent_act_path_active_success_within_1": float(np.mean(values <= 1.0)),
@@ -1901,6 +1984,8 @@ def _runtime_agent_act_path_metrics(
         "runtime_agent_act_path_max_same_action_streak_max": float(np.max(same_streaks)) if same_streaks else 0.0,
         "runtime_agent_act_path_unique_action_count_mean": float(np.mean(unique_counts)) if unique_counts else 0.0,
     }
+    metrics.update(_mean_rank_diagnostic_metrics("runtime_agent_act_path_", diag_series))
+    return metrics
 
 
 def _grid_observation_from_state(

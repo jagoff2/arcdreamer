@@ -12,6 +12,8 @@ from arcagi.agents.base import BaseAgent
 from arcagi.core.action_schema import build_action_schema, build_action_schema_context, parse_click_action
 from arcagi.core.types import ActionName, GridObservation, StructuredState, Transition
 from arcagi.learned_online.event_tokens import (
+    ACTION_FEATURE_GRID_COL,
+    ACTION_FEATURE_HAS_GRID_CELL,
     OUT_ACTION_AVAIL_CHANGED,
     OUT_APPEARED_OR_DISAPPEARED,
     OUT_HARM,
@@ -169,7 +171,12 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         with torch.no_grad():
             output, action_batch = self._forward_state_actions(state, action_tuple)
             probabilities, scores, outcomes, values = self._calibrated_distribution(output, action_batch.mask)
-            component_stats = self._rank_component_diagnostics(output, action_tuple, action_batch.mask)
+            component_stats = self._rank_component_diagnostics(
+                output,
+                action_tuple,
+                action_batch.mask,
+                getattr(action_batch, "numeric", None),
+            )
         decisions: dict[ActionName, ObjectEventDecision] = {}
         for index, action in enumerate(action_tuple):
             outcome_tuple = tuple(float(value) for value in outcomes[index].tolist())
@@ -487,7 +494,13 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         self.last_runtime_diagnostic_utility_mean = float(np.mean(diagnostic_utility[valid])) if valid.any() else 0.0
         return probs, scores, outcome_probs, value
 
-    def _rank_component_diagnostics(self, output, actions: Sequence[ActionName], action_mask: np.ndarray) -> dict[str, object]:
+    def _rank_component_diagnostics(
+        self,
+        output,
+        actions: Sequence[ActionName],
+        action_mask: np.ndarray,
+        action_numeric: np.ndarray | None = None,
+    ) -> dict[str, object]:
         components = getattr(output, "rank_components", None)
         valid = np.asarray(action_mask, dtype=bool)
         if components is None or not np.any(valid):
@@ -495,7 +508,9 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
         action_tuple = tuple(actions)
 
         def values(name: str) -> np.ndarray:
-            tensor = getattr(components, name)
+            tensor = getattr(components, name, None)
+            if tensor is None:
+                return np.zeros_like(values("total"))
             return tensor[0].detach().cpu().numpy().astype(np.float64)
 
         stats: dict[str, object] = {}
@@ -508,6 +523,46 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
                 valid_indices = np.flatnonzero(valid)
                 top_index = int(valid_indices[int(np.argmax(active))])
                 stats[f"rank_component_{name}_top_action"] = action_tuple[top_index]
+        for name in ("base", "relation", "failed_action", "coordinate_noeffect", "axis_noeffect"):
+            raw = values(f"{name}_raw")
+            active = raw[valid]
+            stats[f"rank_component_{name}_raw_std"] = float(np.std(active)) if active.size else 0.0
+            stats[f"rank_component_{name}_raw_mean"] = float(np.mean(active)) if active.size else 0.0
+        gate_values = getattr(components, "component_gates", None)
+        if gate_values is not None:
+            gates = gate_values.detach().cpu().numpy().astype(np.float64)
+            for index, name in enumerate(("base", "relation", "failed_action", "coordinate_noeffect", "axis_noeffect")):
+                if index < gates.shape[0]:
+                    stats[f"rank_component_gate_{name}"] = float(gates[index])
+        boost = getattr(components, "noeffect_boost", None)
+        if boost is not None:
+            stats["rank_component_noeffect_boost_mean"] = float(np.mean(boost.detach().cpu().numpy().astype(np.float64)))
+        relation = getattr(self.model, "event_relation_memory_rank", None)
+        if relation is not None:
+            stats["relation_object_prior_scale"] = float(2.0 * torch.sigmoid(relation.object_prior_scale_raw).detach().cpu())
+            stats["relation_positive_prior_scale"] = float(4.0 * torch.sigmoid(relation.positive_prior_scale_raw).detach().cpu())
+            stats["relation_negative_prior_scale"] = float(4.0 * torch.sigmoid(relation.negative_prior_scale_raw).detach().cpu())
+            stats["relation_repeat_penalty_scale"] = float(6.0 * torch.sigmoid(relation.repeat_penalty_scale_raw).detach().cpu())
+        for name in (
+            "relation_object_prior",
+            "relation_positive_prior",
+            "relation_negative_prior",
+            "relation_repeat_penalty",
+            "relation_contradiction_gate",
+        ):
+            raw = values(name)
+            active = raw[valid]
+            stats[f"{name}_mean"] = float(np.mean(active)) if active.size else 0.0
+            stats[f"{name}_std"] = float(np.std(active)) if active.size else 0.0
+        stats["top_score_same_x_fraction"] = 0.0
+        stats["top_score_same_mapped_col_fraction"] = 0.0
+        stats["rank_component_axis_failed_column_delta_mean"] = 0.0
+        stats["rank_component_relation_minus_axis_failed_column_mean"] = 0.0
+        stats["rank_component_relation_minus_noeffect_failed_column_mean"] = 0.0
+        stats["relation_contradiction_gate_failed_column_mean"] = 0.0
+        stats["relation_object_prior_failed_column_mean"] = 0.0
+        stats["relation_positive_prior_failed_column_mean"] = 0.0
+        stats["relation_prior_after_contradiction_failed_column_mean"] = 0.0
         selected = self.last_decision.action if self.last_decision is not None else ""
         reference = selected or str(stats.get("rank_component_total_top_action", ""))
         click = parse_click_action(reference)
@@ -517,20 +572,46 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
                 parsed = parse_click_action(action)
                 same_x.append(bool(valid[index] and parsed is not None and int(parsed[0]) == int(click[0])))
             same_x_mask = np.asarray(same_x, dtype=bool)
+            same_mapped_col_mask = same_x_mask
+            if action_numeric is not None:
+                numeric = np.asarray(action_numeric, dtype=np.float64)
+                has_grid = numeric[:, ACTION_FEATURE_HAS_GRID_CELL] > 0.5
+                grid_col = numeric[:, ACTION_FEATURE_GRID_COL]
+                top_reference_index = int(np.argmax(values("total")[valid]))
+                valid_indices_for_ref = np.flatnonzero(valid)
+                reference_index = int(valid_indices_for_ref[top_reference_index])
+                if bool(has_grid[reference_index]):
+                    same_mapped_col_mask = valid & has_grid & (np.abs(grid_col - grid_col[reference_index]) <= 0.15)
             total = values("total")
             axis = values("axis_noeffect")
+            coordinate = values("coordinate_noeffect")
+            failed_action = values("failed_action")
             relation = values("relation")
+            relation_object_prior = values("relation_object_prior")
+            relation_positive_prior = values("relation_positive_prior")
+            relation_negative_prior = values("relation_negative_prior")
+            relation_repeat_penalty = values("relation_repeat_penalty")
+            relation_prior_after = relation_object_prior + relation_positive_prior + relation_negative_prior - relation_repeat_penalty
+            relation_gate = values("relation_contradiction_gate")
             top_count = min(12, int(np.count_nonzero(valid)))
             if top_count > 0:
                 top_indices = np.argsort(total[valid])[-top_count:]
                 valid_indices = np.flatnonzero(valid)
                 actual_top = valid_indices[top_indices]
                 stats["top_score_same_x_fraction"] = float(np.mean(same_x_mask[actual_top]))
+                stats["top_score_same_mapped_col_fraction"] = float(np.mean(same_mapped_col_mask[actual_top]))
             if np.any(same_x_mask):
                 stats["rank_component_axis_failed_column_delta_mean"] = float(np.mean(axis[same_x_mask]))
                 stats["rank_component_relation_minus_axis_failed_column_mean"] = float(
                     np.mean(relation[same_x_mask] - axis[same_x_mask])
                 )
+                stats["rank_component_relation_minus_noeffect_failed_column_mean"] = float(
+                    np.mean(relation[same_x_mask] - (axis[same_x_mask] + coordinate[same_x_mask] + failed_action[same_x_mask]))
+                )
+                stats["relation_contradiction_gate_failed_column_mean"] = float(np.mean(relation_gate[same_x_mask]))
+                stats["relation_object_prior_failed_column_mean"] = float(np.mean(relation_object_prior[same_x_mask]))
+                stats["relation_positive_prior_failed_column_mean"] = float(np.mean(relation_positive_prior[same_x_mask]))
+                stats["relation_prior_after_contradiction_failed_column_mean"] = float(np.mean(relation_prior_after[same_x_mask]))
         return stats
 
     def _start_new_level(self) -> None:

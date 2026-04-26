@@ -62,6 +62,17 @@ class ObjectEventModelConfig:
 
 
 @dataclass(frozen=True)
+class RelationComponentOutput:
+    learned: torch.Tensor
+    object_prior: torch.Tensor
+    positive_prior: torch.Tensor
+    negative_prior: torch.Tensor
+    repeat_penalty: torch.Tensor
+    contradiction_gate: torch.Tensor
+    total: torch.Tensor
+
+
+@dataclass(frozen=True)
 class RankComponentOutput:
     base: torch.Tensor
     relation: torch.Tensor
@@ -69,6 +80,18 @@ class RankComponentOutput:
     coordinate_noeffect: torch.Tensor
     axis_noeffect: torch.Tensor
     total: torch.Tensor
+    base_raw: torch.Tensor | None = None
+    relation_raw: torch.Tensor | None = None
+    failed_action_raw: torch.Tensor | None = None
+    coordinate_noeffect_raw: torch.Tensor | None = None
+    axis_noeffect_raw: torch.Tensor | None = None
+    relation_object_prior: torch.Tensor | None = None
+    relation_positive_prior: torch.Tensor | None = None
+    relation_negative_prior: torch.Tensor | None = None
+    relation_repeat_penalty: torch.Tensor | None = None
+    relation_contradiction_gate: torch.Tensor | None = None
+    component_gates: torch.Tensor | None = None
+    noeffect_boost: torch.Tensor | None = None
 
 
 @dataclass(frozen=True)
@@ -240,6 +263,18 @@ class EventRelationMemoryRank(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(4 * self.key_dim, 1),
         )
+        self.object_prior_scale_raw = nn.Parameter(torch.tensor(0.0))
+        self.positive_prior_scale_raw = nn.Parameter(torch.tensor(0.0))
+        self.negative_prior_scale_raw = nn.Parameter(torch.tensor(0.0))
+        self.repeat_penalty_scale_raw = nn.Parameter(torch.tensor(1.0))
+        self.contradiction_gate = nn.Sequential(
+            nn.LayerNorm(8),
+            nn.Linear(8, 16),
+            nn.GELU(),
+            nn.Linear(16, 1),
+        )
+        nn.init.zeros_(self.contradiction_gate[-1].weight)
+        nn.init.zeros_(self.contradiction_gate[-1].bias)
 
     def cue_key_features(self, cue_features: torch.Tensor) -> torch.Tensor:
         key = self.cue_key(cue_features)
@@ -292,6 +327,21 @@ class EventRelationMemoryRank(nn.Module):
         session_belief: torch.Tensor,
         level_belief: torch.Tensor,
     ) -> torch.Tensor:
+        return self.components(
+            query_cue_features=query_cue_features,
+            candidate_target_features=candidate_target_features,
+            session_belief=session_belief,
+            level_belief=level_belief,
+        ).total
+
+    def components(
+        self,
+        *,
+        query_cue_features: torch.Tensor,
+        candidate_target_features: torch.Tensor,
+        session_belief: torch.Tensor,
+        level_belief: torch.Tensor,
+    ) -> RelationComponentOutput:
         belief = session_belief + level_belief
         key_dim = self.key_dim
         pos_cue = belief[:, 0:key_dim]
@@ -326,11 +376,33 @@ class EventRelationMemoryRank(nn.Module):
         same_relation = pos_cue_scalar * pos_target_scalar + (1.0 - pos_cue_scalar) * (1.0 - pos_target_scalar)
         different_relation = neg_cue_scalar * (1.0 - neg_target_scalar) + (1.0 - neg_cue_scalar) * neg_target_scalar
         candidate_contains = candidate_target_features[..., 11] * (1.0 - candidate_target_features[..., 24])
-        object_target_prior = 12.0 * candidate_contains
-        repeat_penalty = 120.0 * candidate_contains * level_neg_strength * level_neg_target_scalar
-        relation_prior = object_target_prior + 40.0 * candidate_contains * (
-            pos_strength * same_relation + neg_strength * different_relation
-        ) - repeat_penalty
+        object_scale = _bounded_scale(self.object_prior_scale_raw, 2.0)
+        positive_scale = _bounded_scale(self.positive_prior_scale_raw, 4.0)
+        negative_scale = _bounded_scale(self.negative_prior_scale_raw, 4.0)
+        repeat_scale = _bounded_scale(self.repeat_penalty_scale_raw, 6.0)
+        object_prior = object_scale * candidate_contains
+        positive_prior = positive_scale * candidate_contains * pos_strength * same_relation
+        negative_prior = negative_scale * candidate_contains * neg_strength * different_relation
+        repeat_penalty = repeat_scale * candidate_contains * level_neg_strength * level_neg_target_scalar
+        contradiction_evidence = (level_neg_strength * level_neg_target_scalar).clamp(0.0, 1.0)
+        contradiction_features = torch.stack(
+            [
+                candidate_contains,
+                pos_strength.expand_as(candidate_contains),
+                neg_strength.expand_as(candidate_contains),
+                level_neg_strength.expand_as(candidate_contains),
+                pos_target_scalar,
+                neg_target_scalar,
+                level_neg_target_scalar,
+                (repeat_penalty / 6.0).clamp(0.0, 1.0),
+            ],
+            dim=-1,
+        )
+        contradiction_gate = contradiction_evidence * torch.sigmoid(
+            self.contradiction_gate(contradiction_features).squeeze(-1)
+        )
+        object_prior = object_prior * (1.0 - 0.5 * contradiction_gate)
+        positive_prior = positive_prior * (1.0 - contradiction_gate)
         features = torch.cat(
             [
                 query_cue_expanded,
@@ -351,7 +423,17 @@ class EventRelationMemoryRank(nn.Module):
             ],
             dim=-1,
         )
-        return self.rank_mlp(features).squeeze(-1) + relation_prior
+        learned = self.rank_mlp(features).squeeze(-1)
+        total = learned + object_prior + positive_prior + negative_prior - repeat_penalty
+        return RelationComponentOutput(
+            learned=learned,
+            object_prior=object_prior,
+            positive_prior=positive_prior,
+            negative_prior=negative_prior,
+            repeat_penalty=repeat_penalty,
+            contradiction_gate=contradiction_gate,
+            total=total,
+        )
 
 
 class FailedActionMemoryRank(nn.Module):
@@ -698,7 +780,7 @@ class RawCandidateStateRank(nn.Module):
         self.failed_action_memory = failed_action_memory
         self.coordinate_noeffect_memory = coordinate_noeffect_memory
         self.axis_noeffect_memory = axis_noeffect_memory
-        self.rank_component_gates = nn.Parameter(torch.ones(5, dtype=torch.float32))
+        self.rank_component_gates = nn.Parameter(torch.tensor([1.0, 2.0, 1.0, 1.0, 1.0], dtype=torch.float32))
         input_dim = ACTION_NUMERIC_DIM + (4 * STATE_NUMERIC_DIM) + (2 * STATE_NUMERIC_DIM) + (4 * d_model)
         self.rank_mlp = nn.Sequential(
             nn.LayerNorm(input_dim),
@@ -717,6 +799,7 @@ class RawCandidateStateRank(nn.Module):
         state_numeric: torch.Tensor,
         state_type_ids: torch.Tensor,
         state_mask: torch.Tensor,
+        action_mask: torch.Tensor | None = None,
         session_belief: torch.Tensor,
         level_belief: torch.Tensor,
     ) -> torch.Tensor:
@@ -725,6 +808,7 @@ class RawCandidateStateRank(nn.Module):
             state_numeric=state_numeric,
             state_type_ids=state_type_ids,
             state_mask=state_mask,
+            action_mask=action_mask,
             session_belief=session_belief,
             level_belief=level_belief,
         ).total
@@ -736,6 +820,7 @@ class RawCandidateStateRank(nn.Module):
         state_numeric: torch.Tensor,
         state_type_ids: torch.Tensor,
         state_mask: torch.Tensor,
+        action_mask: torch.Tensor | None = None,
         session_belief: torch.Tensor,
         level_belief: torch.Tensor,
     ) -> RankComponentOutput:
@@ -778,32 +863,40 @@ class RawCandidateStateRank(nn.Module):
             ],
             dim=-1,
         )
-        base_rank = self.rank_mlp(features).squeeze(-1)
-        relation_rank = self.relation_memory.rank_delta(
+        base_raw = self.rank_mlp(features).squeeze(-1)
+        relation_components = self.relation_memory.components(
             query_cue_features=agent_summary,
             candidate_target_features=action_numeric,
             session_belief=session_belief,
             level_belief=level_belief,
         )
-        failed_action_rank = self.failed_action_memory.rank_delta(
+        relation_raw = relation_components.total
+        failed_action_raw = self.failed_action_memory.rank_delta(
             candidate_action_numeric=action_numeric,
             level_belief=level_belief,
         )
-        coordinate_noeffect_rank = self.coordinate_noeffect_memory.rank_delta(
+        coordinate_noeffect_raw = self.coordinate_noeffect_memory.rank_delta(
             candidate_action_numeric=action_numeric,
             level_belief=level_belief,
         )
-        axis_noeffect_rank = self.axis_noeffect_memory.rank_delta(
+        axis_noeffect_raw = self.axis_noeffect_memory.rank_delta(
             candidate_action_numeric=action_numeric,
             level_belief=level_belief,
         )
+        base_rank = _standardize_component(base_raw, action_mask)
+        relation_rank = _standardize_component(relation_raw, action_mask)
+        failed_action_rank = _standardize_component(failed_action_raw, action_mask)
+        coordinate_noeffect_rank = _standardize_component(coordinate_noeffect_raw, action_mask)
+        axis_noeffect_rank = _standardize_component(axis_noeffect_raw, action_mask)
         gates = F.softplus(self.rank_component_gates)
+        gates = gates / gates.mean().clamp_min(1.0e-6)
+        noeffect_boost = self._noeffect_boost(level_belief)
         total = (
             gates[0] * base_rank
             + gates[1] * relation_rank
-            + gates[2] * failed_action_rank
-            + gates[3] * coordinate_noeffect_rank
-            + gates[4] * axis_noeffect_rank
+            + gates[2] * failed_action_rank * noeffect_boost
+            + gates[3] * coordinate_noeffect_rank * noeffect_boost
+            + gates[4] * axis_noeffect_rank * noeffect_boost
         )
         return RankComponentOutput(
             base=base_rank,
@@ -812,7 +905,31 @@ class RawCandidateStateRank(nn.Module):
             coordinate_noeffect=coordinate_noeffect_rank,
             axis_noeffect=axis_noeffect_rank,
             total=total,
+            base_raw=base_raw,
+            relation_raw=relation_raw,
+            failed_action_raw=failed_action_raw,
+            coordinate_noeffect_raw=coordinate_noeffect_raw,
+            axis_noeffect_raw=axis_noeffect_raw,
+            relation_object_prior=relation_components.object_prior,
+            relation_positive_prior=relation_components.positive_prior,
+            relation_negative_prior=relation_components.negative_prior,
+            relation_repeat_penalty=relation_components.repeat_penalty,
+            relation_contradiction_gate=relation_components.contradiction_gate,
+            component_gates=gates,
+            noeffect_boost=noeffect_boost,
         )
+
+    def _noeffect_boost(self, level_belief: torch.Tensor) -> torch.Tensor:
+        counts: list[torch.Tensor] = []
+        for memory in (self.coordinate_noeffect_memory, self.axis_noeffect_memory):
+            start = int(getattr(memory, "start", 0))
+            width = int(getattr(memory, "width", 0))
+            if width > 0 and start < level_belief.shape[-1]:
+                counts.append(level_belief[:, start : start + 1].clamp_min(0.0))
+        if not counts:
+            return level_belief.new_ones((level_belief.shape[0], 1))
+        strength = torch.tanh(torch.stack(counts, dim=0).sum(dim=0))
+        return 1.0 + torch.clamp(strength, 0.0, 2.0)
 
     def coordinate_noeffect_rank_delta(
         self,
@@ -839,6 +956,29 @@ class RawCandidateStateRank(nn.Module):
 
 def _soft_same(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
     return torch.exp(-20.0 * torch.abs(left - right))
+
+
+def _bounded_scale(raw: torch.Tensor, max_value: float) -> torch.Tensor:
+    return torch.as_tensor(float(max_value), dtype=raw.dtype, device=raw.device) * torch.sigmoid(raw)
+
+
+def _standardize_component(
+    values: torch.Tensor,
+    action_mask: torch.Tensor | None,
+    *,
+    clamp: float = 8.0,
+) -> torch.Tensor:
+    if action_mask is None:
+        valid = torch.ones_like(values, dtype=torch.bool)
+    else:
+        valid = action_mask.bool()
+    active = values.masked_fill(~valid, 0.0)
+    count = valid.to(dtype=values.dtype).sum(dim=1, keepdim=True).clamp_min(1.0)
+    mean = active.sum(dim=1, keepdim=True) / count
+    centered = torch.where(valid, values - mean, torch.zeros_like(values))
+    var = (centered * centered).sum(dim=1, keepdim=True) / count
+    standardized = torch.clamp(centered / torch.sqrt(var.clamp_min(1.0e-6)), -float(clamp), float(clamp))
+    return standardized.masked_fill(~valid, -1.0e9)
 
 
 def _multi_positive_rank_ce(
@@ -1003,7 +1143,6 @@ class ObjectEventModel(nn.Module):
         session_belief: torch.Tensor | None = None,
         level_belief: torch.Tensor | None = None,
     ) -> ObjectEventModelOutput:
-        del action_mask
         state_type_ids = state_type_ids.clamp(min=0, max=6)
         encoded_state = self.state_numeric(state_numeric) + self.state_type(state_type_ids)
         encoded_state = self.state_encoder(encoded_state, src_key_padding_mask=~state_mask.bool())
@@ -1051,6 +1190,7 @@ class ObjectEventModel(nn.Module):
             state_numeric=state_numeric,
             state_type_ids=state_type_ids,
             state_mask=state_mask.bool(),
+            action_mask=action_mask,
             session_belief=session_belief,
             level_belief=level_belief,
         )

@@ -963,3 +963,46 @@ Operator actions recorded for continuity:
    - axis memory works synthetically but real ARC remains dominated by relation/object priors
    - do not run 320-step ARC
    - push this diagnostic patch and ask GPT-Pro about relation-prior damping/component normalization before coding further
+
+## 2026-04-26 Rank-Gated Relation Components
+
+Operator actions recorded for continuity:
+
+1. Consulted GPT-Pro before coding. Consensus was to implement a combined bounded relation-prior decomposition, contradiction gating, full-surface component normalization, learned component gates, and narrow synthetic contradiction training. GPT-Pro agreed that the prior 48-step result showed online evidence was firing but not controlling ranking.
+2. Implemented the rank-gated patch:
+   - decomposed `EventRelationMemoryRank` into learned, object-prior, positive-prior, negative-prior, repeat-penalty, contradiction-gate, and total components
+   - replaced unbounded constants (`12`, `40`, `120`) with bounded trainable scales
+   - standardized rank components over the full legal surface before gated summation
+   - added no-effect boost from level-local coordinate/axis evidence
+   - added raw/normalized component diagnostics, relation scale diagnostics, contradiction gate diagnostics, and relation-minus-no-effect failed-column diagnostics
+   - added `--relation-contradiction-cases` and contradiction/component-balance losses
+3. Verification:
+   - focused parametric/agent tests: `31 passed`
+   - full object-event suite: `85 passed`
+   - recurrent suite: `31 passed`
+4. 447-action synthetic training gate:
+   - command included `--relation-contradiction-cases 0.25 --axis-noeffect-cases 0.25 --steps 180 --eval-every 45`
+   - artifact: `artifacts/object_event_rank_gated_runtime_probe.pkl`
+   - saved checkpoint step `135`: within-5 `0.8541666666666666`, within-3 `0.7708333333333334`, next-level first try `0.7291666666666666`, exact repeat `0.0`, near repeat `0.0`, max same-action streak `3.0`, full `447` scoring, no leakage
+   - saved checkpoint diagnostics: normalized relation std about `1.0`, axis no-effect std about `1.0`, relation-minus-no-effect failed-column mean `1.6962674923428591`
+   - final step `180` was not saved by the selected metric but had cleaner mapped-column concentration `0.7480916030534351` and max same-action streak `2.0`
+5. Real ARC 48-step hygiene:
+   - command: `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent learned_online_object_event --checkpoint-path artifacts/object_event_rank_gated_runtime_probe.pkl --mode offline --game-limit 1 --max-steps 48 --progress-every 8 --object-event-bridge-diagnostics`
+   - no win, no level completion, return `0.0`
+   - full `447/447` scoring
+   - no forbidden controller/oracle/replay/metadata leakage
+   - online update count `48`
+   - coordinate no-effect norm `62.186614990234375`
+   - axis no-effect norm `81.51248931884766`
+   - `rank_component_relation_std=1.0000000362661303`
+   - `rank_component_axis_noeffect_std=0.9999999701152954`
+   - `top_score_same_x_fraction=0.5833333333333334`
+   - `rank_component_relation_minus_noeffect_failed_column_mean=3.259751149852361`
+   - `max_same_action_streak=3`
+   - action histogram still concentrated: `click:31:1=28`, `click:31:25=10`, `click:31:22=4`, `click:31:4=3`, plus three one-offs
+6. Current conclusion:
+   - relation-prior swamping is fixed
+   - same exact-action repetition is controlled
+   - ARC is still not solved and diversity remains too low under the 48-step hygiene probe
+   - do not run 320-step ARC yet
+   - commit/push, then ask GPT-Pro for the next mechanism before another code step

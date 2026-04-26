@@ -360,6 +360,17 @@ def test_object_event_agent_parametric_no_effect_update_keeps_failed_action_scor
     assert float(diagnostics["axis_noeffect_count"]) > 0.0
     assert "rank_component_axis_noeffect_std" in diagnostics
     assert "rank_component_relation_std" in diagnostics
+    assert "rank_component_axis_noeffect_raw_std" in diagnostics
+    assert "rank_component_relation_raw_std" in diagnostics
+    assert "rank_component_gate_relation" in diagnostics
+    assert "rank_component_gate_axis_noeffect" in diagnostics
+    assert "relation_object_prior_scale" in diagnostics
+    assert "relation_positive_prior_scale" in diagnostics
+    assert "relation_repeat_penalty_scale" in diagnostics
+    assert "relation_contradiction_gate_mean" in diagnostics
+    assert "top_score_same_x_fraction" in diagnostics
+    assert np.isfinite(float(diagnostics["rank_component_gate_relation"]))
+    assert np.isfinite(float(diagnostics["relation_object_prior_scale"]))
     assert after[failed_action].score != before[failed_action].score
     for forbidden in (
         "tried_actions",

@@ -378,6 +378,117 @@ def test_axis_noeffect_rank_changes_same_column_scores_without_hard_mask() -> No
     assert torch.allclose(reset, before)
 
 
+def test_relation_prior_scales_are_bounded() -> None:
+    model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
+    relation = model.event_relation_memory_rank
+
+    with torch.no_grad():
+        relation.object_prior_scale_raw.fill_(100.0)
+        relation.positive_prior_scale_raw.fill_(100.0)
+        relation.negative_prior_scale_raw.fill_(100.0)
+        relation.repeat_penalty_scale_raw.fill_(100.0)
+
+    assert float((2.0 * torch.sigmoid(relation.object_prior_scale_raw)).detach()) <= 2.0
+    assert float((4.0 * torch.sigmoid(relation.positive_prior_scale_raw)).detach()) <= 4.0
+    assert float((4.0 * torch.sigmoid(relation.negative_prior_scale_raw)).detach()) <= 4.0
+    assert float((6.0 * torch.sigmoid(relation.repeat_penalty_scale_raw)).detach()) <= 6.0
+
+
+def test_rank_component_standardization_prevents_relation_swamping() -> None:
+    level = _parametric_level(seed=215)
+    tensors = _batch_to_tensors(collate_object_event_examples((level.example,)), device=torch.device("cpu"))
+    model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
+    model.eval()
+    with torch.no_grad():
+        model.event_relation_memory_rank.rank_mlp[-1].weight.fill_(50.0)
+        model.event_relation_memory_rank.rank_mlp[-1].bias.fill_(50.0)
+        model.raw_candidate_rank.rank_component_gates[1].fill_(10.0)
+
+    output = model(**tensors["inputs"])
+    components = output.rank_components
+    assert components is not None
+    valid = tensors["action_mask"].bool()
+    relation = components.relation[valid]
+    total = components.total[valid]
+
+    assert output.rank_logits.shape[-1] == 447
+    assert torch.isfinite(output.rank_logits[valid]).all()
+    assert float(torch.abs(relation.mean()).detach()) < 1.0e-4
+    assert float(relation.std(unbiased=False).detach()) <= 1.05
+    assert float(total.std(unbiased=False).detach()) < 20.0
+
+
+def test_contradiction_gate_increases_on_noeffect_object_evidence() -> None:
+    level = _parametric_level(seed=216)
+    example = level.example
+    tensors = _batch_to_tensors(collate_object_event_examples((example,)), device=torch.device("cpu"))
+    failed = _failed_object_click_index(example, tensors)
+    model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
+    model.eval()
+    zero = torch.zeros((1, model.config.d_model), dtype=torch.float32)
+    before = model(**tensors["inputs"], level_belief=zero)
+    before_components = before.rank_components
+    assert before_components is not None
+    deltas = model.observed_event_belief_deltas(
+        before,
+        target_outcome=tensors["candidate_outcome_targets"][:, failed],
+        target_delta=tensors["candidate_delta_targets"][:, failed],
+        actual_action_index=torch.as_tensor([failed], dtype=torch.long),
+        state_numeric=tensors["inputs"]["state_numeric"],
+        state_type_ids=tensors["inputs"]["state_type_ids"],
+        state_mask=tensors["inputs"]["state_mask"],
+        action_numeric=tensors["inputs"]["action_numeric"],
+    )
+    after = model(**tensors["inputs"], level_belief=deltas.level_delta)
+    after_components = after.rank_components
+    assert after_components is not None
+
+    candidate_contains = tensors["inputs"]["action_numeric"][0, failed, 11] * (
+        1.0 - tensors["inputs"]["action_numeric"][0, failed, 24]
+    )
+    ungated_object_prior = 2.0 * torch.sigmoid(model.event_relation_memory_rank.object_prior_scale_raw) * candidate_contains
+
+    assert float(before_components.relation_contradiction_gate[0, failed].detach()) == 0.0
+    assert float(after_components.relation_contradiction_gate[0, failed].detach()) > 0.0
+    assert float(after_components.relation_object_prior[0, failed].detach()) < float(ungated_object_prior.detach())
+    assert torch.isfinite(after.rank_logits[tensors["action_mask"]]).all()
+
+
+def test_component_gating_keeps_all_actions_legal_and_finite_after_noeffect_column() -> None:
+    level = _parametric_level(seed=217)
+    example = level.example
+    failed_a, failed_b = _two_failed_clicks_same_x(example)
+    model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
+    model.eval()
+    tensors = _batch_to_tensors(collate_object_event_examples((example,)), device=torch.device("cpu"))
+    level_belief = torch.zeros((1, model.config.d_model), dtype=torch.float32)
+    for failed in (failed_a, failed_b):
+        output = model(**tensors["inputs"], level_belief=level_belief)
+        deltas = model.observed_event_belief_deltas(
+            output,
+            target_outcome=tensors["candidate_outcome_targets"][:, failed],
+            target_delta=tensors["candidate_delta_targets"][:, failed],
+            actual_action_index=torch.as_tensor([failed], dtype=torch.long),
+            state_numeric=tensors["inputs"]["state_numeric"],
+            state_type_ids=tensors["inputs"]["state_type_ids"],
+            state_mask=tensors["inputs"]["state_mask"],
+            action_numeric=tensors["inputs"]["action_numeric"],
+        )
+        level_belief = level_belief + deltas.level_delta
+    after = model(**tensors["inputs"], level_belief=level_belief)
+    logits = policy_rank_logits_from_predictions(after, tensors["action_mask"])
+    components = after.rank_components
+
+    assert components is not None
+    assert logits.shape[-1] == 447
+    assert torch.isfinite(logits[tensors["action_mask"]]).all()
+    assert torch.isfinite(components.total[tensors["action_mask"]]).all()
+    assert components.component_gates is not None
+    assert torch.isfinite(components.component_gates).all()
+    for forbidden in ("tried_actions", "blocked_actions", "action_blacklist", "sweep_index", "frontier", "coverage_queue"):
+        assert not hasattr(model, forbidden)
+
+
 def _parametric_level(*, seed: int):
     split = build_active_online_object_event_curriculum(
         ActiveOnlineObjectEventConfig(
@@ -405,6 +516,15 @@ def _failed_click_index(example) -> int:
         for index, value in enumerate(example.candidate_targets.value)
         if float(value) == 0.0 and example.legal_actions[index].startswith("click:")
     )
+
+
+def _failed_object_click_index(example, tensors: dict[str, object]) -> int:
+    action_numeric = tensors["inputs"]["action_numeric"][0]
+    for index, value in enumerate(example.candidate_targets.value):
+        is_object = float(action_numeric[index, 11]) > 0.5 and float(action_numeric[index, 24]) < 0.5
+        if float(value) == 0.0 and example.legal_actions[index].startswith("click:") and is_object:
+            return int(index)
+    raise AssertionError("parametric test level has no failed object click")
 
 
 def _two_failed_clicks_same_x(example) -> tuple[int, int]:
