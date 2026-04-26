@@ -831,3 +831,46 @@ Learned recurrent ARC recovery regression and GPT-Pro escalation context:
    - the earlier level-1 behavior is not recovered by value credit or dense imitation;
    - the current scalar-head / heuristic-feature recurrent learner is not sufficient to robustly imitate or rediscover the validated trace;
    - GPT-Pro must review the pushed updated code and advise whether to continue with sampled/hard-negative action-prior recovery or pivot to a larger mechanism-level architecture.
+
+## 2026-04-25 Parametric Object-Event Implementation And Diagnostic
+
+Operator actions recorded for continuity:
+
+1. Implemented the GPT-Pro-approved parametric object-event patch:
+   - `arcagi/learned_online/object_event_curriculum.py`
+   - `arcagi/learned_online/object_event_model.py`
+   - `scripts/train_learned_online_object_event.py`
+   - `arcagi/agents/learned_online_object_event_agent.py`
+   - `tests/test_learned_online_object_event_agent_contracts.py`
+   - `tests/test_object_event_parametric_action_surface.py`
+   - `TASKS.MD`
+   - `CONTEXT.MD`
+2. Ran verification:
+   - focused parametric/runtime/agent tests: `31 passed`
+   - full object-event suite: `77 passed`
+   - recurrent regression: `31 passed`
+3. Ran the fast 447-action synthetic gate:
+   - command used `--state-source extracted --action-surface arc_scale_parametric --action-surface-size 447 --coordinate-grid-size 64 --max-steps-per-level 5`
+   - best checkpoint at step `120`
+   - true runtime within-5 `0.84375`
+   - failed exact/near repeat rates both `0.0`
+4. Ran the 447-action promotion gate:
+   - best checkpoint at step `200`
+   - true runtime within-5 `0.8333333333333334`
+   - next-level first try `0.8125`
+   - failed exact repeat `0.0`
+   - failed near repeat `0.10714285714285714`
+   - max same-action streak `3.0`
+   - artifact: `artifacts/object_event_parametric_runtime_probe.pkl`
+5. Ran the dense 68-action regression:
+   - final true runtime within-5 `1.0`
+   - next-level first try `0.7083333333333334`
+   - no metadata leakage
+6. Ran the real ARC hygiene diagnostic:
+   - command: `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent learned_online_object_event --checkpoint-path artifacts/object_event_parametric_runtime_probe.pkl --mode offline --game-limit 1 --max-steps 48 --progress-every 8 --object-event-bridge-diagnostics`
+   - result: no win, no level completion, full `447/447` scoring, no forbidden controller/oracle/replay/metadata leakage
+   - failure signature: repeated coordinate-column clicks around `click:31:31`, `click:31:34`, `click:31:37`; `max_same_action_streak=11`
+7. Operator constraint update:
+   - the `48`-step ARC run is only a harsh hygiene cutoff for collapse/forbidden behavior
+   - it must not be treated as a fair competence budget for a game that may require online learning over hundreds of steps
+   - future real ARC checks should combine short hygiene probes with longer acquisition probes after collapse behavior is fixed

@@ -5,6 +5,7 @@ from typing import Any, Sequence
 
 import numpy as np
 
+from arcagi.core.action_schema import click_action_to_grid_cell
 from arcagi.core.types import ActionName, GridObservation, ObjectState, StructuredState, Transition
 from arcagi.learned_online.event_tokens import (
     OUT_NO_EFFECT_NONPROGRESS,
@@ -25,6 +26,17 @@ from arcagi.learned_online.event_tokens import (
 
 
 @dataclass(frozen=True)
+class ParametricActionSurfaceConfig:
+    kind: str = "dense_8x8"
+    action_surface_size: int = 68
+    coordinate_grid_size: int = 64
+    empty_click_fraction: float = 0.80
+    positive_region_radius: int = 1
+    include_controls: bool = True
+    misc_actions: tuple[ActionName, ...] = ("0", "undo", "up", "down")
+
+
+@dataclass(frozen=True)
 class ObjectEventCurriculumConfig:
     seed: int = 0
     train_geometries: int = 16
@@ -33,6 +45,11 @@ class ObjectEventCurriculumConfig:
     grid_size: int = 8
     include_distractors: bool = True
     require_full_dense_actions: bool = True
+    action_surface: str = "dense_8x8"
+    action_surface_size: int = 68
+    coordinate_grid_size: int = 64
+    empty_click_fraction: float = 0.80
+    positive_region_radius: int = 1
 
 
 @dataclass(frozen=True)
@@ -48,6 +65,11 @@ class OnlineObjectEventCurriculumConfig:
     curriculum: str = "latent_rule_color_click"
     palette_size: int = 8
     require_role_balanced_colors: bool = False
+    action_surface: str = "dense_8x8"
+    action_surface_size: int = 68
+    coordinate_grid_size: int = 64
+    empty_click_fraction: float = 0.80
+    positive_region_radius: int = 1
 
 
 @dataclass(frozen=True)
@@ -63,6 +85,11 @@ class ActiveOnlineObjectEventConfig:
     curriculum: str = "latent_rule_color_click"
     palette_size: int = 8
     require_role_balanced_colors: bool = False
+    action_surface: str = "dense_8x8"
+    action_surface_size: int = 68
+    coordinate_grid_size: int = 64
+    empty_click_fraction: float = 0.80
+    positive_region_radius: int = 1
 
 
 @dataclass(frozen=True)
@@ -85,6 +112,8 @@ class ObjectEventExample:
     transition_targets: TransitionEventTargets
     candidate_targets: CandidateEventTargets
     metadata: dict[str, Any]
+    positive_action_mask: np.ndarray | None = None
+    positive_action_indices: tuple[int, ...] = ()
 
     def transition(self) -> Transition:
         return Transition(
@@ -203,6 +232,11 @@ def build_active_online_object_event_curriculum(
             curriculum=str(config.curriculum),
             palette_size=int(config.palette_size),
             require_role_balanced_colors=bool(config.require_role_balanced_colors),
+            action_surface=str(config.action_surface),
+            action_surface_size=int(config.action_surface_size),
+            coordinate_grid_size=int(config.coordinate_grid_size),
+            empty_click_fraction=float(config.empty_click_fraction),
+            positive_region_radius=int(config.positive_region_radius),
         )
     )
 
@@ -215,7 +249,10 @@ def apply_synthetic_object_event_action(
     index = int(selected_action_index)
     if index < 0 or index >= len(example.legal_actions):
         raise IndexError(f"selected action index {index} outside legal surface of {len(example.legal_actions)} actions")
-    success = index == int(example.correct_action_index)
+    if example.positive_action_mask is None:
+        success = index == int(example.correct_action_index)
+    else:
+        success = bool(np.asarray(example.positive_action_mask, dtype=bool)[index])
     outcome = np.asarray(example.candidate_targets.outcome[index], dtype=np.float32)
     delta = np.asarray(example.candidate_targets.delta[index], dtype=np.float32)
     reward = float(example.candidate_targets.value[index])
@@ -241,6 +278,7 @@ def apply_synthetic_object_event_action(
             "cue_mode": int(level.cue_mode),
             "selected_action_index": index,
             "correct_action_index": int(example.correct_action_index),
+            "positive_action_count": int(len(example.positive_action_indices) if example.positive_action_indices else 1),
             "oracle_support_used": False,
         },
     )
@@ -253,17 +291,35 @@ def state_to_grid_observation(
     step_index: int | None = None,
 ) -> GridObservation:
     action_tuple = tuple(state.affordances if actions is None else actions)
+    inventory = state.inventory_dict()
+    extras: dict[str, Any] = {
+        "action_roles": dict(state.action_roles),
+        "cell_tags": _public_cell_tags(state),
+        "background_color": 0,
+    }
+    if state.inventory:
+        extras["inventory"] = dict(state.inventory)
+    if state.flags:
+        extras["flags"] = dict(state.flags)
+    if "interface_display_scale" in inventory:
+        extras["display_scale"] = int(inventory["interface_display_scale"])
+    if "interface_display_pad_x" in inventory or "interface_display_pad_y" in inventory:
+        extras["display_padding"] = (
+            int(inventory.get("interface_display_pad_x", "0")),
+            int(inventory.get("interface_display_pad_y", "0")),
+        )
+    if "interface_camera_height" in inventory and "interface_camera_width" in inventory:
+        extras["camera_grid_shape"] = (
+            int(inventory["interface_camera_height"]),
+            int(inventory["interface_camera_width"]),
+        )
     return GridObservation(
         task_id=state.task_id,
         episode_id=state.episode_id,
         step_index=int(state.step_index if step_index is None else step_index),
         grid=state.as_grid(),
         available_actions=action_tuple,
-        extras={
-            "action_roles": dict(state.action_roles),
-            "cell_tags": _public_cell_tags(state),
-            "background_color": 0,
-        },
+        extras=extras,
     )
 
 
@@ -308,6 +364,7 @@ def rebuild_object_event_example_with_states(
         legal_actions=example.legal_actions,
         correct_action_index=int(transition_targets.actual_action_index),
         transition_targets=transition_targets,
+        positive_action_indices=example.positive_action_indices,
     )
     metadata = dict(example.metadata)
     if metadata_extra:
@@ -323,6 +380,8 @@ def rebuild_object_event_example_with_states(
         transition_targets=transition_targets,
         candidate_targets=candidate_targets,
         metadata=metadata,
+        positive_action_mask=None if example.positive_action_mask is None else np.asarray(example.positive_action_mask, dtype=bool).copy(),
+        positive_action_indices=tuple(int(index) for index in example.positive_action_indices),
     )
 
 
@@ -406,6 +465,11 @@ def make_latent_rule_color_click_example(
             grid_size=int(config.grid_size),
             include_distractors=bool(config.include_distractors),
             require_full_dense_actions=bool(config.require_full_dense_actions),
+            action_surface=str(config.action_surface),
+            action_surface_size=int(config.action_surface_size),
+            coordinate_grid_size=int(config.coordinate_grid_size),
+            empty_click_fraction=float(config.empty_click_fraction),
+            positive_region_radius=int(config.positive_region_radius),
         ),
     )
     target_mode = int(cue_mode) if int(latent_rule) == 0 else 1 - int(cue_mode)
@@ -458,6 +522,11 @@ def make_latent_rule_variable_palette_example(
             grid_size=int(config.grid_size),
             include_distractors=bool(config.include_distractors),
             require_full_dense_actions=bool(config.require_full_dense_actions),
+            action_surface=str(config.action_surface),
+            action_surface_size=int(config.action_surface_size),
+            coordinate_grid_size=int(config.coordinate_grid_size),
+            empty_click_fraction=float(config.empty_click_fraction),
+            positive_region_radius=int(config.positive_region_radius),
         ),
         slot_colors=target_colors,
         distractor_colors=distractor_colors,
@@ -591,7 +660,14 @@ def _sample_geometry_with_colors(
             )
             occupied.add(cell)
             distractors.append((int(cell[0]), int(cell[1]), int(color)))
-    actions = _dense_actions(grid_size=grid_size) if config.require_full_dense_actions else _sparse_actions(red_pos, blue_pos, grid_size)
+    actions, surface_metadata = _actions_for_surface(
+        red_pos=red_pos,
+        blue_pos=blue_pos,
+        distractors=tuple((int(row), int(col)) for row, col, _color in distractors),
+        geometry_seed=int(geometry_seed),
+        grid_size=grid_size,
+        config=config,
+    )
     roles = {action: "click" for action in actions if action.startswith("click:")}
     roles.update({"0": "reset_level", "undo": "undo", "up": "move_up", "down": "move_down"})
     slot0_id = "object_0" if generic_object_ids else "red"
@@ -610,6 +686,7 @@ def _sample_geometry_with_colors(
         "distractor_object_ids": distractor_ids,
         "actions": tuple(actions),
         "action_roles": tuple(sorted(roles.items())),
+        "action_surface_metadata": surface_metadata,
     }
 
 
@@ -705,7 +782,31 @@ def _example_from_geometry(
             grid[row, col] = int(obj.color)
     legal_actions = tuple(geometry["actions"])
     effective_target_mode = int(cue_mode) if target_mode is None else int(target_mode)
-    correct_action = _click_action(red_pos) if effective_target_mode == 0 else _click_action(blue_pos)
+    surface_metadata = dict(geometry.get("action_surface_metadata", {}))
+    red_positive_actions = _slot_positive_actions(
+        surface_metadata,
+        slot="red",
+        fallback=_click_action(red_pos),
+    )
+    blue_positive_actions = _slot_positive_actions(
+        surface_metadata,
+        slot="blue",
+        fallback=_click_action(blue_pos),
+    )
+    target_positive_actions = red_positive_actions if effective_target_mode == 0 else blue_positive_actions
+    wrong_positive_actions = blue_positive_actions if effective_target_mode == 0 else red_positive_actions
+    positive_action_indices = tuple(int(legal_actions.index(action)) for action in target_positive_actions if action in legal_actions)
+    if not positive_action_indices:
+        raise ValueError("object-event example has no positive legal target actions")
+    correct_action = legal_actions[int(positive_action_indices[0])]
+    red_action_index = int(legal_actions.index(red_positive_actions[0]))
+    blue_action_index = int(legal_actions.index(blue_positive_actions[0]))
+    red_action_indices = tuple(int(legal_actions.index(action)) for action in red_positive_actions if action in legal_actions)
+    blue_action_indices = tuple(int(legal_actions.index(action)) for action in blue_positive_actions if action in legal_actions)
+    wrong_action_indices = tuple(int(legal_actions.index(action)) for action in wrong_positive_actions if action in legal_actions)
+    positive_action_mask = np.zeros((len(legal_actions),), dtype=bool)
+    positive_action_mask[list(positive_action_indices)] = True
+    inventory = _surface_inventory(surface_metadata, grid_size=grid_size)
     state = StructuredState(
         task_id="synthetic_object_event",
         episode_id=f"{split}_{geometry['geometry_seed']}",
@@ -716,6 +817,7 @@ def _example_from_geometry(
         relations=(),
         affordances=legal_actions,
         action_roles=tuple(geometry["action_roles"]),
+        inventory=inventory,
     )
     next_state = StructuredState(
         task_id=state.task_id,
@@ -727,6 +829,7 @@ def _example_from_geometry(
         relations=(),
         affordances=state.affordances,
         action_roles=state.action_roles,
+        inventory=state.inventory,
         flags=(("synthetic_success_latch", "1"),),
     )
     transition = Transition(
@@ -742,6 +845,7 @@ def _example_from_geometry(
         legal_actions=legal_actions,
         correct_action_index=int(transition_targets.actual_action_index),
         transition_targets=transition_targets,
+        positive_action_indices=positive_action_indices,
     )
     metadata = {
         "curriculum": "paired_color_click",
@@ -749,17 +853,24 @@ def _example_from_geometry(
         "geometry_seed": int(geometry["geometry_seed"]),
         "cue_mode": int(cue_mode),
         "target_mode": int(effective_target_mode),
-        "red_action_index": int(legal_actions.index(_click_action(red_pos))),
-        "blue_action_index": int(legal_actions.index(_click_action(blue_pos))),
-        "slot0_action_index": int(legal_actions.index(_click_action(red_pos))),
-        "slot1_action_index": int(legal_actions.index(_click_action(blue_pos))),
-        "candidate_action_indices": (
-            int(legal_actions.index(_click_action(red_pos))),
-            int(legal_actions.index(_click_action(blue_pos))),
-        ),
+        "red_action_index": red_action_index,
+        "blue_action_index": blue_action_index,
+        "slot0_action_index": red_action_index,
+        "slot1_action_index": blue_action_index,
+        "red_action_indices": red_action_indices,
+        "blue_action_indices": blue_action_indices,
+        "positive_action_indices": positive_action_indices,
+        "wrong_action_indices": wrong_action_indices,
+        "candidate_action_indices": tuple(red_action_indices + blue_action_indices),
         "target_color": int(slot0_color if int(effective_target_mode) == 0 else slot1_color),
         "correct_action_index": int(transition_targets.actual_action_index),
         "legal_action_count": int(len(legal_actions)),
+        "positive_action_count": int(len(positive_action_indices)),
+        "action_surface_kind": str(surface_metadata.get("action_surface_kind", "dense_8x8")),
+        "coordinate_grid_size": int(surface_metadata.get("coordinate_grid_size", grid_size)),
+        "interface_display_scale": int(surface_metadata.get("display_scale", 1)),
+        "empty_action_count": int(len(tuple(surface_metadata.get("empty_action_strings", ())))),
+        "object_action_count": int(len(tuple(surface_metadata.get("object_action_strings", ())))),
     }
     if metadata_extra:
         metadata.update(dict(metadata_extra))
@@ -774,6 +885,8 @@ def _example_from_geometry(
         transition_targets=transition_targets,
         candidate_targets=candidate_targets,
         metadata=metadata,
+        positive_action_mask=positive_action_mask,
+        positive_action_indices=positive_action_indices,
     )
 
 
@@ -782,24 +895,229 @@ def _candidate_targets(
     legal_actions: tuple[ActionName, ...],
     correct_action_index: int,
     transition_targets: TransitionEventTargets,
+    positive_action_indices: Sequence[int] | None = None,
 ) -> CandidateEventTargets:
     action_count = len(legal_actions)
     outcome = np.zeros((action_count, OUTCOME_DIM), dtype=np.float32)
     outcome[:, OUT_NO_EFFECT_NONPROGRESS] = 1.0
     value = np.zeros((action_count,), dtype=np.float32)
     delta = np.zeros((action_count, STATE_DELTA_DIM), dtype=np.float32)
-    index = int(correct_action_index)
-    outcome[index, :] = 0.0
-    outcome[index, OUT_VISIBLE_CHANGE] = 1.0
-    outcome[index, OUT_OBJECTIVE_PROGRESS] = 1.0
-    outcome[index, OUT_REWARD_PROGRESS] = 1.0
-    value[index] = 1.0
-    delta[index] = transition_targets.delta
+    if positive_action_indices:
+        indices = tuple(sorted({int(index) for index in positive_action_indices}))
+    else:
+        indices = (int(correct_action_index),)
+    for index in indices:
+        outcome[index, :] = 0.0
+        outcome[index, OUT_VISIBLE_CHANGE] = 1.0
+        outcome[index, OUT_OBJECTIVE_PROGRESS] = 1.0
+        outcome[index, OUT_REWARD_PROGRESS] = 1.0
+        value[index] = 1.0
+        delta[index] = transition_targets.delta
     return CandidateEventTargets(
         outcome=outcome,
         value=value,
         delta=delta,
         action_mask=np.ones((action_count,), dtype=bool),
+    )
+
+
+def parametric_click_to_grid_cell(
+    action: ActionName,
+    *,
+    grid_size: int,
+    coordinate_grid_size: int,
+) -> tuple[int, int] | None:
+    scale = _display_scale(grid_size=grid_size, coordinate_grid_size=coordinate_grid_size)
+    return click_action_to_grid_cell(
+        action,
+        grid_shape=(int(grid_size), int(grid_size)),
+        inventory={
+            "interface_display_scale": str(scale),
+            "interface_display_pad_x": "0",
+            "interface_display_pad_y": "0",
+        },
+    )
+
+
+def _actions_for_surface(
+    *,
+    red_pos: tuple[int, int],
+    blue_pos: tuple[int, int],
+    distractors: tuple[tuple[int, int], ...],
+    geometry_seed: int,
+    grid_size: int,
+    config: ObjectEventCurriculumConfig,
+) -> tuple[tuple[ActionName, ...], dict[str, Any]]:
+    kind = str(config.action_surface)
+    if kind == "arc_scale_parametric":
+        return _arc_scale_parametric_actions(
+            red_pos=red_pos,
+            blue_pos=blue_pos,
+            distractors=distractors,
+            geometry_seed=int(geometry_seed),
+            grid_size=int(grid_size),
+            action_surface_size=int(config.action_surface_size),
+            coordinate_grid_size=int(config.coordinate_grid_size),
+            empty_click_fraction=float(config.empty_click_fraction),
+            positive_region_radius=int(config.positive_region_radius),
+        )
+    if kind != "dense_8x8":
+        raise ValueError(f"unknown object-event action surface: {kind!r}")
+    actions = _dense_actions(grid_size=grid_size) if config.require_full_dense_actions else _sparse_actions(red_pos, blue_pos, grid_size)
+    return tuple(actions), {
+        "action_surface_kind": "dense_8x8",
+        "coordinate_grid_size": int(grid_size),
+        "display_scale": 1,
+        "empty_action_strings": tuple(),
+        "object_action_strings": tuple(action for action in actions if action.startswith("click:")),
+    }
+
+
+def _slot_positive_actions(
+    surface_metadata: dict[str, Any],
+    *,
+    slot: str,
+    fallback: ActionName,
+) -> tuple[ActionName, ...]:
+    raw = surface_metadata.get(f"{slot}_positive_action_strings")
+    if isinstance(raw, (list, tuple)) and raw:
+        return tuple(str(action) for action in raw)
+    return (str(fallback),)
+
+
+def _surface_inventory(surface_metadata: dict[str, Any], *, grid_size: int) -> tuple[tuple[str, str], ...]:
+    if str(surface_metadata.get("action_surface_kind", "dense_8x8")) != "arc_scale_parametric":
+        return ()
+    coordinate_grid_size = int(surface_metadata.get("coordinate_grid_size", grid_size))
+    display_scale = int(surface_metadata.get("display_scale", _display_scale(grid_size=grid_size, coordinate_grid_size=coordinate_grid_size)))
+    return tuple(
+        sorted(
+            {
+                "interface_display_scale": str(display_scale),
+                "interface_display_pad_x": "0",
+                "interface_display_pad_y": "0",
+                "interface_camera_height": str(int(grid_size)),
+                "interface_camera_width": str(int(grid_size)),
+                "interface_coordinate_grid_size": str(int(coordinate_grid_size)),
+            }.items()
+        )
+    )
+
+
+def _arc_scale_parametric_actions(
+    *,
+    red_pos: tuple[int, int],
+    blue_pos: tuple[int, int],
+    distractors: tuple[tuple[int, int], ...],
+    geometry_seed: int,
+    grid_size: int,
+    action_surface_size: int,
+    coordinate_grid_size: int,
+    empty_click_fraction: float,
+    positive_region_radius: int,
+) -> tuple[tuple[ActionName, ...], dict[str, Any]]:
+    controls: tuple[ActionName, ...] = ("0", "undo", "up", "down")
+    total = max(int(action_surface_size), len(controls) + 1)
+    click_budget = total - len(controls)
+    coord_size = max(int(coordinate_grid_size), int(grid_size))
+    scale = _display_scale(grid_size=grid_size, coordinate_grid_size=coord_size)
+    rng = np.random.default_rng(int(geometry_seed) * 9_973 + 4_211)
+    occupied = {(0, 0), tuple(red_pos), tuple(blue_pos), *tuple(tuple(cell) for cell in distractors)}
+    actions: list[ActionName] = []
+    seen: set[ActionName] = set()
+    red_actions: set[ActionName] = set()
+    blue_actions: set[ActionName] = set()
+    object_actions: set[ActionName] = set()
+    empty_actions: set[ActionName] = set()
+
+    def add_click(x: int, y: int, *, category: str) -> None:
+        if len(actions) >= click_budget:
+            return
+        x = max(0, min(int(x), coord_size - 1))
+        y = max(0, min(int(y), coord_size - 1))
+        action = f"click:{x}:{y}"
+        if action in seen:
+            return
+        cell = parametric_click_to_grid_cell(action, grid_size=grid_size, coordinate_grid_size=coord_size)
+        if cell is None:
+            return
+        seen.add(action)
+        actions.append(action)
+        if category == "red":
+            red_actions.add(action)
+            object_actions.add(action)
+        elif category == "blue":
+            blue_actions.add(action)
+            object_actions.add(action)
+        elif category == "object":
+            object_actions.add(action)
+        elif category == "empty":
+            empty_actions.add(action)
+
+    radius = max(int(positive_region_radius), 0)
+    for category, cell in (("red", red_pos), ("blue", blue_pos)):
+        cx, cy = _cell_center_xy(cell, scale=scale, coordinate_grid_size=coord_size)
+        for dy in range(-radius, radius + 1):
+            for dx in range(-radius, radius + 1):
+                add_click(cx + dx, cy + dy, category=category)
+    for cell in ((0, 0), *distractors):
+        cx, cy = _cell_center_xy(cell, scale=scale, coordinate_grid_size=coord_size)
+        add_click(cx, cy, category="object")
+        add_click(cx + 1, cy, category="object")
+    desired_empty = int(round(float(empty_click_fraction) * float(click_budget)))
+    while len(empty_actions) < desired_empty and len(actions) < click_budget:
+        x = int(rng.integers(0, coord_size))
+        y = int(rng.integers(0, coord_size))
+        action = f"click:{x}:{y}"
+        cell = parametric_click_to_grid_cell(action, grid_size=grid_size, coordinate_grid_size=coord_size)
+        if cell is None or cell in occupied or action in seen:
+            continue
+        add_click(x, y, category="empty")
+    for y in range(coord_size):
+        if len(actions) >= click_budget:
+            break
+        for x in range(coord_size):
+            if len(actions) >= click_budget:
+                break
+            action = f"click:{x}:{y}"
+            if action in seen:
+                continue
+            cell = parametric_click_to_grid_cell(action, grid_size=grid_size, coordinate_grid_size=coord_size)
+            if cell is None:
+                continue
+            add_click(x, y, category="empty" if cell not in occupied else "object")
+    if len(actions) != click_budget:
+        raise ValueError(f"could not build {click_budget} unique parametric click actions")
+    all_actions = actions + list(controls)
+    rng.shuffle(all_actions)
+    action_tuple = tuple(all_actions)
+    return action_tuple, {
+        "action_surface_kind": "arc_scale_parametric",
+        "coordinate_grid_size": int(coord_size),
+        "display_scale": int(scale),
+        "empty_action_strings": tuple(sorted(empty_actions)),
+        "object_action_strings": tuple(sorted(object_actions)),
+        "red_positive_action_strings": tuple(sorted(red_actions)),
+        "blue_positive_action_strings": tuple(sorted(blue_actions)),
+    }
+
+
+def _display_scale(*, grid_size: int, coordinate_grid_size: int) -> int:
+    return max(int(coordinate_grid_size) // max(int(grid_size), 1), 1)
+
+
+def _cell_center_xy(
+    cell: tuple[int, int],
+    *,
+    scale: int,
+    coordinate_grid_size: int,
+) -> tuple[int, int]:
+    row, col = int(cell[0]), int(cell[1])
+    x = int(col * int(scale) + int(scale) // 2)
+    y = int(row * int(scale) + int(scale) // 2)
+    return (
+        max(0, min(x, int(coordinate_grid_size) - 1)),
+        max(0, min(y, int(coordinate_grid_size) - 1)),
     )
 
 

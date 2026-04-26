@@ -333,7 +333,7 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             self.level_belief = torch.zeros((self.config.d_model,), dtype=torch.float32, device=self.device)
         model_state = state.get("model_state", {})
         if isinstance(model_state, dict):
-            self.model.load_state_dict(model_state)
+            self.model.load_state_dict(model_state, strict=False)
         metadata = state.get("metadata", {})
         self.metadata = metadata if isinstance(metadata, dict) else self.checkpoint_metadata()
 

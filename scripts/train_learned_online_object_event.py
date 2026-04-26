@@ -16,6 +16,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from arcagi.agents.learned_online_object_event_agent import LearnedOnlineObjectEventAgent
+from arcagi.core.action_schema import parse_click_action
 from arcagi.core.types import GridObservation, StructuredState, Transition
 from arcagi.learned_online.object_event_bridge import (
     SelectedActionObservation,
@@ -97,6 +98,12 @@ def main() -> None:
     parser.add_argument("--save-best", action="store_true")
     parser.add_argument("--selection-metric", default=None)
     parser.add_argument("--state-source", choices=("structured", "extracted", "both"), default="structured")
+    parser.add_argument("--action-surface", choices=("dense_8x8", "arc_scale_parametric"), default="dense_8x8")
+    parser.add_argument("--action-surface-size", type=int, default=68)
+    parser.add_argument("--coordinate-grid-size", type=int, default=64)
+    parser.add_argument("--empty-click-fraction", type=float, default=0.80)
+    parser.add_argument("--positive-region-radius", type=int, default=1)
+    parser.add_argument("--max-steps-per-level", type=int, default=3)
     args = parser.parse_args()
 
     mode = args.source or args.mode
@@ -206,10 +213,15 @@ def _run_synthetic_online_object_event(
                 max_distractors=int(args.max_distractors),
                 include_distractors=True,
                 grid_size=8,
-                max_steps_per_level=3,
+                max_steps_per_level=int(args.max_steps_per_level),
                 curriculum=str(args.curriculum),
                 palette_size=int(args.palette_size),
                 require_role_balanced_colors=bool(args.require_role_balanced_colors),
+                action_surface=str(args.action_surface),
+                action_surface_size=int(args.action_surface_size),
+                coordinate_grid_size=int(args.coordinate_grid_size),
+                empty_click_fraction=float(args.empty_click_fraction),
+                positive_region_radius=int(args.positive_region_radius),
             )
         )
     else:
@@ -224,6 +236,11 @@ def _run_synthetic_online_object_event(
                 include_distractors=False,
                 require_full_dense_actions=True,
                 curriculum="latent_rule_color_click",
+                action_surface=str(args.action_surface),
+                action_surface_size=int(args.action_surface_size),
+                coordinate_grid_size=int(args.coordinate_grid_size),
+                empty_click_fraction=float(args.empty_click_fraction),
+                positive_region_radius=int(args.positive_region_radius),
             )
         )
     model = ObjectEventModel(config).to(device)
@@ -261,17 +278,17 @@ def _run_synthetic_online_object_event(
         session_belief = _observed_belief_delta(model, support_tensors)
         query_output = _forward_tensors(model, query_tensors, session_belief=session_belief)
         query_logits = policy_rank_logits_from_predictions(query_output, query_tensors["action_mask"])
-        query_loss = F.cross_entropy(query_logits, query_tensors["actual_action_index"])
+        query_loss = _positive_rank_loss(query_logits, query_tensors)
         next_output = _forward_tensors(model, next_tensors, session_belief=session_belief)
         next_logits = policy_rank_logits_from_predictions(next_output, next_tensors["action_mask"])
-        next_loss = F.cross_entropy(next_logits, next_tensors["actual_action_index"])
+        next_loss = _positive_rank_loss(next_logits, next_tensors)
         wrong_indices = _wrong_candidate_indices(support_examples, device=device)
         failure_support_tensors = _with_observed_candidate_targets(support_tensors, wrong_indices)
         failure_deltas = _observed_belief_deltas(model, failure_support_tensors)
         failure_belief = failure_deltas.session_delta
         failure_query_output = _forward_tensors(model, query_tensors, session_belief=failure_belief)
         failure_query_logits = policy_rank_logits_from_predictions(failure_query_output, query_tensors["action_mask"])
-        failure_loss = F.cross_entropy(failure_query_logits, query_tensors["actual_action_index"])
+        failure_loss = _positive_rank_loss(failure_query_logits, query_tensors)
         retry_examples = _post_failure_retry_examples(
             tuple(session.levels[0] for session in sessions),
             tuple(int(index) for index in wrong_indices.detach().cpu().tolist()),
@@ -284,11 +301,11 @@ def _run_synthetic_online_object_event(
             level_belief=failure_deltas.level_delta,
         )
         retry_logits = policy_rank_logits_from_predictions(retry_output, retry_tensors["action_mask"])
-        retry_loss = F.cross_entropy(retry_logits, retry_tensors["actual_action_index"])
+        retry_loss = _positive_rank_loss(retry_logits, retry_tensors)
         support_output = _forward_tensors(model, support_tensors)
         support_logits = policy_rank_logits_from_predictions(support_output, support_tensors["action_mask"])
         self_selected = torch.argmax(support_logits.detach(), dim=-1)
-        self_failure_mask = (self_selected != support_tensors["actual_action_index"]).float()
+        self_failure_mask = (~_selected_is_positive(support_tensors, self_selected)).float()
         self_observed_tensors = _with_observed_candidate_targets(support_tensors, self_selected)
         self_deltas = _observed_belief_deltas(model, self_observed_tensors)
         self_retry_examples = _post_failure_retry_examples(
@@ -303,14 +320,31 @@ def _run_synthetic_online_object_event(
             level_belief=self_deltas.level_delta,
         )
         self_retry_logits = policy_rank_logits_from_predictions(self_retry_output, self_retry_tensors["action_mask"])
-        self_retry_ce = F.cross_entropy(
-            self_retry_logits,
-            self_retry_tensors["actual_action_index"],
-            reduction="none",
-        )
+        self_retry_ce = _positive_rank_loss_per_row(self_retry_logits, self_retry_tensors)
         self_retry_loss = torch.sum(self_retry_ce * self_failure_mask) / torch.clamp(torch.sum(self_failure_mask), min=1.0)
+        selected_before = support_logits.gather(1, self_selected[:, None]).squeeze(1)
+        selected_after = self_retry_logits.gather(1, self_selected[:, None]).squeeze(1)
+        positive_mask = _positive_mask_from_tensors(self_retry_tensors)
+        positive_after = torch.logsumexp(self_retry_logits.masked_fill(~positive_mask, -1.0e9), dim=-1)
+        repeat_margin_loss = _masked_mean_loss(
+            F.relu(selected_after - positive_after + 1.0),
+            self_failure_mask,
+        )
+        score_drop_loss = _masked_mean_loss(
+            F.relu(selected_after - selected_before + 0.5),
+            self_failure_mask,
+        )
         plausible_loss = _plausible_red_blue_loss(support_logits, support_examples)
-        loss = query_loss + next_loss + 0.5 * failure_loss + 0.75 * retry_loss + 0.75 * self_retry_loss + 0.2 * plausible_loss
+        loss = (
+            query_loss
+            + next_loss
+            + 0.5 * failure_loss
+            + 0.75 * retry_loss
+            + 0.75 * self_retry_loss
+            + 0.5 * repeat_margin_loss
+            + 0.25 * score_drop_loss
+            + 0.2 * plausible_loss
+        )
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -327,6 +361,7 @@ def _run_synthetic_online_object_event(
                 active=active,
                 eval_runtime_agent=bool(args.eval_runtime_agent),
                 extra_metrics=extraction_metrics,
+                max_steps_per_level=int(args.max_steps_per_level),
             )
             if bool(args.save_best):
                 if selection_metric not in metrics:
@@ -361,6 +396,7 @@ def _run_synthetic_online_object_event(
             active=active,
             eval_runtime_agent=bool(args.eval_runtime_agent),
             extra_metrics=extraction_metrics,
+            max_steps_per_level=int(args.max_steps_per_level),
         )
         if bool(args.save_best):
             summary = {
@@ -573,6 +609,39 @@ def _observed_belief_deltas(model: ObjectEventModel, tensors: dict[str, Any]):
     )
 
 
+def _positive_mask_from_tensors(tensors: dict[str, Any]) -> torch.Tensor:
+    return tensors["candidate_value_targets"].to(dtype=torch.float32) > 0.5
+
+
+def _positive_rank_loss(logits: torch.Tensor, tensors: dict[str, Any]) -> torch.Tensor:
+    return _positive_rank_loss_per_row(logits, tensors).mean()
+
+
+def _positive_rank_loss_per_row(logits: torch.Tensor, tensors: dict[str, Any]) -> torch.Tensor:
+    valid = tensors["action_mask"].bool()
+    positives = _positive_mask_from_tensors(tensors) & valid
+    safe_logits = logits.masked_fill(~valid, -1.0e9)
+    log_probs = torch.log_softmax(safe_logits, dim=-1)
+    positive_log_probs = log_probs.masked_fill(~positives, -1.0e9)
+    return -torch.logsumexp(positive_log_probs, dim=-1)
+
+
+def _selected_is_positive(tensors: dict[str, Any], selected_indices: torch.Tensor) -> torch.Tensor:
+    row = torch.arange(selected_indices.shape[0], device=selected_indices.device)
+    return _positive_mask_from_tensors(tensors)[row, selected_indices]
+
+
+def _masked_mean_loss(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    weights = mask.to(dtype=values.dtype)
+    return torch.sum(values * weights) / torch.clamp(torch.sum(weights), min=1.0)
+
+
+def _is_positive_index(example: ObjectEventExample, index: int) -> bool:
+    if example.positive_action_mask is not None:
+        return bool(np.asarray(example.positive_action_mask, dtype=bool)[int(index)])
+    return int(index) == int(example.correct_action_index)
+
+
 def _sample_red_blue_indices(
     examples: Sequence[ObjectEventExample],
     *,
@@ -592,8 +661,19 @@ def _wrong_candidate_indices(
 ) -> torch.Tensor:
     indices: list[int] = []
     for example in examples:
+        raw_wrong = example.metadata.get("wrong_action_indices")
+        if isinstance(raw_wrong, (list, tuple)) and raw_wrong:
+            wrong = [int(index) for index in raw_wrong if not _is_positive_index(example, int(index))]
+        else:
+            candidates = _candidate_action_indices(example)
+            wrong = [int(index) for index in candidates if not _is_positive_index(example, int(index))]
+        if not wrong:
+            wrong = [
+                int(index)
+                for index, value in enumerate(example.candidate_targets.value)
+                if float(value) <= 0.5 and bool(example.candidate_targets.action_mask[index])
+            ]
         candidates = _candidate_action_indices(example)
-        wrong = [index for index in candidates if int(index) != int(example.correct_action_index)]
         indices.append(int(wrong[0] if wrong else candidates[0]))
     return torch.as_tensor(indices, dtype=torch.long, device=device)
 
@@ -659,8 +739,9 @@ def _post_failure_retry_examples(
 def _plausible_red_blue_loss(rank_logits: torch.Tensor, examples: Sequence[ObjectEventExample]) -> torch.Tensor:
     mask = torch.zeros_like(rank_logits, dtype=torch.bool)
     for row, example in enumerate(examples):
-        mask[row, int(example.metadata["red_action_index"])] = True
-        mask[row, int(example.metadata["blue_action_index"])] = True
+        for index in _candidate_action_indices(example):
+            if 0 <= int(index) < rank_logits.shape[1]:
+                mask[row, int(index)] = True
     plausible = torch.logsumexp(rank_logits.masked_fill(~mask, -1.0e9), dim=-1)
     all_actions = torch.logsumexp(rank_logits, dim=-1)
     return torch.mean(all_actions - plausible)
@@ -677,6 +758,7 @@ def _online_training_metrics(
     active: bool = False,
     eval_runtime_agent: bool = False,
     extra_metrics: dict[str, Any] | None = None,
+    max_steps_per_level: int = 3,
 ) -> dict[str, Any]:
     train_metrics = _evaluate_online_sessions(model, train, device=device)
     heldout_metrics = _evaluate_online_sessions(model, heldout, device=device)
@@ -690,7 +772,7 @@ def _online_training_metrics(
     same_cue_metrics = _evaluate_online_sessions(model, same_cue, device=device)
     different_cue_metrics = _evaluate_online_sessions(model, different_cue, device=device)
     closed = _closed_loop_online_metrics(model, heldout, device=device)
-    active_closed = _active_rollout_metrics(model, heldout, device=device) if active else {}
+    active_closed = _active_rollout_metrics(model, heldout, device=device, max_steps_per_level=int(max_steps_per_level)) if active else {}
     metrics = {
         "step": int(step),
         "train_loss": float(train_loss),
@@ -732,6 +814,7 @@ def _online_training_metrics(
                 "heldout_active_success_within_1": active_closed["success_within_1"],
                 "heldout_active_success_within_2": active_closed["success_within_2"],
                 "heldout_active_success_within_3": active_closed["success_within_3"],
+                "heldout_active_success_within_5": active_closed["success_within_5"],
                 "heldout_active_next_level_first_try_acc": heldout_metrics["next_level_top1"],
                 "heldout_active_next_level_with_session_reset_acc": reset_metrics["next_level_top1"],
                 "heldout_active_pre_update_top1_acc": heldout_metrics["pre_top1"],
@@ -762,11 +845,22 @@ def _online_training_metrics(
                 "post_session_target_first_click_rate": active_closed["post_session_target_first_click_rate"],
                 "post_session_distractor_first_click_rate": active_closed["post_session_distractor_first_click_rate"],
                 "post_session_next_level_first_try_acc": active_closed["post_session_next_level_first_try_acc"],
+                "self_selected_no_effect_count": active_closed["self_selected_no_effect_count"],
+                "failed_exact_repeat_top1_rate": active_closed["failed_exact_repeat_top1_rate"],
+                "failed_near_repeat_top1_rate": active_closed["failed_near_repeat_top1_rate"],
+                "failed_action_score_delta_mean": active_closed["failed_action_score_delta_mean"],
+                "max_same_action_streak_mean": active_closed["max_same_action_streak_mean"],
+                "max_same_action_streak_max": active_closed["max_same_action_streak_max"],
+                "unique_action_count_mean": active_closed["unique_action_count_mean"],
+                "object_event_action_surface_capped": False,
+                "trace_replay_used": False,
+                "graph_controller_used": False,
             }
         )
+        metrics.update(_action_surface_metrics(train=train, heldout=heldout))
         metrics.update(_color_role_balance_metrics(train=train, heldout=heldout))
         if eval_runtime_agent:
-            metrics.update(_runtime_agent_active_metrics(model, heldout, device=device))
+            metrics.update(_runtime_agent_active_metrics(model, heldout, device=device, max_steps_per_level=int(max_steps_per_level)))
         if "runtime_agent_active_success_within_3" in metrics and "runtime_agent_act_path_active_success_within_3" in metrics:
             metrics["structured_vs_act_path_success_gap"] = (
                 float(metrics["runtime_agent_active_success_within_3"])
@@ -775,6 +869,48 @@ def _online_training_metrics(
     if extra_metrics:
         metrics.update(extra_metrics)
     return metrics
+
+
+def _action_surface_metrics(
+    *,
+    train: Sequence[OnlineObjectEventSession],
+    heldout: Sequence[OnlineObjectEventSession],
+) -> dict[str, Any]:
+    examples = tuple(level.example for session in heldout for level in session.levels)
+    if not examples:
+        examples = tuple(level.example for session in train for level in session.levels)
+    if not examples:
+        return {
+            "action_surface_kind": "unknown",
+            "parametric_action_count_mean": 0.0,
+            "parametric_action_count_min": 0.0,
+            "parametric_action_count_max": 0.0,
+            "parametric_coordinate_grid_size": 0.0,
+            "empty_click_fraction_observed": 0.0,
+            "object_click_fraction_observed": 0.0,
+            "positive_action_count_mean": 0.0,
+            "positive_action_count_min": 0.0,
+            "positive_action_count_max": 0.0,
+        }
+    kinds = [str(example.metadata.get("action_surface_kind", "dense_8x8")) for example in examples]
+    legal_counts = np.asarray([float(len(example.legal_actions)) for example in examples], dtype=np.float32)
+    empty_counts = np.asarray([float(example.metadata.get("empty_action_count", 0.0) or 0.0) for example in examples], dtype=np.float32)
+    object_counts = np.asarray([float(example.metadata.get("object_action_count", 0.0) or 0.0) for example in examples], dtype=np.float32)
+    positive_counts = np.asarray([float(len(example.positive_action_indices) if example.positive_action_indices else 1.0) for example in examples], dtype=np.float32)
+    coord_sizes = np.asarray([float(example.metadata.get("coordinate_grid_size", 0.0) or 0.0) for example in examples], dtype=np.float32)
+    dominant_kind = max(sorted(set(kinds)), key=kinds.count)
+    return {
+        "action_surface_kind": dominant_kind,
+        "parametric_action_count_mean": float(np.mean(legal_counts)),
+        "parametric_action_count_min": float(np.min(legal_counts)),
+        "parametric_action_count_max": float(np.max(legal_counts)),
+        "parametric_coordinate_grid_size": float(np.mean(coord_sizes)),
+        "empty_click_fraction_observed": float(np.mean(empty_counts / np.maximum(legal_counts, 1.0))),
+        "object_click_fraction_observed": float(np.mean(object_counts / np.maximum(legal_counts, 1.0))),
+        "positive_action_count_mean": float(np.mean(positive_counts)),
+        "positive_action_count_min": float(np.min(positive_counts)),
+        "positive_action_count_max": float(np.max(positive_counts)),
+    }
 
 
 def _color_role_balance_metrics(
@@ -846,16 +982,7 @@ def _evaluate_online_sessions(
         wrong_support = _wrong_rule_support_examples(sessions)
         support_tensors = _batch_to_tensors(collate_object_event_examples(wrong_support), device=device, ablation=ablation)
     if support_mode == "failure":
-        wrong_indices = torch.as_tensor(
-            [
-                int(example.metadata["blue_action_index"])
-                if int(example.correct_action_index) == int(example.metadata["red_action_index"])
-                else int(example.metadata["red_action_index"])
-                for example in support_examples
-            ],
-            dtype=torch.long,
-            device=device,
-        )
+        wrong_indices = _wrong_candidate_indices(support_examples, device=device)
         support_tensors = _with_observed_candidate_targets(support_tensors, wrong_indices)
     with torch.no_grad():
         pre_output = _forward_tensors(model, query_tensors)
@@ -876,11 +1003,11 @@ def _evaluate_online_sessions(
         post_entropy = _mean_entropy(post_logits)
         legal_counts = torch.sum(query_tensors["action_mask"].float(), dim=-1)
     return {
-        "pre_top1": _top1(pre_logits, query_tensors["actual_action_index"]),
-        "post_top1": _top1(post_logits, query_tensors["actual_action_index"]),
-        "next_level_top1": _top1(next_logits, next_tensors["actual_action_index"]),
-        "pre_rank_ce": float(F.cross_entropy(pre_logits, query_tensors["actual_action_index"]).detach().cpu()),
-        "post_rank_ce": float(F.cross_entropy(post_logits, query_tensors["actual_action_index"]).detach().cpu()),
+        "pre_top1": _top1_positive(pre_logits, query_tensors),
+        "post_top1": _top1_positive(post_logits, query_tensors),
+        "next_level_top1": _top1_positive(next_logits, next_tensors),
+        "pre_rank_ce": float(_positive_rank_loss(pre_logits, query_tensors).detach().cpu()),
+        "post_rank_ce": float(_positive_rank_loss(post_logits, query_tensors).detach().cpu()),
         "pre_entropy": float(pre_entropy.detach().cpu()),
         "post_entropy": float(post_entropy.detach().cpu()),
         "num_legal_actions_mean": float(torch.mean(legal_counts).detach().cpu()),
@@ -915,7 +1042,7 @@ def _closed_loop_online_metrics(
             output = _forward_tensors(model, support_tensors)
             logits = policy_rank_logits_from_predictions(output, support_tensors["action_mask"])
             first = int(torch.argmax(logits[0]).detach().cpu())
-            if first == int(support.correct_action_index):
+            if _is_positive_index(support, first):
                 steps.append(1)
                 continue
             observed = _with_observed_candidate_targets(support_tensors, torch.as_tensor([first], dtype=torch.long))
@@ -923,7 +1050,7 @@ def _closed_loop_online_metrics(
             retry_output = _forward_tensors(model, support_tensors, session_belief=session_belief)
             retry_logits = policy_rank_logits_from_predictions(retry_output, support_tensors["action_mask"])
             second = int(torch.argmax(retry_logits[0]).detach().cpu())
-            steps.append(2 if second == int(support.correct_action_index) else 4)
+            steps.append(2 if _is_positive_index(support, second) else 4)
     values = np.asarray(steps, dtype=np.float32)
     return {
         "mean_steps_to_first_success": float(np.mean(np.minimum(values, 4.0))),
@@ -945,9 +1072,17 @@ def _active_rollout_metrics(
             "success_within_1": 0.0,
             "success_within_2": 0.0,
             "success_within_3": 0.0,
+            "success_within_5": 0.0,
             "post_self_update_top1_acc": 0.0,
             "failed_candidate_repeat_top1_rate": 0.0,
             "failed_candidate_score_delta": 0.0,
+            "self_selected_no_effect_count": 0.0,
+            "failed_exact_repeat_top1_rate": 0.0,
+            "failed_near_repeat_top1_rate": 0.0,
+            "failed_action_score_delta_mean": 0.0,
+            "max_same_action_streak_mean": 0.0,
+            "max_same_action_streak_max": 0.0,
+            "unique_action_count_mean": 0.0,
             "ordinary_object_click_rate": 0.0,
             "agent_or_cue_click_rate": 0.0,
             "distractor_first_click_rate": 0.0,
@@ -970,7 +1105,11 @@ def _active_rollout_metrics(
     success_steps: list[int] = []
     post_update_hits: list[float] = []
     repeat_hits: list[float] = []
+    near_repeat_hits: list[float] = []
     failed_deltas: list[float] = []
+    same_streaks: list[float] = []
+    unique_counts: list[float] = []
+    no_effect_count = 0
     bridge_legal_counts: list[float] = []
     bridge_selected_matches: list[float] = []
     model_input_forbidden_count = 0
@@ -994,12 +1133,14 @@ def _active_rollout_metrics(
             step_success = max_steps_per_level + 1
             failed_index: int | None = None
             failed_score_before = 0.0
+            selected_actions_for_level: list[str] = []
             for step in range(1, max_steps_per_level + 1):
                 tensors = _batch_to_tensors(collate_object_event_examples((level.example,)), device=device)
                 with torch.no_grad():
                     output = _forward_tensors(model, tensors, session_belief=session_belief, level_belief=level_belief)
                     logits = policy_rank_logits_from_predictions(output, tensors["action_mask"])
                     selected = int(torch.argmax(logits[0]).detach().cpu())
+                    selected_actions_for_level.append(level.example.legal_actions[selected])
                     action_row = tensors["inputs"]["action_numeric"][0, selected]
                     is_ordinary = float(action_row[11].detach().cpu()) > 0.5 and float(action_row[24].detach().cpu()) < 0.5
                     is_agent = float(action_row[24].detach().cpu()) > 0.5
@@ -1010,7 +1151,7 @@ def _active_rollout_metrics(
                         first_clicks += 1
                         target_indices = set(_candidate_action_indices(level.example))
                         target_set_first += int(selected in target_indices)
-                        actual_target_first += int(selected == int(level.example.correct_action_index))
+                        actual_target_first += int(_is_positive_index(level.example, selected))
                         distractor_first += int(_is_distractor_action(level.example, selected, action_row=action_row))
                     result = apply_synthetic_object_event_action(level, selected)
                     bridge = _synthetic_bridge_observation(level.example, selected, result)
@@ -1031,16 +1172,23 @@ def _active_rollout_metrics(
                     level_belief = level_belief + deltas.level_delta
                     level_norms.append(float(torch.linalg.vector_norm(level_belief).detach().cpu()))
                     if failed_index is None:
+                        no_effect_count += 1
                         failed_index = selected
                         failed_score_before = float(logits[0, selected].detach().cpu())
                         retry_output = _forward_tensors(model, tensors, session_belief=session_belief, level_belief=level_belief)
                         retry_logits = policy_rank_logits_from_predictions(retry_output, tensors["action_mask"])
-                        post_update_hits.append(float(int(torch.argmax(retry_logits[0]).detach().cpu()) == int(level.example.correct_action_index)))
-                        repeat = float(int(torch.argmax(retry_logits[0]).detach().cpu()) == selected)
+                        retry_selected = int(torch.argmax(retry_logits[0]).detach().cpu())
+                        post_update_hits.append(float(_is_positive_index(level.example, retry_selected)))
+                        repeat = float(retry_selected == selected)
                         repeat_hits.append(repeat)
+                        near_repeat_hits.append(
+                            float(_is_near_repeat_action(level.example.legal_actions[selected], level.example.legal_actions[retry_selected], level.example))
+                        )
                         failed_deltas.append(float(retry_logits[0, selected].detach().cpu()) - failed_score_before)
                         if _is_distractor_action(level.example, selected, action_row=action_row):
                             observed_distractor_failures += 1
+            same_streaks.append(float(_max_same_action_streak(selected_actions_for_level)))
+            unique_counts.append(float(len(set(selected_actions_for_level))))
             success_steps.append(step_success)
         if len(session.levels) > 1:
             query_level = session.levels[1]
@@ -1052,10 +1200,10 @@ def _active_rollout_metrics(
                 query_selected = int(torch.argmax(query_logits[0]).detach().cpu())
                 query_action_row = query_tensors["inputs"]["action_numeric"][0, query_selected]
             post_session_first_clicks += 1
-            post_session_target_first += int(query_selected == int(query.correct_action_index))
+            post_session_target_first += int(_is_positive_index(query, query_selected))
             post_session_distractor_first += int(_is_distractor_action(query, query_selected, action_row=query_action_row))
-            post_session_hits.append(float(query_selected == int(query.correct_action_index)))
-            if query_selected != int(query.correct_action_index):
+            post_session_hits.append(float(_is_positive_index(query, query_selected)))
+            if not _is_positive_index(query, query_selected):
                 with torch.no_grad():
                     query_result = apply_synthetic_object_event_action(query_level, query_selected)
                     query_observed = _with_observed_candidate_targets(
@@ -1072,9 +1220,12 @@ def _active_rollout_metrics(
                     )
                     query_retry_logits = policy_rank_logits_from_predictions(query_retry_output, query_tensors["action_mask"])
                     query_retry_selected = int(torch.argmax(query_retry_logits[0]).detach().cpu())
-                    post_update_hits.append(float(query_retry_selected == int(query.correct_action_index)))
+                    post_update_hits.append(float(_is_positive_index(query, query_retry_selected)))
                     repeat = float(query_retry_selected == query_selected)
                     repeat_hits.append(repeat)
+                    near_repeat_hits.append(
+                        float(_is_near_repeat_action(query.legal_actions[query_selected], query.legal_actions[query_retry_selected], query))
+                    )
                     failed_deltas.append(
                         float(query_retry_logits[0, query_selected].detach().cpu())
                         - float(query_logits[0, query_selected].detach().cpu())
@@ -1085,9 +1236,17 @@ def _active_rollout_metrics(
         "success_within_1": float(np.mean(values <= 1.0)),
         "success_within_2": float(np.mean(values <= 2.0)),
         "success_within_3": float(np.mean(values <= 3.0)),
+        "success_within_5": float(np.mean(values <= 5.0)),
         "post_self_update_top1_acc": float(np.mean(post_update_hits)) if post_update_hits else 1.0,
         "failed_candidate_repeat_top1_rate": float(np.mean(repeat_hits)) if repeat_hits else 0.0,
         "failed_candidate_score_delta": float(np.mean(failed_deltas)) if failed_deltas else 0.0,
+        "self_selected_no_effect_count": float(no_effect_count),
+        "failed_exact_repeat_top1_rate": float(np.mean(repeat_hits)) if repeat_hits else 0.0,
+        "failed_near_repeat_top1_rate": float(np.mean(near_repeat_hits)) if near_repeat_hits else 0.0,
+        "failed_action_score_delta_mean": float(np.mean(failed_deltas)) if failed_deltas else 0.0,
+        "max_same_action_streak_mean": float(np.mean(same_streaks)) if same_streaks else 0.0,
+        "max_same_action_streak_max": float(np.max(same_streaks)) if same_streaks else 0.0,
+        "unique_action_count_mean": float(np.mean(unique_counts)) if unique_counts else 0.0,
         "ordinary_object_click_rate": float(ordinary_clicks / total_clicks),
         "agent_or_cue_click_rate": float(agent_clicks / total_clicks),
         "distractor_first_click_rate": float(distractor_first / max(first_clicks, 1)),
@@ -1115,6 +1274,38 @@ def _candidate_action_indices(example: ObjectEventExample) -> tuple[int, ...]:
     if isinstance(raw, (list, tuple)):
         return tuple(int(item) for item in raw)
     return (int(example.metadata["red_action_index"]), int(example.metadata["blue_action_index"]))
+
+
+def _max_same_action_streak(actions: Sequence[str]) -> int:
+    best = 0
+    current = 0
+    previous: str | None = None
+    for action in actions:
+        if action == previous:
+            current += 1
+        else:
+            previous = action
+            current = 1
+        best = max(best, current)
+    return int(best)
+
+
+def _is_near_repeat_action(first: str, second: str, example: ObjectEventExample) -> bool:
+    if first == second:
+        return True
+    first_click = parse_click_action(first)
+    second_click = parse_click_action(second)
+    if first_click is None or second_click is None:
+        return False
+    scale = int(example.metadata.get("interface_display_scale", 1) or 1)
+    if abs(int(first_click[0]) - int(second_click[0])) + abs(int(first_click[1]) - int(second_click[1])) <= max(scale, 1):
+        return True
+    inventory = example.state.inventory_dict()
+    from arcagi.core.action_schema import click_action_to_grid_cell
+
+    first_cell = click_action_to_grid_cell(first, grid_shape=example.state.grid_shape, inventory=inventory)
+    second_cell = click_action_to_grid_cell(second, grid_shape=example.state.grid_shape, inventory=inventory)
+    return first_cell is not None and first_cell == second_cell
 
 
 def _is_distractor_action(
@@ -1159,6 +1350,7 @@ def _runtime_agent_active_metrics(
             "runtime_agent_active_success_within_1": 0.0,
             "runtime_agent_active_success_within_2": 0.0,
             "runtime_agent_active_success_within_3": 0.0,
+            "runtime_agent_active_success_within_5": 0.0,
             "runtime_agent_next_level_first_try_acc": 0.0,
             "runtime_agent_next_level_with_session_reset_acc": 0.0,
             "runtime_agent_post_failure_repeat_top1_rate": 0.0,
@@ -1169,6 +1361,7 @@ def _runtime_agent_active_metrics(
             "runtime_agent_act_path_active_success_within_1": 0.0,
             "runtime_agent_act_path_active_success_within_2": 0.0,
             "runtime_agent_act_path_active_success_within_3": 0.0,
+            "runtime_agent_act_path_active_success_within_5": 0.0,
             "runtime_agent_act_path_next_level_first_try_acc": 0.0,
             "runtime_agent_act_path_next_level_with_session_reset_acc": 0.0,
             "runtime_agent_act_path_bridge_selected_action_match_rate": 0.0,
@@ -1231,7 +1424,7 @@ def _runtime_agent_active_metrics(
             query = session.levels[1].example
             decisions = agent.score_actions_for_state(query.state, query.legal_actions)
             selected_action = max(decisions.values(), key=lambda decision: decision.score).action
-            next_hits.append(float(query.legal_actions.index(selected_action) == int(query.correct_action_index)))
+            next_hits.append(float(_is_positive_index(query, int(query.legal_actions.index(selected_action)))))
             reset_agent = LearnedOnlineObjectEventAgent(
                 seed=0,
                 config=model.config,
@@ -1242,7 +1435,7 @@ def _runtime_agent_active_metrics(
             reset_agent.model.load_state_dict(base_state)
             reset_decisions = reset_agent.score_actions_for_state(query.state, query.legal_actions)
             reset_action = max(reset_decisions.values(), key=lambda decision: decision.score).action
-            reset_hits.append(float(query.legal_actions.index(reset_action) == int(query.correct_action_index)))
+            reset_hits.append(float(_is_positive_index(query, int(query.legal_actions.index(reset_action)))))
     values = np.asarray(success_steps, dtype=np.float32)
     metrics = {
         "runtime_agent_rank_logits_used": float(np.mean(rank_used)) if rank_used else 0.0,
@@ -1251,6 +1444,7 @@ def _runtime_agent_active_metrics(
         "runtime_agent_active_success_within_1": float(np.mean(values <= 1.0)),
         "runtime_agent_active_success_within_2": float(np.mean(values <= 2.0)),
         "runtime_agent_active_success_within_3": float(np.mean(values <= 3.0)),
+        "runtime_agent_active_success_within_5": float(np.mean(values <= 5.0)),
         "runtime_agent_next_level_first_try_acc": float(np.mean(next_hits)) if next_hits else 0.0,
         "runtime_agent_next_level_with_session_reset_acc": float(np.mean(reset_hits)) if reset_hits else 0.0,
         "runtime_agent_post_failure_repeat_top1_rate": float(np.mean(repeat_hits)) if repeat_hits else 0.0,
@@ -1284,6 +1478,12 @@ def _runtime_agent_act_path_metrics(
     legal_counts: list[float] = []
     bridge_matches: list[float] = []
     online_counts: list[float] = []
+    exact_repeat_hits: list[float] = []
+    near_repeat_hits: list[float] = []
+    failed_deltas: list[float] = []
+    same_streaks: list[float] = []
+    unique_counts: list[float] = []
+    no_effect_count = 0
     forbidden_count = 0
     for session_index, session in enumerate(sessions):
         agent = LearnedOnlineObjectEventAgent(
@@ -1298,10 +1498,14 @@ def _runtime_agent_act_path_metrics(
         first_level = session.levels[0]
         first_example = first_level.example
         step_success = max_steps_per_level + 1
+        selected_actions_for_level: list[str] = []
+        first_failed_action: str | None = None
+        first_failed_score = 0.0
         for step in range(1, max_steps_per_level + 1):
             observation = _grid_observation_from_state(first_example.state, first_example.legal_actions, step_index=step - 1)
             selected_action = agent.act(observation)
             selected = int(first_example.legal_actions.index(selected_action))
+            selected_actions_for_level.append(selected_action)
             diagnostics = agent.diagnostics()
             rank_used.append(float(bool(diagnostics.get("runtime_rank_logits_used", False))))
             legal_counts.append(float(diagnostics.get("legal_action_count", 0) or 0))
@@ -1323,13 +1527,24 @@ def _runtime_agent_act_path_metrics(
             if result.success:
                 step_success = step
                 break
+            if first_failed_action is None:
+                no_effect_count += 1
+                first_failed_action = selected_action
+                first_failed_score = float(agent.last_scores.get(selected_action, 0.0))
+                retry_scores = agent.score_actions_for_state(first_example.state, first_example.legal_actions)
+                retry_selected_action = max(retry_scores.values(), key=lambda decision: decision.score).action
+                exact_repeat_hits.append(float(retry_selected_action == first_failed_action))
+                near_repeat_hits.append(float(_is_near_repeat_action(first_failed_action, retry_selected_action, first_example)))
+                failed_deltas.append(float(retry_scores[first_failed_action].score) - first_failed_score)
         success_steps.append(step_success)
+        same_streaks.append(float(_max_same_action_streak(selected_actions_for_level)))
+        unique_counts.append(float(len(set(selected_actions_for_level))))
         online_counts.append(float(agent.online_update_count))
         if len(session.levels) > 1:
             query = session.levels[1].example
             query_observation = _grid_observation_from_state(query.state, query.legal_actions, step_index=0)
             selected_action = agent.act(query_observation)
-            next_hits.append(float(query.legal_actions.index(selected_action) == int(query.correct_action_index)))
+            next_hits.append(float(_is_positive_index(query, int(query.legal_actions.index(selected_action)))))
             reset_agent = LearnedOnlineObjectEventAgent(
                 seed=session_index,
                 config=config,
@@ -1339,7 +1554,7 @@ def _runtime_agent_act_path_metrics(
             )
             reset_agent.model.load_state_dict(model_state)
             reset_action = reset_agent.act(query_observation)
-            reset_hits.append(float(query.legal_actions.index(reset_action) == int(query.correct_action_index)))
+            reset_hits.append(float(_is_positive_index(query, int(query.legal_actions.index(reset_action)))))
     values = np.asarray(success_steps, dtype=np.float32)
     return {
         "runtime_agent_act_path_rank_logits_used": float(np.mean(rank_used)) if rank_used else 0.0,
@@ -1347,11 +1562,20 @@ def _runtime_agent_act_path_metrics(
         "runtime_agent_act_path_active_success_within_1": float(np.mean(values <= 1.0)),
         "runtime_agent_act_path_active_success_within_2": float(np.mean(values <= 2.0)),
         "runtime_agent_act_path_active_success_within_3": float(np.mean(values <= 3.0)),
+        "runtime_agent_act_path_active_success_within_5": float(np.mean(values <= 5.0)),
         "runtime_agent_act_path_next_level_first_try_acc": float(np.mean(next_hits)) if next_hits else 0.0,
         "runtime_agent_act_path_next_level_with_session_reset_acc": float(np.mean(reset_hits)) if reset_hits else 0.0,
         "runtime_agent_act_path_bridge_selected_action_match_rate": float(np.mean(bridge_matches)) if bridge_matches else 0.0,
         "runtime_agent_act_path_metadata_model_input_forbidden_count": float(forbidden_count),
         "runtime_agent_act_path_online_update_count_mean": float(np.mean(online_counts)) if online_counts else 0.0,
+        "runtime_agent_act_path_self_selected_no_effect_count": float(no_effect_count),
+        "runtime_agent_act_path_failed_exact_repeat_top1_rate": float(np.mean(exact_repeat_hits)) if exact_repeat_hits else 0.0,
+        "runtime_agent_act_path_failed_near_repeat_top1_rate": float(np.mean(near_repeat_hits)) if near_repeat_hits else 0.0,
+        "runtime_agent_act_path_failed_action_score_delta_mean": float(np.mean(failed_deltas)) if failed_deltas else 0.0,
+        "runtime_agent_act_path_post_failure_candidate_switch_rate": float(1.0 - np.mean(exact_repeat_hits)) if exact_repeat_hits else 0.0,
+        "runtime_agent_act_path_max_same_action_streak_mean": float(np.mean(same_streaks)) if same_streaks else 0.0,
+        "runtime_agent_act_path_max_same_action_streak_max": float(np.max(same_streaks)) if same_streaks else 0.0,
+        "runtime_agent_act_path_unique_action_count_mean": float(np.mean(unique_counts)) if unique_counts else 0.0,
     }
 
 
@@ -1384,6 +1608,11 @@ def _synthetic_transition(example: ObjectEventExample, action: str, result: Any)
 
 def _top1(logits: torch.Tensor, actual: torch.Tensor) -> float:
     return float(torch.mean((torch.argmax(logits, dim=-1) == actual).float()).detach().cpu())
+
+
+def _top1_positive(logits: torch.Tensor, tensors: dict[str, Any]) -> float:
+    selected = torch.argmax(logits, dim=-1)
+    return float(torch.mean(_selected_is_positive(tensors, selected).float()).detach().cpu())
 
 
 def _mean_entropy(logits: torch.Tensor) -> torch.Tensor:

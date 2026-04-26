@@ -5316,3 +5316,125 @@ GPT-Pro post-crash guardrail on 2026-04-25:
 - score all generated legal actions before and after update; failed actions must remain legal and finite-scored
 - fast commit gate target: 447 actions, extracted state, full bridge match, no leakage, within-5 at least 0.60, repeated-failure metrics improved
 - promotion gate target before another real ARC diagnostic: within-5 at least 0.70, within-3 at least 0.45, next-level first try at least 0.60, exact repeats at most 0.10, near repeats at most 0.25, max same-action streak at most 5
+
+## Entry 081: 2026-04-25 / ARC-Scale Parametric Object-Event Curriculum
+
+Iteration objective:
+
+- close the synthetic/real action-surface mismatch without using forbidden search, scripted probes, graph/frontier control, replay, or per-game behavior
+
+Implemented:
+
+- `arcagi/learned_online/object_event_curriculum.py`
+  - added `arc_scale_parametric` synthetic surfaces with requested action counts such as `447`
+  - generated 64-coordinate click actions over 8x8 synthetic grids using display metadata compatible with ARC tokenization
+  - added `positive_action_mask` / `positive_action_indices` while keeping legacy `correct_action_index`
+  - made active synthetic success accept any positive click in the target region
+  - preserved interface display inventory through raw observation reconstruction
+- `arcagi/learned_online/object_event_model.py`
+  - added learned/evidence-updated failed-action memory slices in level-local belief
+  - failed actions remain legal and finite-scored; there is no blacklist, hard no-repeat rule, frontier, or replay controller
+  - added multi-positive rank loss support
+- `scripts/train_learned_online_object_event.py`
+  - added `--action-surface`, `--action-surface-size`, `--coordinate-grid-size`, `--empty-click-fraction`, `--positive-region-radius`, and `--max-steps-per-level`
+  - added metrics for action-surface size, positive masks, no-effect repeats, near repeats, score drops, same-action streaks, and true runtime `act -> update_after_step` performance
+- `arcagi/agents/learned_online_object_event_agent.py`
+  - relaxed checkpoint loading for the added learned memory parameters
+- tests
+  - added parametric action-surface tests for display mapping, multi-positive success, extraction/bridge integrity, forbidden metadata exclusion, and learned failed-action memory without hard masking
+
+Verification:
+
+- focused parametric/runtime/agent tests:
+  - `python -m pytest tests/test_object_event_parametric_action_surface.py tests/test_object_event_runtime_extraction.py tests/test_learned_online_object_event_agent_contracts.py -q`
+  - `31 passed`
+- full object-event suite:
+  - `python -m pytest tests/test_object_event_tokens.py tests/test_object_event_curriculum.py tests/test_object_event_online_adaptation.py tests/test_object_event_model_learning.py tests/test_learned_online_object_event_agent_contracts.py tests/test_object_event_bridge_contracts.py tests/test_object_event_active_variable_palette.py tests/test_object_event_runtime_extraction.py tests/test_object_event_parametric_action_surface.py -q`
+  - `77 passed`
+- recurrent regression:
+  - `python -m pytest tests/test_learned_online_recurrent_gates.py tests/test_learned_online_sequence_curriculum.py -q`
+  - `31 passed`
+
+Fast 447-action gate:
+
+- command:
+  - `python scripts\train_learned_online_object_event.py --mode synthetic_active_online_object_event --curriculum latent_rule_variable_palette --state-source extracted --action-surface arc_scale_parametric --action-surface-size 447 --coordinate-grid-size 64 --empty-click-fraction 0.80 --positive-region-radius 1 --seed 0 --steps 120 --batch-size 8 --train-sessions 32 --heldout-sessions 32 --levels-per-session 3 --max-distractors 2 --palette-size 8 --require-role-balanced-colors --max-steps-per-level 5 --eval-every 40 --eval-runtime-agent --save-best --selection-metric runtime_agent_act_path_active_success_within_5 --save-path artifacts/object_event_parametric_runtime_probe.pkl`
+- saved summary:
+  - `checkpoint_best_step = 120`
+  - `runtime_agent_act_path_num_legal_actions_mean = 447.0`
+  - `runtime_agent_act_path_active_success_within_3 = 0.84375`
+  - `runtime_agent_act_path_active_success_within_5 = 0.84375`
+  - `runtime_agent_act_path_next_level_first_try_acc = 0.6875`
+  - `runtime_agent_act_path_failed_exact_repeat_top1_rate = 0.0`
+  - `runtime_agent_act_path_failed_near_repeat_top1_rate = 0.0`
+  - `runtime_agent_act_path_failed_action_score_delta_mean = -4.1590`
+  - `runtime_agent_act_path_max_same_action_streak_max = 3.0`
+  - `runtime_agent_act_path_unique_action_count_mean = 1.875`
+
+Promotion 447-action gate:
+
+- command:
+  - `python scripts\train_learned_online_object_event.py --mode synthetic_active_online_object_event --curriculum latent_rule_variable_palette --state-source extracted --action-surface arc_scale_parametric --action-surface-size 447 --coordinate-grid-size 64 --empty-click-fraction 0.80 --positive-region-radius 1 --seed 0 --steps 200 --batch-size 8 --train-sessions 48 --heldout-sessions 48 --levels-per-session 3 --max-distractors 2 --palette-size 8 --require-role-balanced-colors --max-steps-per-level 5 --eval-every 50 --eval-runtime-agent --save-best --selection-metric runtime_agent_act_path_active_success_within_5 --save-path artifacts/object_event_parametric_runtime_probe.pkl`
+- saved summary:
+  - `checkpoint_best_step = 200`
+  - `checkpoint_selection_metric_value = 0.8333333333333334`
+  - `runtime_agent_act_path_num_legal_actions_mean = 447.0`
+  - `runtime_agent_act_path_active_success_within_3 = 0.8125`
+  - `runtime_agent_act_path_active_success_within_5 = 0.8333333333333334`
+  - `runtime_agent_act_path_next_level_first_try_acc = 0.8125`
+  - `runtime_agent_act_path_failed_exact_repeat_top1_rate = 0.0`
+  - `runtime_agent_act_path_failed_near_repeat_top1_rate = 0.10714285714285714`
+  - `runtime_agent_act_path_post_failure_candidate_switch_rate = 1.0`
+  - `runtime_agent_act_path_failed_action_score_delta_mean = -3.8333937792311863`
+  - `runtime_agent_act_path_max_same_action_streak_max = 3.0`
+  - `runtime_agent_act_path_metadata_model_input_forbidden_count = 0.0`
+
+Dense 68-action regression:
+
+- command:
+  - `python scripts\train_learned_online_object_event.py --mode synthetic_active_online_object_event --curriculum latent_rule_variable_palette --state-source extracted --action-surface dense_8x8 --seed 0 --steps 150 --batch-size 16 --train-sessions 48 --heldout-sessions 48 --levels-per-session 3 --max-distractors 1 --palette-size 8 --require-role-balanced-colors --eval-every 50 --eval-runtime-agent --no-save`
+- final:
+  - `runtime_agent_act_path_num_legal_actions_mean = 68.0`
+  - `runtime_agent_act_path_active_success_within_3 = 0.875`
+  - `runtime_agent_act_path_active_success_within_5 = 1.0`
+  - `runtime_agent_act_path_next_level_first_try_acc = 0.7083333333333334`
+  - no metadata leakage
+
+Real ARC diagnostic:
+
+- command:
+  - `.venv313\Scripts\python.exe -m arcagi.evaluation.harness arc --agent learned_online_object_event --checkpoint-path artifacts/object_event_parametric_runtime_probe.pkl --mode offline --game-limit 1 --max-steps 48 --progress-every 8 --object-event-bridge-diagnostics`
+- result on `ar25-0c556536`:
+  - `success = false`
+  - `won = false`
+  - `levels_completed = 0`
+  - `return = 0.0`
+  - `legal_action_count = 447`
+  - `scored_action_count = 447`
+  - no action-surface cap, oracle support, trace replay, graph controller, or metadata leakage
+  - `object_event_online_update_count = 48`
+  - `runtime_rank_logits_used = true`
+  - `runtime_greedy_rank_selection = true`
+  - `session_belief_norm = 52.90283966064453`
+  - `level_belief_norm = 117.89612579345703`
+  - final observed outcome is no-effect
+  - action histogram collapsed around one vertical coordinate column:
+    - `click:31:31 = 14`
+    - `click:31:34 = 15`
+    - `click:31:37 = 15`
+  - `max_same_action_streak = 11`
+
+Current interpretation:
+
+- the parametric synthetic surface and true runtime extraction gate are now materially better aligned with real ARC action counts
+- the real ARC run still fails; the immediate failure signature is near-repeat coordinate-column collapse after no-effect evidence
+- the synthetic repeat/no-effect memory does not yet transfer strongly enough to real ARC continuous coordinates
+- the next change must improve learned/evidence-updated coordinate-neighborhood no-effect belief while keeping all actions legal and finite-scored
+- the `48`-step ARC diagnostic is a harsh hygiene cutoff only, not a fair final competence budget for an online agent that must infer the game from scratch
+- use short ARC runs to detect collapse/forbidden behavior, then longer runs to judge online acquisition; prior real AR25 progress reportedly required roughly `300` steps
+
+Next execution slice:
+
+- push this focused parametric implementation
+- ask GPT-Pro to review the pushed commit and this failure signature
+- likely next implementation target, pending GPT-Pro consensus: stronger learned/evidence-updated continuous coordinate no-effect memory or uncertainty revision, not hard masks, scripted probes, graph/frontier control, replay, or per-game logic

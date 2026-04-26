@@ -12,8 +12,12 @@ from arcagi.core.types import GridObservation, ObjectState, StructuredState, Tra
 from arcagi.evaluation.harness import build_agent
 from arcagi.learned_online.event_tokens import OUT_NO_EFFECT_NONPROGRESS, OUT_VISIBLE_CHANGE, OUT_VISIBLE_ONLY_NONPROGRESS
 from arcagi.learned_online.object_event_curriculum import (
+    ActiveOnlineObjectEventConfig,
     OnlineObjectEventCurriculumConfig,
+    apply_synthetic_object_event_action,
+    build_active_online_object_event_curriculum,
     build_online_object_event_curriculum,
+    level_to_grid_observation,
 )
 from arcagi.learned_online.object_event_model import ObjectEventModelOutput
 
@@ -298,6 +302,59 @@ def test_object_event_agent_has_no_forbidden_controller_attributes() -> None:
     assert not hasattr(agent, "rule_inducer")
 
 
+def test_object_event_agent_scores_arc_scale_parametric_surface_without_cap() -> None:
+    level = _parametric_level()
+    agent = LearnedOnlineObjectEventAgent(seed=21, device="cpu", temperature=0.1, epsilon_floor=0.0)
+
+    action = agent.act(level_to_grid_observation(level))
+    diagnostics = agent.diagnostics()
+
+    assert action in level.example.legal_actions
+    assert diagnostics["legal_action_count"] == 447
+    assert diagnostics["scored_action_count"] == 447
+    assert diagnostics["full_dense_surface_scored"] is True
+    assert diagnostics["object_event_action_surface_capped"] is False
+    assert diagnostics["runtime_graph_search_solver"] is False
+    assert diagnostics["runtime_action_pattern_enumerator"] is False
+    assert diagnostics["runtime_external_api_or_knowledge"] is False
+
+
+def test_object_event_agent_parametric_no_effect_update_keeps_failed_action_scored() -> None:
+    level = _parametric_level()
+    example = level.example
+    failed = next(index for index, value in enumerate(example.candidate_targets.value) if float(value) == 0.0)
+    failed_action = example.legal_actions[failed]
+    agent = LearnedOnlineObjectEventAgent(seed=22, device="cpu", temperature=0.1, epsilon_floor=0.0)
+    with torch.no_grad():
+        agent.model.failed_action_memory_rank.rank_mlp[-1].weight.fill_(-0.25)
+        agent.model.failed_action_memory_rank.rank_mlp[-1].bias.zero_()
+
+    before = agent.score_actions_for_state(example.state, example.legal_actions)
+    result = apply_synthetic_object_event_action(level, failed)
+    agent.on_transition(
+        Transition(
+            state=example.state,
+            action=failed_action,
+            reward=0.0,
+            next_state=example.state,
+            terminated=False,
+            info={"score_delta": 0.0},
+        )
+    )
+    after = agent.score_actions_for_state(example.state, example.legal_actions)
+    diagnostics = agent.diagnostics()
+
+    assert diagnostics["online_update_count"] == 1
+    assert result.no_effect is True
+    assert failed_action in after
+    assert np.isfinite(after[failed_action].score)
+    assert diagnostics["legal_action_count"] == 447
+    assert diagnostics["scored_action_count"] == 447
+    assert after[failed_action].score != before[failed_action].score
+    assert not hasattr(agent, "action_sequence")
+    assert not hasattr(agent, "state_hash_to_action")
+
+
 def test_harness_alias_loads_object_event_checkpoint(tmp_path: Path) -> None:
     agent = LearnedOnlineObjectEventAgent(seed=11, device="cpu")
     path = tmp_path / "agent.pkl"
@@ -382,3 +439,24 @@ def _object(object_id: str, color: int, cell: tuple[int, int]) -> ObjectState:
         area=1,
         tags=(),
     )
+
+
+def _parametric_level():
+    split = build_active_online_object_event_curriculum(
+        ActiveOnlineObjectEventConfig(
+            seed=333,
+            train_sessions=1,
+            heldout_sessions=0,
+            levels_per_session=3,
+            max_distractors=2,
+            curriculum="latent_rule_variable_palette",
+            palette_size=8,
+            require_role_balanced_colors=True,
+            action_surface="arc_scale_parametric",
+            action_surface_size=447,
+            coordinate_grid_size=64,
+            empty_click_fraction=0.80,
+            positive_region_radius=1,
+        )
+    )
+    return split.train[0].levels[0]

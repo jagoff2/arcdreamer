@@ -39,6 +39,8 @@ class ObjectEventModelConfig:
     ff_mult: int = 4
     dropout: float = 0.05
     online_rank: int = 8
+    relation_key_dim: int = 8
+    failed_action_key_dim: int = 12
     outcome_dim: int = OUTCOME_DIM
     delta_dim: int = STATE_DELTA_DIM
 
@@ -225,6 +227,8 @@ class EventRelationMemoryRank(nn.Module):
         direct = torch.zeros_like(key)
         if self.key_dim > 0:
             direct[..., 0] = cue_features[..., 0]
+        if self.key_dim > 1:
+            direct[..., 1] = cue_features[..., 9]
         return torch.tanh(0.1 * key + direct)
 
     def target_key_features(self, target_features: torch.Tensor) -> torch.Tensor:
@@ -298,8 +302,8 @@ class EventRelationMemoryRank(nn.Module):
         neg_target_scalar = neg_same_target[..., 0]
         level_neg_target_scalar = level_neg_same_target[..., 0]
         pos_strength = torch.clamp(pos_cue[:, :1].abs(), 0.0, 1.0)
-        neg_strength = torch.clamp(neg_cue[:, :1].abs(), 0.0, 1.0)
-        level_neg_strength = torch.clamp(level_neg_cue[:, :1].abs(), 0.0, 1.0)
+        neg_strength = torch.clamp(neg_cue[:, : min(2, key_dim)].abs().max(dim=-1, keepdim=True).values, 0.0, 1.0)
+        level_neg_strength = torch.clamp(level_neg_cue[:, : min(2, key_dim)].abs().max(dim=-1, keepdim=True).values, 0.0, 1.0)
         same_relation = pos_cue_scalar * pos_target_scalar + (1.0 - pos_cue_scalar) * (1.0 - pos_target_scalar)
         different_relation = neg_cue_scalar * (1.0 - neg_target_scalar) + (1.0 - neg_cue_scalar) * neg_target_scalar
         candidate_contains = candidate_target_features[..., 11] * (1.0 - candidate_target_features[..., 24])
@@ -331,10 +335,84 @@ class EventRelationMemoryRank(nn.Module):
         return self.rank_mlp(features).squeeze(-1) + relation_prior
 
 
+class FailedActionMemoryRank(nn.Module):
+    def __init__(
+        self,
+        *,
+        action_feature_dim: int,
+        belief_dim: int,
+        key_dim: int,
+        start: int,
+        dropout: float,
+    ) -> None:
+        super().__init__()
+        self.key_dim = int(key_dim)
+        self.start = int(start)
+        self.belief_dim = int(belief_dim)
+        self.action_key = nn.Sequential(
+            nn.LayerNorm(action_feature_dim),
+            nn.Linear(action_feature_dim, self.key_dim),
+            nn.Tanh(),
+        )
+        feature_dim = 5 * self.key_dim
+        self.rank_mlp = nn.Sequential(
+            nn.LayerNorm(feature_dim),
+            nn.Linear(feature_dim, 2 * self.key_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(2 * self.key_dim, 1),
+        )
+        nn.init.zeros_(self.rank_mlp[-1].weight)
+        nn.init.zeros_(self.rank_mlp[-1].bias)
+
+    @property
+    def stop(self) -> int:
+        return int(self.start + self.key_dim)
+
+    def observed_delta(
+        self,
+        *,
+        selected_action_numeric: torch.Tensor,
+        no_effect_gate: torch.Tensor,
+    ) -> torch.Tensor:
+        key = self.action_key(selected_action_numeric)
+        delta = selected_action_numeric.new_zeros((selected_action_numeric.shape[0], self.belief_dim))
+        delta[:, self.start : self.stop] = no_effect_gate.reshape(-1, 1) * key
+        return delta
+
+    def rank_delta(
+        self,
+        *,
+        candidate_action_numeric: torch.Tensor,
+        level_belief: torch.Tensor,
+    ) -> torch.Tensor:
+        candidate = self.action_key(candidate_action_numeric)
+        failed = level_belief[:, None, self.start : self.stop]
+        same = _soft_same(candidate, failed.expand_as(candidate))
+        features = torch.cat(
+            [
+                candidate,
+                failed.expand_as(candidate),
+                same,
+                candidate * failed,
+                torch.abs(candidate - failed),
+            ],
+            dim=-1,
+        )
+        return self.rank_mlp(features).squeeze(-1)
+
+
 class RawCandidateStateRank(nn.Module):
-    def __init__(self, d_model: int, dropout: float, relation_memory: EventRelationMemoryRank) -> None:
+    def __init__(
+        self,
+        d_model: int,
+        dropout: float,
+        relation_memory: EventRelationMemoryRank,
+        failed_action_memory: FailedActionMemoryRank,
+    ) -> None:
         super().__init__()
         self.relation_memory = relation_memory
+        self.failed_action_memory = failed_action_memory
         input_dim = ACTION_NUMERIC_DIM + (4 * STATE_NUMERIC_DIM) + (2 * STATE_NUMERIC_DIM) + (4 * d_model)
         self.rank_mlp = nn.Sequential(
             nn.LayerNorm(input_dim),
@@ -401,11 +479,28 @@ class RawCandidateStateRank(nn.Module):
             session_belief=session_belief,
             level_belief=level_belief,
         )
-        return self.rank_mlp(features).squeeze(-1) + relation_rank
+        failed_action_rank = self.failed_action_memory.rank_delta(
+            candidate_action_numeric=action_numeric,
+            level_belief=level_belief,
+        )
+        return self.rank_mlp(features).squeeze(-1) + relation_rank + failed_action_rank
 
 
 def _soft_same(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
     return torch.exp(-20.0 * torch.abs(left - right))
+
+
+def _multi_positive_rank_ce(
+    logits: torch.Tensor,
+    positive_mask: torch.Tensor,
+    action_mask: torch.Tensor,
+) -> torch.Tensor:
+    valid = action_mask.bool()
+    positives = positive_mask.bool() & valid
+    safe_logits = logits.masked_fill(~valid, -1.0e9)
+    log_probs = torch.log_softmax(safe_logits, dim=-1)
+    pos_log_probs = log_probs.masked_fill(~positives, -1.0e9)
+    return -torch.logsumexp(pos_log_probs, dim=-1).mean()
 
 
 def _masked_mean(
@@ -468,14 +563,25 @@ class ObjectEventModel(nn.Module):
             target_feature_dim=ACTION_NUMERIC_DIM,
             outcome_dim=int(self.config.outcome_dim),
             belief_dim=d_model,
-            key_dim=max(4, min(16, d_model // 5)),
+            key_dim=max(2, min(int(self.config.relation_key_dim), max(d_model // 8, 2))),
             dropout=float(self.config.dropout),
         )
+        relation_width = int(self.event_relation_memory_rank.key_dim * 5)
+        failed_key_dim = max(2, min(int(self.config.failed_action_key_dim), max(d_model - relation_width, 2)))
+        self.failed_action_memory_rank = FailedActionMemoryRank(
+            action_feature_dim=ACTION_NUMERIC_DIM,
+            belief_dim=d_model,
+            key_dim=failed_key_dim,
+            start=relation_width,
+            dropout=float(self.config.dropout),
+        )
+        self.reserved_belief_width = min(int(relation_width + failed_key_dim), d_model)
         self.candidate_state_compat = CandidateStateCompatibility(d_model, float(self.config.dropout))
         self.raw_candidate_rank = RawCandidateStateRank(
             d_model,
             float(self.config.dropout),
             self.event_relation_memory_rank,
+            self.failed_action_memory_rank,
         )
         self.rank_score_head = nn.Linear(d_model, 1)
         nn.init.normal_(self.rank_score_head.weight, mean=0.0, std=0.02)
@@ -673,17 +779,22 @@ class ObjectEventModel(nn.Module):
                 target_features=chosen_action,
                 outcome_targets=target_outcome,
             )
+            failed_action_delta = self.failed_action_memory_rank.observed_delta(
+                selected_action_numeric=chosen_action,
+                no_effect_gate=target_outcome[:, OUT_NO_EFFECT_NONPROGRESS],
+            )
         else:
             direct = raw_context.new_zeros((raw_context.shape[0], self.config.d_model))
+            failed_action_delta = raw_context.new_zeros((raw_context.shape[0], self.config.d_model))
         learned = self.observed_event_belief_encoder(torch.cat([raw_context, event], dim=-1))
         learned = 0.05 * learned
-        relation_width = min(self.event_relation_memory_rank.key_dim * 5, learned.shape[1])
-        if relation_width > 0:
+        reserved_width = min(int(self.reserved_belief_width), learned.shape[1])
+        if reserved_width > 0:
             learned = learned.clone()
-            learned[:, :relation_width] = 0.0
+            learned[:, :reserved_width] = 0.0
         session_delta = torch.tanh(direct + learned)
         no_effect_gate = target_outcome[:, OUT_NO_EFFECT_NONPROGRESS].reshape(-1, 1)
-        level_delta = torch.tanh(direct + learned * (0.5 + no_effect_gate))
+        level_delta = torch.tanh(direct + failed_action_delta + learned * (0.5 + no_effect_gate))
         return ObservedEventBeliefDelta(session_delta=session_delta, level_delta=level_delta)
 
     def loss(
@@ -741,7 +852,10 @@ class ObjectEventModel(nn.Module):
             pos_weight = (negatives / positives).detach()
             value_loss = F.binary_cross_entropy_with_logits(masked_logits, masked_targets, pos_weight=pos_weight)
         rank_logits = policy_rank_logits_from_predictions(output, action_mask)
-        rank_loss = F.cross_entropy(rank_logits, actual_action_index)
+        if candidate_value_targets is not None:
+            rank_loss = _multi_positive_rank_ce(rank_logits, candidate_value_targets > 0.5, action_mask)
+        else:
+            rank_loss = F.cross_entropy(rank_logits, actual_action_index)
         anchor = self.online_adapter.up.weight.square().mean()
         anchor = anchor + self.fast_outcome_head.weight.square().mean()
         anchor = anchor + self.fast_delta_head.weight.square().mean()
