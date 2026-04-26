@@ -283,6 +283,7 @@ def test_object_event_checkpoint_roundtrip_contains_anti_replay_metadata(tmp_pat
     assert metadata["online_update_from_transition_error"] is True
     assert "session_belief" in metadata["online_update_params"]
     assert "level_belief" in metadata["online_update_params"]
+    assert "level_belief_action_basis_slots" in metadata["online_update_params"]
     assert "level_belief_action_family_slots" in metadata["online_update_params"]
     _assert_no_forbidden_payload_keys(checkpoint)
 
@@ -362,6 +363,9 @@ def test_object_event_agent_parametric_no_effect_update_keeps_failed_action_scor
     assert float(diagnostics["action_family_belief_norm"]) > 0.0
     assert float(diagnostics["action_family_evidence_count"]) > 0.0
     assert float(diagnostics["action_family_noeffect_count"]) > 0.0
+    assert float(diagnostics["action_basis_belief_norm"]) > 0.0
+    assert float(diagnostics["action_basis_evidence_count"]) > 0.0
+    assert float(diagnostics["action_basis_noeffect_count"]) > 0.0
     assert "rank_component_axis_noeffect_std" in diagnostics
     assert "rank_component_relation_std" in diagnostics
     assert "rank_component_axis_noeffect_raw_std" in diagnostics
@@ -381,13 +385,19 @@ def test_object_event_agent_parametric_no_effect_update_keeps_failed_action_scor
     assert "diagnostic_mix_model_value" in diagnostics
     assert "action_family_belief_uncertainty_mean" in diagnostics
     assert "action_family_belief_noeffect_mean" in diagnostics
+    assert "action_basis_belief_uncertainty_mean" in diagnostics
+    assert "action_basis_belief_noeffect_mean" in diagnostics
     assert "family_assignment_effective_count" in diagnostics
     assert "family_assignment_usage_max" in diagnostics
+    assert "basis_assignment_effective_count" in diagnostics
+    assert "basis_assignment_usage_max" in diagnostics
     assert np.isfinite(float(diagnostics["rank_component_gate_relation"]))
     assert np.isfinite(float(diagnostics["relation_object_prior_scale"]))
     assert np.isfinite(float(diagnostics["runtime_learned_diagnostic_utility_std"]))
     assert np.isfinite(float(diagnostics["action_family_belief_uncertainty_mean"]))
     assert np.isfinite(float(diagnostics["family_assignment_effective_count"]))
+    assert np.isfinite(float(diagnostics["action_basis_belief_uncertainty_mean"]))
+    assert np.isfinite(float(diagnostics["basis_assignment_effective_count"]))
     assert 0.0 <= float(diagnostics["runtime_diagnostic_mix"]) <= 1.0
     assert after[failed_action].score != before[failed_action].score
     for forbidden in (
@@ -405,6 +415,8 @@ def test_object_event_agent_parametric_no_effect_update_keeps_failed_action_scor
         "untried",
         "tried_families",
         "family_blacklist",
+        "basis_blacklist",
+        "visited_basis",
         "probe_counter",
     ):
         assert not hasattr(agent, forbidden)

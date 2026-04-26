@@ -35,6 +35,10 @@ DEFAULT_OBJECT_EVENT_LOSS_WEIGHTS = {
     "delta": 0.05,
 }
 
+ACTION_FEATURE_CONTAINS_OBJECT = 11
+ACTION_FEATURE_RELATED_OBJECT_PRESENT = 12
+ACTION_FEATURE_RELATED_OBJECT_AGENT_TAG = 24
+
 
 @dataclass(frozen=True)
 class ObjectEventModelConfig:
@@ -52,6 +56,9 @@ class ObjectEventModelConfig:
     action_family_count: int = 8
     action_family_key_dim: int = 16
     action_family_temperature: float = 0.25
+    action_basis_coordinate_centers: int = 3
+    action_basis_mapped_centers: int = 2
+    action_basis_object_bases: bool = True
     outcome_dim: int = OUTCOME_DIM
     delta_dim: int = STATE_DELTA_DIM
 
@@ -110,6 +117,7 @@ class ObjectEventModelOutput:
     action_family_logits: torch.Tensor | None = None
     action_family_probs: torch.Tensor | None = None
     action_family_posterior_features: torch.Tensor | None = None
+    action_basis_posterior_features: torch.Tensor | None = None
     candidate_state_attn: torch.Tensor | None = None
     rank_components: RankComponentOutput | None = None
 
@@ -866,6 +874,137 @@ class ActionFamilyBelief(nn.Module):
         )
 
 
+class ActionBasisBelief(nn.Module):
+    def __init__(
+        self,
+        *,
+        belief_dim: int,
+        start: int,
+        coordinate_centers: int = 3,
+        mapped_centers: int = 2,
+        include_object_bases: bool = True,
+        max_bases: int | None = None,
+    ) -> None:
+        super().__init__()
+        self.start = int(start)
+        self.coordinate_centers = max(int(coordinate_centers), 0)
+        self.mapped_center_count = max(int(mapped_centers), 0)
+        self.include_object_bases = bool(include_object_bases)
+        self.num_object = 4 if self.include_object_bases else 0
+        requested = (self.coordinate_centers * self.coordinate_centers) + (self.mapped_center_count * self.mapped_center_count) + self.num_object
+        if max_bases is not None:
+            requested = min(requested, max(int(max_bases), 0))
+        self.num_bases = max(int(requested), 0)
+        self.width = 3 * self.num_bases
+        self.stop = self.start + self.width
+        self.belief_dim = int(belief_dim)
+        if self.coordinate_centers > 0:
+            screen = torch.linspace(0.125, 0.875, self.coordinate_centers)
+            sx, sy = torch.meshgrid(screen, screen, indexing="xy")
+            screen_centers = torch.stack([sx.reshape(-1), sy.reshape(-1)], dim=-1)
+        else:
+            screen_centers = torch.zeros((0, 2), dtype=torch.float32)
+        if self.mapped_center_count > 0:
+            mapped = torch.linspace(0.125, 0.875, self.mapped_center_count)
+            mr, mc = torch.meshgrid(mapped, mapped, indexing="ij")
+            mapped_centers = torch.stack([mr.reshape(-1), mc.reshape(-1)], dim=-1)
+        else:
+            mapped_centers = torch.zeros((0, 2), dtype=torch.float32)
+        self.register_buffer("screen_basis_centers", screen_centers)
+        self.register_buffer("mapped_basis_centers", mapped_centers)
+
+    def basis(self, action_numeric: torch.Tensor) -> torch.Tensor:
+        if self.num_bases <= 0:
+            return action_numeric.new_zeros((*action_numeric.shape[:-1], 0))
+        is_click = action_numeric[..., ACTION_FEATURE_IS_CLICK : ACTION_FEATURE_IS_CLICK + 1].clamp(0.0, 1.0)
+        x = action_numeric[..., ACTION_FEATURE_CLICK_X : ACTION_FEATURE_CLICK_X + 1].clamp(0.0, 1.0)
+        y = action_numeric[..., ACTION_FEATURE_CLICK_Y : ACTION_FEATURE_CLICK_Y + 1].clamp(0.0, 1.0)
+        has_grid = action_numeric[..., ACTION_FEATURE_HAS_GRID_CELL : ACTION_FEATURE_HAS_GRID_CELL + 1].clamp(0.0, 1.0)
+        row = action_numeric[..., ACTION_FEATURE_GRID_ROW : ACTION_FEATURE_GRID_ROW + 1].clamp(0.0, 1.0)
+        col = action_numeric[..., ACTION_FEATURE_GRID_COL : ACTION_FEATURE_GRID_COL + 1].clamp(0.0, 1.0)
+        bases: list[torch.Tensor] = []
+        if self.include_object_bases:
+            contains_object = action_numeric[
+                ..., ACTION_FEATURE_CONTAINS_OBJECT : ACTION_FEATURE_CONTAINS_OBJECT + 1
+            ].clamp(0.0, 1.0)
+            related_object = action_numeric[
+                ..., ACTION_FEATURE_RELATED_OBJECT_PRESENT : ACTION_FEATURE_RELATED_OBJECT_PRESENT + 1
+            ].clamp(0.0, 1.0)
+            related_agent = action_numeric[
+                ..., ACTION_FEATURE_RELATED_OBJECT_AGENT_TAG : ACTION_FEATURE_RELATED_OBJECT_AGENT_TAG + 1
+            ].clamp(0.0, 1.0)
+            nonagent_object = related_object * (1.0 - related_agent)
+            empty_click = is_click * (1.0 - contains_object)
+            nonclick = 1.0 - is_click
+            bases.append(torch.cat([contains_object, nonagent_object, empty_click, nonclick], dim=-1))
+        if self.coordinate_centers > 0:
+            xy = torch.cat([x, y], dim=-1)
+            centers = self.screen_basis_centers.to(device=xy.device, dtype=xy.dtype)
+            screen_d2 = ((xy.unsqueeze(-2) - centers) ** 2).sum(dim=-1)
+            bases.append(torch.exp(-screen_d2 / 0.025) * is_click)
+        if self.mapped_center_count > 0:
+            rc = torch.cat([row, col], dim=-1)
+            centers = self.mapped_basis_centers.to(device=rc.device, dtype=rc.dtype)
+            mapped_d2 = ((rc.unsqueeze(-2) - centers) ** 2).sum(dim=-1)
+            bases.append(torch.exp(-mapped_d2 / 0.040) * is_click * has_grid)
+        raw = torch.cat(bases, dim=-1)[..., : self.num_bases]
+        return raw / raw.sum(dim=-1, keepdim=True).clamp_min(1.0e-6)
+
+    def observed_delta(
+        self,
+        *,
+        selected_action_numeric: torch.Tensor,
+        target_outcome: torch.Tensor,
+    ) -> torch.Tensor:
+        delta = selected_action_numeric.new_zeros((selected_action_numeric.shape[0], self.belief_dim))
+        if self.num_bases <= 0 or self.width <= 0:
+            return delta
+        basis = self.basis(selected_action_numeric)
+        success = (
+            target_outcome[:, OUT_OBJECTIVE_PROGRESS] + target_outcome[:, OUT_REWARD_PROGRESS]
+        ).clamp(0.0, 1.0).unsqueeze(-1)
+        no_effect = target_outcome[:, OUT_NO_EFFECT_NONPROGRESS].clamp(0.0, 1.0).unsqueeze(-1)
+        k = self.num_bases
+        delta[:, self.start : self.start + k] = basis
+        delta[:, self.start + k : self.start + 2 * k] = basis * success
+        delta[:, self.start + 2 * k : self.start + 3 * k] = basis * no_effect
+        return delta
+
+    def posterior_features(
+        self,
+        *,
+        candidate_action_numeric: torch.Tensor,
+        level_belief: torch.Tensor,
+    ) -> torch.Tensor:
+        shape = (*candidate_action_numeric.shape[:-1], 4)
+        if self.num_bases <= 0 or self.width <= 0:
+            return candidate_action_numeric.new_zeros(shape)
+        basis = self.basis(candidate_action_numeric)
+        k = self.num_bases
+        counts = level_belief[:, self.start : self.start + k].clamp_min(0.0)
+        successes = level_belief[:, self.start + k : self.start + 2 * k].clamp_min(0.0)
+        no_effects = level_belief[:, self.start + 2 * k : self.start + 3 * k].clamp_min(0.0)
+        alpha = 1.0 + successes
+        beta = 1.0 + no_effects
+        total = (alpha + beta).clamp_min(1.0e-6)
+        mean = alpha / total
+        variance = (alpha * beta) / ((total * total) * (total + 1.0)).clamp_min(1.0e-6)
+        uncertainty = torch.sqrt(variance.clamp_min(0.0))
+        candidate_mean = torch.einsum("bak,bk->ba", basis, mean)
+        candidate_uncertainty = torch.einsum("bak,bk->ba", basis, uncertainty)
+        candidate_count = torch.einsum("bak,bk->ba", basis, counts)
+        candidate_noeffect = torch.einsum("bak,bk->ba", basis, no_effects)
+        return torch.stack(
+            [
+                candidate_mean,
+                candidate_uncertainty,
+                torch.tanh(candidate_count),
+                torch.tanh(candidate_noeffect),
+            ],
+            dim=-1,
+        )
+
+
 class ActionFamilyDiagnosticUtility(nn.Module):
     def __init__(
         self,
@@ -876,7 +1015,7 @@ class ActionFamilyDiagnosticUtility(nn.Module):
         dropout: float,
     ) -> None:
         super().__init__()
-        input_dim = int(action_feature_dim) + (2 * int(belief_dim)) + 16 + 4
+        input_dim = int(action_feature_dim) + (2 * int(belief_dim)) + 16 + 8
         hidden = max(int(d_model), 16)
         self.utility = nn.Sequential(
             nn.LayerNorm(input_dim),
@@ -897,14 +1036,24 @@ class ActionFamilyDiagnosticUtility(nn.Module):
         session_belief: torch.Tensor,
         level_belief: torch.Tensor,
         family_posterior_features: torch.Tensor | None = None,
+        basis_posterior_features: torch.Tensor | None = None,
     ) -> torch.Tensor:
         family_features = _action_family_features(action_numeric)
         expanded_session = session_belief[:, None, :].expand(-1, action_numeric.shape[1], -1)
         expanded_level = level_belief[:, None, :].expand(-1, action_numeric.shape[1], -1)
         if family_posterior_features is None:
             family_posterior_features = action_numeric.new_zeros((*action_numeric.shape[:2], 4))
+        if basis_posterior_features is None:
+            basis_posterior_features = action_numeric.new_zeros((*action_numeric.shape[:2], 4))
         features = torch.cat(
-            [action_numeric, expanded_session, expanded_level, family_features, family_posterior_features],
+            [
+                action_numeric,
+                expanded_session,
+                expanded_level,
+                family_features,
+                family_posterior_features,
+                basis_posterior_features,
+            ],
             dim=-1,
         )
         return self.utility(features).squeeze(-1)
@@ -1234,14 +1383,23 @@ class ObjectEventModel(nn.Module):
             ]
         )
         requested_family_count = max(int(self.config.action_family_count), 0)
-        family_count = min(requested_family_count, max((d_model - 32) // 3, 0))
-        family_reserved_width = 3 * family_count
-        pre_family_budget = max(d_model - family_reserved_width, 0)
+        requested_basis_count = (
+            max(int(self.config.action_basis_coordinate_centers), 0) ** 2
+            + max(int(self.config.action_basis_mapped_centers), 0) ** 2
+            + (4 if bool(self.config.action_basis_object_bases) else 0)
+        )
+        minimum_family_width = 3 if requested_family_count > 0 else 0
+        minimum_memory_width = 10 + 2 + 2 + 4
+        basis_reserved_width = min(
+            3 * requested_basis_count,
+            max(d_model - minimum_memory_width - minimum_family_width, 0),
+        )
+        pre_basis_budget = max(d_model - basis_reserved_width - minimum_family_width, 0)
         relation_key_dim = max(
             2,
             min(
                 int(self.config.relation_key_dim),
-                max((pre_family_budget - 16) // 5, 2),
+                max((pre_basis_budget - 16) // 5, 2),
             ),
         )
         self.event_relation_memory_rank = EventRelationMemoryRank(
@@ -1253,7 +1411,7 @@ class ObjectEventModel(nn.Module):
             dropout=float(self.config.dropout),
         )
         relation_width = int(self.event_relation_memory_rank.key_dim * 5)
-        available_after_relation = max(pre_family_budget - relation_width, 0)
+        available_after_relation = max(pre_basis_budget - relation_width, 0)
         axis_width = min(
             max(int(self.config.axis_noeffect_key_dim), 0),
             max(available_after_relation - 4, 0),
@@ -1286,8 +1444,19 @@ class ObjectEventModel(nn.Module):
             width=axis_width,
             dropout=float(self.config.dropout),
         )
-        family_start = relation_width + failed_key_dim + coord_width + axis_width
-        family_count = min(family_count, max((d_model - family_start) // 3, 0))
+        basis_start = relation_width + failed_key_dim + coord_width + axis_width
+        max_basis_count = max((d_model - basis_start - minimum_family_width) // 3, 0)
+        basis_count = min(requested_basis_count, max_basis_count)
+        self.action_basis_belief = ActionBasisBelief(
+            belief_dim=d_model,
+            start=basis_start,
+            coordinate_centers=int(self.config.action_basis_coordinate_centers),
+            mapped_centers=int(self.config.action_basis_mapped_centers),
+            include_object_bases=bool(self.config.action_basis_object_bases),
+            max_bases=basis_count,
+        )
+        family_start = basis_start + self.action_basis_belief.width
+        family_count = min(requested_family_count, max((d_model - family_start) // 3, 0))
         self.action_family_belief = ActionFamilyBelief(
             action_feature_dim=ACTION_NUMERIC_DIM,
             belief_dim=d_model,
@@ -1419,11 +1588,16 @@ class ObjectEventModel(nn.Module):
             candidate_action_numeric=action_numeric,
             level_belief=level_belief,
         )
+        action_basis_posterior_features = self.action_basis_belief.posterior_features(
+            candidate_action_numeric=action_numeric,
+            level_belief=level_belief,
+        )
         diagnostic_utility_logits = self.action_family_diagnostic_utility(
             action_numeric=action_numeric,
             session_belief=session_belief,
             level_belief=level_belief,
             family_posterior_features=action_family_posterior_features,
+            basis_posterior_features=action_basis_posterior_features,
         )
         diagnostic_mix_logit = self.diagnostic_mix_head(
             self._diagnostic_mix_features(
@@ -1446,6 +1620,7 @@ class ObjectEventModel(nn.Module):
             action_family_logits=action_family_logits,
             action_family_probs=action_family_probs,
             action_family_posterior_features=action_family_posterior_features,
+            action_basis_posterior_features=action_basis_posterior_features,
             candidate_state_attn=candidate_state_attn,
             rank_components=rank_components,
         )
@@ -1608,12 +1783,17 @@ class ObjectEventModel(nn.Module):
                 selected_action_numeric=chosen_action,
                 target_outcome=target_outcome,
             )
+            action_basis_delta = self.action_basis_belief.observed_delta(
+                selected_action_numeric=chosen_action,
+                target_outcome=target_outcome,
+            )
         else:
             direct = raw_context.new_zeros((raw_context.shape[0], self.config.d_model))
             failed_action_delta = raw_context.new_zeros((raw_context.shape[0], self.config.d_model))
             coordinate_noeffect_delta = raw_context.new_zeros((raw_context.shape[0], self.config.d_model))
             axis_noeffect_delta = raw_context.new_zeros((raw_context.shape[0], self.config.d_model))
             action_family_delta = raw_context.new_zeros((raw_context.shape[0], self.config.d_model))
+            action_basis_delta = raw_context.new_zeros((raw_context.shape[0], self.config.d_model))
         learned = self.observed_event_belief_encoder(torch.cat([raw_context, event], dim=-1))
         learned = 0.05 * learned
         reserved_width = min(int(self.reserved_belief_width), learned.shape[1])
@@ -1627,6 +1807,7 @@ class ObjectEventModel(nn.Module):
             + failed_action_delta
             + coordinate_noeffect_delta
             + axis_noeffect_delta
+            + action_basis_delta
             + action_family_delta
             + learned * (0.5 + no_effect_gate)
         )

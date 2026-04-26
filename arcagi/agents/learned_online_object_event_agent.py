@@ -308,6 +308,17 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             if family_count > 0
             else 0.0
         )
+        basis_start = int(getattr(self.model.action_basis_belief, "start", 0))
+        basis_stop = int(getattr(self.model.action_basis_belief, "stop", basis_start))
+        basis_count = int(getattr(self.model.action_basis_belief, "num_bases", 0))
+        basis_memory = self.level_belief[basis_start:basis_stop] if basis_stop > basis_start else self.level_belief[:0]
+        basis_norm = float(torch.linalg.vector_norm(basis_memory).detach().cpu()) if basis_memory.numel() > 0 else 0.0
+        basis_evidence = float(torch.sum(basis_memory[:basis_count].clamp_min(0.0)).detach().cpu()) if basis_count > 0 else 0.0
+        basis_noeffect = (
+            float(torch.sum(basis_memory[2 * basis_count : 3 * basis_count].clamp_min(0.0)).detach().cpu())
+            if basis_count > 0
+            else 0.0
+        )
         return {
             "controller_kind": self.controller_kind,
             "claim_eligible_arc_controller": bool(self.claim_eligible_arc_controller),
@@ -329,6 +340,9 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             "object_event_action_family_belief_norm": family_norm,
             "object_event_action_family_evidence_count": family_evidence,
             "object_event_action_family_noeffect_count": family_noeffect,
+            "object_event_action_basis_belief_norm": basis_norm,
+            "object_event_action_basis_evidence_count": basis_evidence,
+            "object_event_action_basis_noeffect_count": basis_noeffect,
             "object_event_action_surface_capped": False,
             "object_event_oracle_support_used": False,
             "object_event_trace_replay_used": False,
@@ -356,6 +370,9 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             "action_family_belief_norm": family_norm,
             "action_family_evidence_count": family_evidence,
             "action_family_noeffect_count": family_noeffect,
+            "action_basis_belief_norm": basis_norm,
+            "action_basis_evidence_count": basis_evidence,
+            "action_basis_noeffect_count": basis_noeffect,
             "level_epoch": int(self.level_epoch),
             "level_step": int(self.level_step),
             "last_predicted_outcome": tuple(self.last_predicted_outcome),
@@ -399,7 +416,13 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             self.level_belief = torch.zeros((self.config.d_model,), dtype=torch.float32, device=self.device)
         model_state = state.get("model_state", {})
         if isinstance(model_state, dict):
-            self.model.load_state_dict(model_state, strict=False)
+            current = self.model.state_dict()
+            filtered = {
+                key: value
+                for key, value in model_state.items()
+                if key in current and hasattr(value, "shape") and tuple(value.shape) == tuple(current[key].shape)
+            }
+            self.model.load_state_dict(filtered, strict=False)
         metadata = state.get("metadata", {})
         self.metadata = metadata if isinstance(metadata, dict) else self.checkpoint_metadata()
 
@@ -465,6 +488,7 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
                 "observed_event_belief_encoder",
                 "level_belief_coordinate_noeffect_slots",
                 "level_belief_axis_noeffect_slots",
+                "level_belief_action_basis_slots",
                 "level_belief_action_family_slots",
                 "session_belief",
                 "level_belief",
@@ -565,7 +589,15 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             start = family_start + 2 * family_count
             stop = family_start + 3 * family_count
             family_noeffect = float(torch.sum(self.level_belief[start:stop].clamp_min(0.0)).detach().cpu())
-        return float(np.tanh(max(coord_count, 0.0) + max(axis_count, 0.0) + max(family_noeffect, 0.0)))
+        basis_start = int(getattr(self.model.action_basis_belief, "start", 0))
+        basis_count = int(getattr(self.model.action_basis_belief, "num_bases", 0))
+        basis_noeffect = 0.0
+        if basis_count > 0:
+            start = basis_start + 2 * basis_count
+            stop = basis_start + 3 * basis_count
+            basis_noeffect = float(torch.sum(self.level_belief[start:stop].clamp_min(0.0)).detach().cpu())
+        evidence = max(coord_count, 0.0) + max(axis_count, 0.0) + max(family_noeffect, 0.0) + max(basis_noeffect, 0.0)
+        return float(np.tanh(evidence))
 
     def _rank_component_diagnostics(
         self,
@@ -666,6 +698,31 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             stats["action_family_belief_noeffect_mean"] = 0.0
             stats["action_family_belief_uncertainty_top_value"] = 0.0
             stats["action_family_belief_noeffect_top_value"] = 0.0
+        basis_features = getattr(output, "action_basis_posterior_features", None)
+        if basis_features is not None:
+            posterior = basis_features[0].detach().cpu().numpy().astype(np.float64)
+            active = posterior[valid]
+            if active.size:
+                stats["action_basis_belief_mean_effect_mean"] = float(np.mean(active[:, 0]))
+                stats["action_basis_belief_uncertainty_mean"] = float(np.mean(active[:, 1]))
+                stats["action_basis_belief_count_mean"] = float(np.mean(active[:, 2]))
+                stats["action_basis_belief_noeffect_mean"] = float(np.mean(active[:, 3]))
+                stats["action_basis_belief_uncertainty_top_value"] = float(np.max(active[:, 1]))
+                stats["action_basis_belief_noeffect_top_value"] = float(np.max(active[:, 3]))
+            else:
+                stats["action_basis_belief_mean_effect_mean"] = 0.0
+                stats["action_basis_belief_uncertainty_mean"] = 0.0
+                stats["action_basis_belief_count_mean"] = 0.0
+                stats["action_basis_belief_noeffect_mean"] = 0.0
+                stats["action_basis_belief_uncertainty_top_value"] = 0.0
+                stats["action_basis_belief_noeffect_top_value"] = 0.0
+        else:
+            stats["action_basis_belief_mean_effect_mean"] = 0.0
+            stats["action_basis_belief_uncertainty_mean"] = 0.0
+            stats["action_basis_belief_count_mean"] = 0.0
+            stats["action_basis_belief_noeffect_mean"] = 0.0
+            stats["action_basis_belief_uncertainty_top_value"] = 0.0
+            stats["action_basis_belief_noeffect_top_value"] = 0.0
         family_probs = getattr(output, "action_family_probs", None)
         if family_probs is not None and family_probs.shape[-1] > 0:
             probs = family_probs[0].detach().cpu().numpy().astype(np.float64)
@@ -692,6 +749,37 @@ class LearnedOnlineObjectEventAgent(BaseAgent):
             stats["family_assignment_usage_min"] = 0.0
             stats["family_assignment_usage_max"] = 0.0
             stats["family_assignment_effective_count"] = 0.0
+        if action_numeric is not None and int(getattr(self.model.action_basis_belief, "num_bases", 0)) > 0:
+            numeric = torch.as_tensor(
+                np.asarray(action_numeric, dtype=np.float32)[None, :, :],
+                dtype=torch.float32,
+                device=output.outcome_logits.device,
+            )
+            with torch.no_grad():
+                basis = self.model.action_basis_belief.basis(numeric)[0].detach().cpu().numpy().astype(np.float64)
+            active = basis[valid]
+            if active.size:
+                usage = np.mean(active, axis=0)
+                usage = usage / max(float(np.sum(usage)), 1.0e-12)
+                surface_entropy = -float(np.sum(usage * np.log(np.clip(usage, 1.0e-12, 1.0))))
+                per_action_entropy = -np.sum(active * np.log(np.clip(active, 1.0e-12, 1.0)), axis=-1)
+                stats["basis_assignment_surface_entropy"] = surface_entropy
+                stats["basis_assignment_per_action_entropy"] = float(np.mean(per_action_entropy))
+                stats["basis_assignment_usage_min"] = float(np.min(usage))
+                stats["basis_assignment_usage_max"] = float(np.max(usage))
+                stats["basis_assignment_effective_count"] = float(np.exp(surface_entropy))
+            else:
+                stats["basis_assignment_surface_entropy"] = 0.0
+                stats["basis_assignment_per_action_entropy"] = 0.0
+                stats["basis_assignment_usage_min"] = 0.0
+                stats["basis_assignment_usage_max"] = 0.0
+                stats["basis_assignment_effective_count"] = 0.0
+        else:
+            stats["basis_assignment_surface_entropy"] = 0.0
+            stats["basis_assignment_per_action_entropy"] = 0.0
+            stats["basis_assignment_usage_min"] = 0.0
+            stats["basis_assignment_usage_max"] = 0.0
+            stats["basis_assignment_effective_count"] = 0.0
         for name in (
             "relation_object_prior",
             "relation_positive_prior",

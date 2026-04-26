@@ -5922,3 +5922,83 @@ Current interpretation:
 - no real ARC run should be made from this artifact
 - the next GPT-Pro request should include this exact negative result and ask whether to change the family representation itself, the training target, or the online update interface rather than adding a runtime diversity controller
 - a `48`-step ARC run remains only a hygiene/collapse detector; it is too harsh to judge full online acquisition when a prior real ARC win reportedly took about `300` steps
+
+## 2026-04-26 Fixed Action-Basis Belief Prototype
+
+GPT-Pro consensus before this patch:
+
+- stop using learned prototype-family regularization as the primary diversification mechanism
+- keep soft family belief only as auxiliary diagnostics/substrate
+- add a fixed smooth multi-resolution action-parameter basis as representation, not control
+- write selected-transition evidence into level-local belief only
+- feed basis posterior features into learned diagnostic utility
+- do not add least-visited basis selection, untried-basis bonuses, basis blacklists, hard diversity rules, avoid-column masks, sweeps, frontiers, replay, graph-search control, or per-game behavior
+
+Implemented:
+
+- `ActionBasisBelief`
+  - fixed buffers, no trainable basis parameters
+  - smooth object/click-coordinate/mapped-grid basis activations over action numeric features
+  - level-local evidence/success/no-effect slots
+  - posterior features: effect mean, uncertainty, evidence count, no-effect count
+- `ObjectEventModelOutput.action_basis_posterior_features`
+- diagnostic utility now receives both family posterior features and basis posterior features
+- basis evidence contributes only to `level_delta`, not `session_delta`
+- agent diagnostics expose action-basis belief and basis-assignment metrics
+- trainer flags:
+  - `--action-basis-diagnostic-cases`
+  - `--action-basis-diagnostic-loss-weight`
+  - `--action-basis-postfailure-margin-weight`
+- training target:
+  - basis uncertainty times no-effect decay times selected-basis overlap penalty
+  - basis target primary when `--action-basis-diagnostic-cases > 0`
+  - hypothesis IG auxiliary
+  - family target auxiliary only if enabled
+- tests cover fixed/no-controller properties, full finite 447 scoring, level-local basis writes, reset behavior, non-overlapping-basis targets, and no forbidden basis controller state
+
+Verification:
+
+- `python -m py_compile scripts\train_learned_online_object_event.py arcagi\agents\learned_online_object_event_agent.py arcagi\learned_online\object_event_model.py` -> passed
+- focused parametric/agent tests: `45 passed`
+- full object-event suite: `99 passed`
+- recurrent suite: `31 passed`
+- 2-step basis smoke emitted finite metrics
+
+447-action basis gate:
+
+- command:
+  - `python scripts\train_learned_online_object_event.py --mode synthetic_active_online_object_event --curriculum latent_rule_variable_palette --state-source extracted --action-surface arc_scale_parametric --action-surface-size 447 --coordinate-grid-size 64 --empty-click-fraction 0.80 --positive-region-radius 1 --seed 0 --steps 200 --batch-size 8 --train-sessions 48 --heldout-sessions 48 --levels-per-session 3 --max-distractors 2 --palette-size 8 --require-role-balanced-colors --max-steps-per-level 5 --axis-noeffect-cases 0.25 --relation-contradiction-cases 0.25 --diagnostic-utility-cases 0.25 --action-basis-diagnostic-cases 0.25 --action-basis-diagnostic-loss-weight 0.30 --action-basis-postfailure-margin-weight 0.20 --eval-every 50 --eval-runtime-agent --save-best --selection-metric runtime_agent_act_path_active_success_within_5 --save-path artifacts\object_event_action_basis_runtime_probe.pkl`
+- saved artifact:
+  - `artifacts/object_event_action_basis_runtime_probe.pkl`
+  - checkpoint best step `50`
+  - selection metric value `0.4583333333333333`
+- saved best step `50`:
+  - full `447` scoring
+  - no metadata leakage
+  - act-path within-5 `0.4583333333333333`
+  - act-path within-3 `0.3541666666666667`
+  - next-level first try `0.3333333333333333`
+  - unique action count `2.0`
+  - selected unique mapped columns `1.2083333333333333`
+  - top-score same mapped column `0.5537766830870279`
+- final step `200`:
+  - act-path within-5 `0.3541666666666667`
+  - act-path within-3 `0.3541666666666667`
+  - next-level first try `0.3125`
+  - unique action count `2.9375`
+  - selected unique x `2.2916666666666665`
+  - selected unique mapped columns `2.0625`
+  - selected unique basis `2.4166666666666665`
+  - selected basis entropy `0.7159599675190487`
+  - max same-action streak `1.0`
+  - top-score same mapped column `0.5467980295566502`
+  - action-basis diagnostic top1 `1.0`
+  - known-no-effect basis top1 `0.0`
+
+Current interpretation:
+
+- the fixed basis representation solves part of the collapse surface better than learned prototype families
+- current training makes the learned diagnostic utility/mix dominate action choice and damages task exploitation
+- this is not ARC-ready and no real ARC run should be made from this artifact
+- next step should not add a basis controller; it should calibrate the learned diagnostic influence or train recovery from diagnostic action back to true positives
+- likely knobs: lower action-basis diagnostic loss/margin weights, lower post-no-effect diagnostic mix target, require stronger evidence before high diagnostic mix, or add a learned exploit-after-diagnostic objective

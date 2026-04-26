@@ -1151,3 +1151,57 @@ Operator actions recorded for continuity:
    - final synthetic competence regressed, so the objective is not aligned enough
    - commit/push the failed attempt honestly, then ask GPT-Pro for the next mechanism before changing code
    - remember the user's note: `48` ARC steps is only a harsh hygiene/collapse cutoff, not a real online-learning competence budget; a prior real ARC win reportedly took about `300` steps
+
+## 2026-04-26 Fixed Action-Basis Belief Prototype
+
+Operator actions recorded for continuity:
+
+1. Consulted GPT-Pro after pushing the failed family-regularization probe. Consensus:
+   - stop using learned prototype-family regularization as the primary diversity mechanism
+   - add fixed smooth multi-resolution action-basis belief as representation only
+   - feed basis posterior features into learned diagnostic utility
+   - keep full legal action scoring
+   - do not add least-visited/untried basis selection, blacklists, hard diversity rules, avoid-column masks, sweeps, frontiers, replay, graph-search control, or per-game behavior
+2. Implemented:
+   - `ActionBasisBelief`
+   - level-local basis evidence/success/no-effect slots
+   - basis posterior features in `ObjectEventModelOutput`
+   - basis posterior features into diagnostic utility
+   - basis diagnostic target and post-failure margin
+   - runtime basis diagnostics and selected-basis diversity metrics
+   - checkpoint metadata for level-local basis slots
+3. Verification:
+   - `py_compile` passed
+   - focused parametric/agent tests: `45 passed`
+   - full object-event suite: `99 passed`
+   - recurrent suite: `31 passed`
+   - 2-step smoke emitted finite basis metrics
+4. 447-action basis gate:
+   - artifact: `artifacts/object_event_action_basis_runtime_probe.pkl`
+   - command used `--steps 200 --eval-every 50 --action-basis-diagnostic-cases 0.25 --action-basis-diagnostic-loss-weight 0.30 --action-basis-postfailure-margin-weight 0.20`
+   - full `447` scoring and no leakage
+   - checkpoint best step `50`, selected by `runtime_agent_act_path_active_success_within_5`
+5. Gate result:
+   - failed competence gate
+   - saved best step `50`:
+     - `runtime_agent_act_path_active_success_within_5 = 0.4583333333333333`
+     - `runtime_agent_act_path_active_success_within_3 = 0.3541666666666667`
+     - `runtime_agent_act_path_next_level_first_try_acc = 0.3333333333333333`
+     - `runtime_agent_act_path_unique_action_count_mean = 2.0`
+     - `runtime_agent_act_path_selected_unique_mapped_col_count = 1.2083333333333333`
+     - `runtime_agent_act_path_top_score_same_mapped_col_fraction = 0.5537766830870279`
+   - final step `200`:
+     - `runtime_agent_act_path_active_success_within_5 = 0.3541666666666667`
+     - `runtime_agent_act_path_active_success_within_3 = 0.3541666666666667`
+     - `runtime_agent_act_path_next_level_first_try_acc = 0.3125`
+     - `runtime_agent_act_path_unique_action_count_mean = 2.9375`
+     - `runtime_agent_act_path_selected_unique_mapped_col_count = 2.0625`
+     - `runtime_agent_act_path_selected_unique_x_count = 2.2916666666666665`
+     - `runtime_agent_act_path_selected_unique_basis_count = 2.4166666666666665`
+     - `runtime_agent_act_path_max_same_action_streak_max = 1.0`
+     - `runtime_agent_act_path_top_score_same_mapped_col_fraction = 0.5467980295566502`
+6. Current conclusion:
+   - action-basis belief is a better representation substrate than learned prototypes for collapse/diversity
+   - current loss/mix makes diagnostic action choice dominate and destroys exploitation
+   - this artifact is not ARC-ready and should not be used for a real ARC run
+   - commit/push the failure honestly, then ask GPT-Pro whether to lower/calibrate diagnostic mix, add exploit-after-diagnostic supervision, or change the basis target

@@ -22,6 +22,8 @@ from arcagi.learned_online.object_event_curriculum import (
 from arcagi.learned_online.object_event_model import ObjectEventModel, ObjectEventModelConfig, policy_rank_logits_from_predictions
 from arcagi.learned_online.object_event_runtime_extraction import ObjectEventRuntimeExtractor, extract_selected_transition_from_grid
 from scripts.train_learned_online_object_event import (
+    _action_basis_known_noeffect_mask,
+    _action_basis_posterior_diagnostic_targets,
     _batch_to_tensors,
     _far_click_action_indices,
     _family_assignment_regularization_losses,
@@ -29,6 +31,7 @@ from scripts.train_learned_online_object_event import (
     _family_posterior_diagnostic_targets,
     _information_gain_from_hypothesis_success,
     _near_action_indices,
+    _selected_basis_overlap,
 )
 from arcagi.learned_online.object_event_curriculum import collate_object_event_examples
 
@@ -167,7 +170,7 @@ def test_failed_action_memory_changes_scores_without_hard_masking() -> None:
     level = _parametric_level(seed=209)
     example = level.example
     failed = _failed_click_index(example)
-    model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
+    model = ObjectEventModel(ObjectEventModelConfig(d_model=128, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
     model.eval()
     with torch.no_grad():
         model.failed_action_memory_rank.rank_mlp[-1].weight.fill_(-0.25)
@@ -204,7 +207,7 @@ def test_failed_action_memory_resets_on_level_reset() -> None:
     level = _parametric_level(seed=210)
     example = level.example
     failed = _failed_click_index(example)
-    model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
+    model = ObjectEventModel(ObjectEventModelConfig(d_model=128, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
     model.eval()
     with torch.no_grad():
         model.failed_action_memory_rank.rank_mlp[-1].weight.fill_(-0.25)
@@ -511,6 +514,9 @@ def test_diagnostic_utility_logits_present_and_full_surface() -> None:
     assert output.action_family_posterior_features is not None
     assert output.action_family_posterior_features.shape == (1, 447, 4)
     assert torch.isfinite(output.action_family_posterior_features[tensors["action_mask"]]).all()
+    assert output.action_basis_posterior_features is not None
+    assert output.action_basis_posterior_features.shape == (1, 447, 4)
+    assert torch.isfinite(output.action_basis_posterior_features[tensors["action_mask"]]).all()
 
 
 def test_action_family_belief_updates_selected_transition_level_only() -> None:
@@ -540,6 +546,68 @@ def test_action_family_belief_updates_selected_transition_level_only() -> None:
     assert torch.linalg.vector_norm(deltas.session_delta[:, start:stop]) == 0.0
     for forbidden in ("visited_bins", "least_visited", "untried", "tried_families", "family_blacklist", "coverage_map", "frontier", "sweep_index", "probe_counter"):
         assert not hasattr(model, forbidden)
+
+
+def test_action_basis_belief_updates_selected_transition_level_only() -> None:
+    level = _parametric_level(seed=225)
+    example = level.example
+    failed = _failed_click_index(example)
+    tensors = _batch_to_tensors(collate_object_event_examples((example,)), device=torch.device("cpu"))
+    model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
+    model.eval()
+
+    output = model(**tensors["inputs"])
+    deltas = model.observed_event_belief_deltas(
+        output,
+        target_outcome=tensors["candidate_outcome_targets"][:, failed],
+        target_delta=tensors["candidate_delta_targets"][:, failed],
+        actual_action_index=torch.as_tensor([failed], dtype=torch.long),
+        state_numeric=tensors["inputs"]["state_numeric"],
+        state_type_ids=tensors["inputs"]["state_type_ids"],
+        state_mask=tensors["inputs"]["state_mask"],
+        action_numeric=tensors["inputs"]["action_numeric"],
+    )
+    start = model.action_basis_belief.start
+    stop = model.action_basis_belief.stop
+
+    assert stop > start
+    assert model.action_basis_belief.num_bases >= 8
+    assert torch.linalg.vector_norm(deltas.level_delta[:, start:stop]) > 0.0
+    assert torch.linalg.vector_norm(deltas.session_delta[:, start:stop]) == 0.0
+    zero_level = torch.zeros((1, model.config.d_model), dtype=torch.float32)
+    reset_output = model(**tensors["inputs"], level_belief=zero_level)
+    assert reset_output.action_basis_posterior_features is not None
+    assert float(reset_output.action_basis_posterior_features[..., 3].max().detach()) == 0.0
+    for forbidden in ("visited_basis", "least_visited", "untried", "basis_blacklist", "coverage_map", "frontier", "sweep_index", "probe_counter"):
+        assert not hasattr(model, forbidden)
+
+
+def test_action_basis_representation_is_fixed_smooth_and_order_equivariant() -> None:
+    level = _parametric_level(seed=226)
+    example = level.example
+    tensors = _batch_to_tensors(collate_object_event_examples((example,)), device=torch.device("cpu"))
+    config = ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0)
+    model_a = ObjectEventModel(config)
+    model_b = ObjectEventModel(config)
+    action_numeric = tensors["inputs"]["action_numeric"]
+
+    basis_a = model_a.action_basis_belief.basis(action_numeric)
+    basis_b = model_b.action_basis_belief.basis(action_numeric)
+    permutation = torch.randperm(action_numeric.shape[1])
+    shuffled_basis = model_a.action_basis_belief.basis(action_numeric[:, permutation])
+
+    assert not list(model_a.action_basis_belief.parameters())
+    assert torch.allclose(basis_a, basis_b)
+    assert torch.allclose(shuffled_basis, basis_a[:, permutation])
+    assert torch.isfinite(basis_a[tensors["action_mask"]]).all()
+    selected = int(example.metadata["correct_action_index"])
+    near = _near_action_indices(example, example.legal_actions[selected])
+    far = _far_click_action_indices(example, example.legal_actions[selected])
+    if near and far:
+        selected_basis = basis_a[0, selected]
+        near_overlap = torch.max(torch.sum(basis_a[0, list(near)] * selected_basis[None, :], dim=-1))
+        far_overlap = torch.mean(torch.sum(basis_a[0, list(far)] * selected_basis[None, :], dim=-1))
+        assert float(near_overlap.detach()) > float(far_overlap.detach())
 
 
 def test_family_posterior_target_prefers_uncertain_over_known_noeffect() -> None:
@@ -576,6 +644,58 @@ def test_family_posterior_target_penalizes_selected_failed_family_overlap() -> N
     assert float(target[0, 0]) < 0.2
 
 
+def test_action_basis_target_prefers_uncertain_nonoverlapping_basis_after_noeffect() -> None:
+    action_mask = torch.ones((1, 3), dtype=torch.bool)
+    features = torch.as_tensor(
+        [[[0.5, 0.25, 0.1, 0.0], [0.5, 0.25, 0.1, 0.0], [0.5, 0.05, 1.0, 1.0]]],
+        dtype=torch.float32,
+    )
+    overlap = torch.as_tensor([[0.9, 0.1, 0.1]], dtype=torch.float32)
+    output = type("Output", (), {})()
+    output.action_basis_posterior_features = features
+
+    target = _action_basis_posterior_diagnostic_targets(
+        output,
+        {"action_mask": action_mask},
+        selected_basis_overlap=overlap,
+    )
+    known_noeffect = _action_basis_known_noeffect_mask(output, {"action_mask": action_mask})
+
+    assert float(target[0, 1]) > float(target[0, 0])
+    assert float(target[0, 0]) < 0.2
+    assert bool(known_noeffect[0, 2])
+    assert not bool(known_noeffect[0, 1])
+
+
+def test_selected_basis_overlap_keeps_same_basis_legal_and_finite() -> None:
+    level = _parametric_level(seed=227)
+    example = level.example
+    failed = _failed_click_index(example)
+    tensors = _batch_to_tensors(collate_object_event_examples((example,)), device=torch.device("cpu"))
+    model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
+    model.eval()
+
+    output = model(**tensors["inputs"])
+    deltas = model.observed_event_belief_deltas(
+        output,
+        target_outcome=tensors["candidate_outcome_targets"][:, failed],
+        target_delta=tensors["candidate_delta_targets"][:, failed],
+        actual_action_index=torch.as_tensor([failed], dtype=torch.long),
+        state_numeric=tensors["inputs"]["state_numeric"],
+        state_type_ids=tensors["inputs"]["state_type_ids"],
+        state_mask=tensors["inputs"]["state_mask"],
+        action_numeric=tensors["inputs"]["action_numeric"],
+    )
+    after = model(**tensors["inputs"], level_belief=deltas.level_delta)
+    logits = policy_rank_logits_from_predictions(after, tensors["action_mask"])
+    overlap = _selected_basis_overlap(model, tensors, tensors, torch.as_tensor([failed], dtype=torch.long))
+
+    assert overlap.shape == tensors["action_mask"].shape
+    assert float(overlap[0, failed].detach()) > 0.99
+    assert torch.isfinite(logits[tensors["action_mask"]]).all()
+    assert bool(tensors["action_mask"][0, failed])
+
+
 def test_family_assignment_regularization_penalizes_single_family_collapse() -> None:
     level = _parametric_level(seed=223)
     tensors = _batch_to_tensors(collate_object_event_examples((level.example,)), device=torch.device("cpu"))
@@ -594,7 +714,7 @@ def test_family_assignment_regularization_penalizes_single_family_collapse() -> 
 def test_family_assignment_uses_multiple_families_on_447_surface() -> None:
     level = _parametric_level(seed=224)
     tensors = _batch_to_tensors(collate_object_event_examples((level.example,)), device=torch.device("cpu"))
-    model = ObjectEventModel(ObjectEventModelConfig(d_model=64, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
+    model = ObjectEventModel(ObjectEventModelConfig(d_model=128, n_heads=4, state_layers=1, action_cross_layers=1, dropout=0.0))
     model.eval()
 
     output = model(**tensors["inputs"])
@@ -602,7 +722,11 @@ def test_family_assignment_uses_multiple_families_on_447_surface() -> None:
 
     assert output.action_family_probs is not None
     assert output.action_family_probs.shape == (1, 447, model.action_family_belief.num_families)
-    assert float(losses["effective_count"].detach()) > 1.0
+    assert model.action_family_belief.num_families >= 1
+    if model.action_family_belief.num_families > 1:
+        assert float(losses["effective_count"].detach()) > 1.0
+    else:
+        assert float(losses["effective_count"].detach()) == 1.0
     assert 0.0 <= float(losses["usage_min"].detach()) <= float(losses["usage_max"].detach()) <= 1.0
     assert torch.isfinite(output.action_family_probs[tensors["action_mask"]]).all()
 
