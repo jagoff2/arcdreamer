@@ -5303,3 +5303,16 @@ Crash recovery note on 2026-04-25:
 - newest artifact was still `artifacts/object_event_extracted_runtime_probe.pkl`; no `object_event_parametric_runtime_probe.pkl` existed
 - remaining local Python processes were DuckDuckGo MCP server processes, not repo training or ARC eval jobs
 - resume point remains the GPT-Pro agreed ARC-scale parameterized action-surface curriculum and learned no-effect revision work
+
+GPT-Pro post-crash guardrail on 2026-04-25:
+
+- proceed with the source implementation under commit title `Add ARC-scale parametric object-event action curriculum`
+- keep the patch focused on `object_event_curriculum.py`, `object_event_model.py`, `scripts/train_learned_online_object_event.py`, tests, `TASKS.MD`, and `CONTEXT.MD`
+- do not touch recurrent code, trace bootstrap, broad docs, artifacts, or harness unless a passive diagnostic is strictly required
+- parametric clicks must carry interface metadata: `interface_display_scale = coordinate_grid_size // grid_size`, zero display padding, and click mapping must use the same conversion as tokenization/extraction
+- add `positive_action_mask` / `positive_action_indices` compatibly while keeping `correct_action_index` for old curricula and tests
+- active synthetic success must use the positive mask when present; selecting a non-first positive action must still succeed
+- no-effect revision must be learned/evidence-updated through level-local belief memory with explicit reserved failed-action slices, not through an action blacklist, tried-action set, hard no-repeat rule, graph frontier, or replay path
+- score all generated legal actions before and after update; failed actions must remain legal and finite-scored
+- fast commit gate target: 447 actions, extracted state, full bridge match, no leakage, within-5 at least 0.60, repeated-failure metrics improved
+- promotion gate target before another real ARC diagnostic: within-5 at least 0.70, within-3 at least 0.45, next-level first try at least 0.60, exact repeats at most 0.10, near repeats at most 0.25, max same-action streak at most 5
