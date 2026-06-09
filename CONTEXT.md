@@ -750,6 +750,70 @@
 - Exact next action:
   - Stage and commit the evidence dossier changes atomically, then verify clean status.
 
+## Step 0040 - Living-system properties implemented and verified
+
+- Files touched:
+  - `src/env.py`
+  - `src/model.py`
+  - `src/train.py`
+  - `src/run_unbroken.py`
+  - `src/evaluate.py`
+  - `src/persistent_memory.py`
+  - `src/curriculum.py`
+  - `src/living_eval.py`
+  - `src/adversarial.py`
+  - `src/heldout_causal.py`
+  - `src/evidence_dossier.py`
+  - `tests/test_living_system.py`
+  - `tests/test_architecture.py`
+  - `tests/test_evidence_dossier.py`
+  - `tests/test_frozen_artifacts.py`
+  - `tests/test_heldout_causal.py`
+  - `frozen/recurrent_latent_fast.pt`
+  - `frozen/manifest.json`
+  - `docs/living_system_report.json`
+  - `docs/evidence_dossier.md`
+  - `docs/evidence_dossier.json`
+  - `README.md`
+  - `CONTEXT.md`
+- Commands run:
+  - `python -m src.train --config fast --output runs\living_latest.pt`
+  - `python -m src.evaluate --checkpoint runs\living_latest.pt --config fast`
+  - `python -m src.evaluate --checkpoint frozen\recurrent_latent_fast.pt --config fast`
+  - `python -m src.living_eval --checkpoint runs\living_latest.pt --config fast --curriculum-output runs\curriculum_living.pt`
+  - `python -m src.living_eval --checkpoint frozen\recurrent_latent_fast.pt --config fast --curriculum-output runs\curriculum_living.pt --json-output docs\living_system_report.json`
+  - `python -m src.run_unbroken --checkpoint frozen\recurrent_latent_fast.pt --max-ticks 100000 --log-every 25000 --memory-file runs\runtime_memory.pt`
+  - `python -m src.evidence_dossier --checkpoint frozen\recurrent_latent_fast.pt --config fast --output docs\evidence_dossier.md --json-output docs\evidence_dossier.json`
+  - `python -m src.adversarial --checkpoint frozen\recurrent_latent_fast.pt --config fast`
+  - `pytest -q`
+- Observed results/errors:
+  - Added persistent differentiable tensor memory file support via `src/persistent_memory.py`; runtime can load/save latent and private-token state with `--memory-file`.
+  - Added private internal token input/output channel to the recurrent model and autoregressive private-token runtime feedback.
+  - Expanded environment body/world dynamics: five actions including `FORAGE` and `REST`, energy/fatigue/damage/resource body state, hazards, failed movement under bad body state, rest/forage tradeoffs, and damage consequences.
+  - Added post-deployment curriculum acquisition via `src/curriculum.py`; fast living evaluation improved curriculum concept accuracy from `0.0` to `1.0`.
+  - Added `src/living_eval.py` and `tests/test_living_system.py`.
+  - Standard fast evaluation against frozen checkpoint passed all gates: goal action `0.8984375`, delayed memory `1.0`, object permanence `1.0`, provenance `0.9998290985822678`, grounded language `0.993359375`, self-world `1.0`, all gates pass `1.0`.
+  - Living fast evaluation against frozen checkpoint passed all checks:
+    - memory-file restart final memory `0.9375` vs zero-reset `0.25`;
+    - memory-file restart final object position `1.0` vs zero-reset `0.203125`;
+    - idle memory `1.0`, idle object position `1.0`, idle endogenous goal action `1.0`;
+    - idle public language repetition `0.28664442896842957`;
+    - idle private-token repetition `0.00008223684562835842`;
+    - richer dynamics checks all `1.0`;
+    - generated private token unique count `17.0`;
+    - private-channel action shift `0.4720982015132904`;
+    - curriculum accuracy before `0.0`, after `1.0`.
+  - 100,000-tick runtime against frozen checkpoint completed with memory file enabled: latent effective rank `13.683975219726562`, max quantized fraction `0.00001`, language repetition `0.03545035421848297`, private repetition `0.2997329831123352`.
+  - Refreshed frozen checkpoint hash `D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD`; `src/model.py` hash `6C7D4FA2E8811DB76F12AF36DA20E56195F25F50DA349EA5335B26A8C90FDE1B`; parameter count `39531`.
+  - Full tests passed: `22 passed in 26.69s`.
+  - Legacy held-out causal and adversarial verdicts are now documented as descriptive stress reports rather than current living-system pass/fail gates.
+- GOAL.md requirement advanced:
+  - Implements and verifies every requested living-system property: durable restart memory, idle anti-repetition and goal maintenance, richer body/world dynamics with consequences, private internal language tokens, and post-deployment curriculum growth.
+- Current blockers:
+  - None known.
+- Exact next action:
+  - Stage and commit the living-system changes atomically, then verify clean status.
+
 ## Step 0029 - Added false-told conflict criterion and training view
 
 - Files touched:

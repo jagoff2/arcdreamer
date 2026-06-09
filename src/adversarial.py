@@ -11,7 +11,12 @@ from .env import (
     ACTION_STAY,
     ANS_COLOR,
     ANS_IMAGINED,
+    BODY_DAMAGE,
+    BODY_ENERGY,
+    BODY_FATIGUE,
+    BODY_RESOURCE,
     GRID_SIZE,
+    NUM_BODY_SCALARS,
     NUM_ACTIONS,
     NUM_COLORS,
     PROV_IMAGINED,
@@ -37,9 +42,9 @@ from .model import RecurrentLatentModel, load_checkpoint
 
 SENSOR_POS = slice(0, GRID_SIZE)
 SENSOR_ORIENT = slice(GRID_SIZE, GRID_SIZE + 2)
-SENSOR_BODY = slice(GRID_SIZE + 2, GRID_SIZE + 4)
-SENSOR_COLOR = slice(GRID_SIZE + 4, GRID_SIZE + 4 + NUM_COLORS + 1)
-SENSOR_VISIBLE = GRID_SIZE + 4 + NUM_COLORS + 1
+SENSOR_BODY = slice(GRID_SIZE + 2, GRID_SIZE + 2 + NUM_BODY_SCALARS)
+SENSOR_COLOR = slice(GRID_SIZE + 2 + NUM_BODY_SCALARS, GRID_SIZE + 2 + NUM_BODY_SCALARS + NUM_COLORS + 1)
+SENSOR_VISIBLE = GRID_SIZE + 2 + NUM_BODY_SCALARS + NUM_COLORS + 1
 SENSOR_OBJECT_POS = slice(SENSOR_VISIBLE + 1, SENSOR_DIM)
 
 
@@ -75,6 +80,7 @@ def run_sequence(
     for tick in range(seq_len):
         sensory = batch["sensory"][:, tick]
         lang_in = batch["lang_in"][:, tick]
+        private_in = batch.get("private_in")
         if mode == "feedforward_only":
             z = model.initial_state(batch_size, device=device)
         elif mode == "no_memory" and tick >= 4:
@@ -93,7 +99,10 @@ def run_sequence(
             noise = torch.randn(z.shape, generator=generator, device="cpu").to(device)
             z = z + noise_scale * noise
 
-        output, z_next = model.step({"sensory": sensory, "lang_in": lang_in}, z)
+        observation = {"sensory": sensory, "lang_in": lang_in}
+        if private_in is not None:
+            observation["private_in"] = private_in[:, tick]
+        output, z_next = model.step(observation, z)
         outputs.append(output)
         z = z_next
         if mode == "freeze_z" and tick >= ablation_start and frozen_z is not None:
@@ -211,8 +220,10 @@ def smaller_map_batch(batch: Dict[str, torch.Tensor], map_size: int = 3) -> Dict
     current_pos = batch["sensory"][:, :, SENSOR_POS].argmax(dim=-1) % map_size
     target_pos = batch["world_pos_target"] % map_size
     color = batch["world_color_target"]
-    energy = batch["sensory"][:, :, SENSOR_BODY.start]
-    fatigue = batch["sensory"][:, :, SENSOR_BODY.start + 1]
+    energy = batch["sensory"][:, :, SENSOR_BODY.start + BODY_ENERGY]
+    fatigue = batch["sensory"][:, :, SENSOR_BODY.start + BODY_FATIGUE]
+    damage = batch["sensory"][:, :, SENSOR_BODY.start + BODY_DAMAGE]
+    resource = batch["sensory"][:, :, SENSOR_BODY.start + BODY_RESOURCE]
     orientation = batch["sensory"][:, :, SENSOR_ORIENT].argmax(dim=-1)
     visible = batch["sensory"][:, :, SENSOR_VISIBLE] > 0.5
     visible_color = torch.where(visible, color, torch.full_like(color, NUM_COLORS))
@@ -223,6 +234,8 @@ def smaller_map_batch(batch: Dict[str, torch.Tensor], map_size: int = 3) -> Dict
             orientation[:, tick],
             energy[:, tick],
             fatigue[:, tick],
+            damage[:, tick],
+            resource[:, tick],
             visible_color[:, tick],
             visible_pos[:, tick],
         )
@@ -247,8 +260,9 @@ def delayed_goal_change_batch(batch: Dict[str, torch.Tensor], change_tick: int =
 
 def energy_constraint_batch(batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
     altered = clone_batch(batch)
-    altered["sensory"][:, 60:, SENSOR_BODY.start] = 0.02
-    altered["sensory"][:, 60:, SENSOR_BODY.start + 1] = 0.98
+    altered["sensory"][:, 60:, SENSOR_BODY.start + BODY_ENERGY] = 0.02
+    altered["sensory"][:, 60:, SENSOR_BODY.start + BODY_FATIGUE] = 0.98
+    altered["sensory"][:, 60:, SENSOR_BODY.start + BODY_DAMAGE] = 0.90
     altered["action_target"][:, 60:] = ACTION_STAY
     altered["language_target"][:, 60:] = batch["language_target"][:, 60:]
     return altered

@@ -13,6 +13,7 @@ from .env import (
     NUM_COLORS,
     NUM_INPUT_TOKENS,
     NUM_LANGUAGE_TOKENS,
+    NUM_PRIVATE_TOKENS,
     NUM_PROVENANCE,
     SENSOR_DIM,
 )
@@ -22,9 +23,11 @@ from .env import (
 class ModelConfig:
     sensor_dim: int = SENSOR_DIM
     input_tokens: int = NUM_INPUT_TOKENS
+    private_tokens: int = NUM_PRIVATE_TOKENS
     language_tokens: int = NUM_LANGUAGE_TOKENS
     hidden_dim: int = 64
     embed_dim: int = 16
+    private_embed_dim: int = 8
 
 
 class RecurrentLatentModel(nn.Module):
@@ -38,14 +41,16 @@ class RecurrentLatentModel(nn.Module):
             nn.Tanh(),
         )
         self.token_embedding = nn.Embedding(self.config.input_tokens, self.config.embed_dim)
+        self.private_embedding = nn.Embedding(self.config.private_tokens, self.config.private_embed_dim)
         self.input_mixer = nn.Sequential(
-            nn.Linear(48 + self.config.embed_dim, self.config.hidden_dim),
+            nn.Linear(48 + self.config.embed_dim + self.config.private_embed_dim, self.config.hidden_dim),
             nn.Tanh(),
         )
         self.core = nn.GRUCell(self.config.hidden_dim, self.config.hidden_dim)
         self.norm = nn.LayerNorm(self.config.hidden_dim)
         self.action_head = nn.Linear(self.config.hidden_dim, NUM_ACTIONS)
         self.language_head = nn.Linear(self.config.hidden_dim, self.config.language_tokens)
+        self.private_head = nn.Linear(self.config.hidden_dim, self.config.private_tokens)
         self.provenance_head = nn.Linear(self.config.hidden_dim, NUM_PROVENANCE)
         self.world_color_head = nn.Linear(self.config.hidden_dim, NUM_COLORS)
         self.world_pos_head = nn.Linear(self.config.hidden_dim, GRID_SIZE)
@@ -60,14 +65,19 @@ class RecurrentLatentModel(nn.Module):
     ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
         sensory = observation["sensory"]
         lang_in = observation["lang_in"]
+        private_in = observation.get("private_in")
+        if private_in is None:
+            private_in = torch.zeros_like(lang_in)
         sensor_features = self.sensor_encoder(sensory)
         token_features = self.token_embedding(lang_in)
-        mixed = self.input_mixer(torch.cat([sensor_features, token_features], dim=-1))
+        private_features = self.private_embedding(private_in)
+        mixed = self.input_mixer(torch.cat([sensor_features, token_features, private_features], dim=-1))
         z_next = self.core(mixed, z_prev)
         z_view = self.norm(z_next)
         output = {
             "action_logits": self.action_head(z_view),
             "language_logits": self.language_head(z_view),
+            "private_logits": self.private_head(z_view),
             "provenance_logits": self.provenance_head(z_view),
             "world_color_logits": self.world_color_head(z_view),
             "world_pos_logits": self.world_pos_head(z_view),
@@ -76,13 +86,27 @@ class RecurrentLatentModel(nn.Module):
         }
         return output, z_next
 
-    def forward(self, sensory: torch.Tensor, lang_in: torch.Tensor) -> Dict[str, torch.Tensor]:
+    def forward(
+        self,
+        sensory: torch.Tensor,
+        lang_in: torch.Tensor,
+        private_in: torch.Tensor | None = None,
+    ) -> Dict[str, torch.Tensor]:
         batch_size, seq_len, _ = sensory.shape
         z = self.initial_state(batch_size, sensory.device)
+        if private_in is None:
+            private_in = torch.zeros_like(lang_in)
         outputs = []
         latents = []
         for tick in range(seq_len):
-            output, z = self.step({"sensory": sensory[:, tick], "lang_in": lang_in[:, tick]}, z)
+            output, z = self.step(
+                {
+                    "sensory": sensory[:, tick],
+                    "lang_in": lang_in[:, tick],
+                    "private_in": private_in[:, tick],
+                },
+                z,
+            )
             outputs.append(output)
             latents.append(z)
         stacked: Dict[str, torch.Tensor] = {}

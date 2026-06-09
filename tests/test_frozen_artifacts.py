@@ -27,4 +27,4 @@ def test_frozen_checkpoint_hash_and_loadability() -> None:
     assert checkpoint.stat().st_size == manifest["checkpoint_size_bytes"]
     assert sha256(checkpoint) == manifest["checkpoint_sha256"]
     model = load_checkpoint(checkpoint)
-    assert sum(param.numel() for param in model.parameters()) == 36618
+    assert sum(param.numel() for param in model.parameters()) == 39531

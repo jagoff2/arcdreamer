@@ -2,7 +2,7 @@ import inspect
 
 import torch
 
-from src.env import SENSOR_DIM, TinyWorldRuntime, generate_batch
+from src.env import NUM_ACTIONS, SENSOR_DIM, TinyWorldRuntime, generate_batch
 from src.model import RecurrentLatentModel
 from src import run_unbroken
 
@@ -17,7 +17,8 @@ def test_model_exposes_recurrent_step_and_persistent_latent() -> None:
     assert z2.shape == z0.shape
     assert not torch.allclose(z0, z1)
     assert not torch.allclose(z1, z2)
-    assert output["action_logits"].shape == (2, 3)
+    assert output["action_logits"].shape == (2, NUM_ACTIONS)
+    assert output["private_logits"].shape[0] == 2
     assert batch["sensory"].shape[-1] == SENSOR_DIM
 
 

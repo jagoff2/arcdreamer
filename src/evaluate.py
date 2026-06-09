@@ -33,9 +33,11 @@ def closed_loop_action_success(
         for episode in range(episodes):
             world = TinyWorldRuntime(seed=seed + episode, episode_len=seq_len)
             z = model.initial_state(1, device=device)
+            private_token = torch.zeros(1, dtype=torch.long, device=device)
             for tick in range(seq_len):
-                observation = world.observation(device=device)
+                observation = world.observation(device=device, private_in=int(private_token.item()))
                 output, z = model.step(observation, z)
+                private_token = output["private_logits"].argmax(dim=-1)
                 action = int(output["action_logits"].argmax(dim=-1).item())
                 if tick >= 64 and token_for_tick(tick) == TOK_ASK_ACTION:
                     correct += int(action == world.expected_action())
@@ -76,7 +78,7 @@ def evaluate_checkpoint(
                 base_seed=1_000_000 + offset,
                 device=device,
             )
-            outputs = model(batch["sensory"], batch["lang_in"])
+            outputs = model(batch["sensory"], batch["lang_in"], batch["private_in"])
             totals["goal_action_success"] += masked_accuracy(
                 outputs["action_logits"], batch["action_target"], batch["action_mask"]
             )

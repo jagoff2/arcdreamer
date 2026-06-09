@@ -24,17 +24,23 @@ from .adversarial import (
 )
 from .env import (
     ACTION_LEFT,
+    ACTION_FORAGE,
+    ACTION_REST,
     ACTION_RIGHT,
     ACTION_STAY,
     ANS_ACTION,
     ANS_COLOR,
     ANS_GOAL,
     ANS_OBJECT_POS,
+    BODY_DAMAGE,
+    BODY_ENERGY,
     GRID_SIZE,
     NUM_ACTIONS,
+    NUM_BODY_SCALARS,
     NUM_COLORS,
     NUM_INPUT_TOKENS,
     NUM_LANGUAGE_TOKENS,
+    NUM_PRIVATE_TOKENS,
     NUM_PROVENANCE,
     PROV_IMAGINED,
     PROV_OBSERVED,
@@ -125,6 +131,8 @@ ACTION_NAMES = {
     ACTION_STAY: "STAY",
     ACTION_LEFT: "LEFT",
     ACTION_RIGHT: "RIGHT",
+    ACTION_FORAGE: "FORAGE",
+    ACTION_REST: "REST",
 }
 
 PROVENANCE_NAMES = {
@@ -161,26 +169,43 @@ class FeedForwardCapacityBaseline(nn.Module):
             nn.Tanh(),
         )
         self.token_embedding = nn.Embedding(NUM_INPUT_TOKENS, embed_dim)
+        self.private_embedding = nn.Embedding(NUM_PRIVATE_TOKENS, 8)
         self.trunk = nn.Sequential(
-            nn.Linear(48 + embed_dim, hidden_dim),
+            nn.Linear(48 + embed_dim + 8, hidden_dim),
             nn.Tanh(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.Tanh(),
         )
         self.action_head = nn.Linear(hidden_dim, NUM_ACTIONS)
         self.language_head = nn.Linear(hidden_dim, NUM_LANGUAGE_TOKENS)
+        self.private_head = nn.Linear(hidden_dim, NUM_PRIVATE_TOKENS)
         self.provenance_head = nn.Linear(hidden_dim, NUM_PROVENANCE)
         self.world_color_head = nn.Linear(hidden_dim, NUM_COLORS)
         self.world_pos_head = nn.Linear(hidden_dim, GRID_SIZE)
         self.memory_color_head = nn.Linear(hidden_dim, NUM_COLORS)
         self.self_start_head = nn.Linear(hidden_dim, GRID_SIZE)
 
-    def forward(self, sensory: torch.Tensor, lang_in: torch.Tensor) -> Dict[str, torch.Tensor]:
+    def forward(
+        self,
+        sensory: torch.Tensor,
+        lang_in: torch.Tensor,
+        private_in: torch.Tensor | None = None,
+    ) -> Dict[str, torch.Tensor]:
         batch_size, seq_len, _ = sensory.shape
+        if private_in is None:
+            private_in = torch.zeros_like(lang_in)
         flat_sensory = sensory.reshape(batch_size * seq_len, -1)
         flat_lang = lang_in.reshape(batch_size * seq_len)
+        flat_private = private_in.reshape(batch_size * seq_len)
         hidden = self.trunk(
-            torch.cat([self.sensor_encoder(flat_sensory), self.token_embedding(flat_lang)], dim=-1)
+            torch.cat(
+                [
+                    self.sensor_encoder(flat_sensory),
+                    self.token_embedding(flat_lang),
+                    self.private_embedding(flat_private),
+                ],
+                dim=-1,
+            )
         )
 
         def view(logits: torch.Tensor) -> torch.Tensor:
@@ -189,6 +214,7 @@ class FeedForwardCapacityBaseline(nn.Module):
         return {
             "action_logits": view(self.action_head(hidden)),
             "language_logits": view(self.language_head(hidden)),
+            "private_logits": view(self.private_head(hidden)),
             "provenance_logits": view(self.provenance_head(hidden)),
             "world_color_logits": view(self.world_color_head(hidden)),
             "world_pos_logits": view(self.world_pos_head(hidden)),
@@ -228,7 +254,11 @@ def run_reset_recurrent(model: RecurrentLatentModel, batch: Dict[str, torch.Tens
     for tick in range(seq_len):
         z = model.initial_state(batch_size, device=device)
         output, z_next = model.step(
-            {"sensory": batch["sensory"][:, tick], "lang_in": batch["lang_in"][:, tick]},
+            {
+                "sensory": batch["sensory"][:, tick],
+                "lang_in": batch["lang_in"][:, tick],
+                "private_in": batch.get("private_in", torch.zeros_like(batch["lang_in"]))[:, tick],
+            },
             z,
         )
         outputs.append(output)
@@ -242,7 +272,7 @@ def run_trained_baseline(baseline: TrainedBaseline, batch: Dict[str, torch.Tenso
     if baseline.kind == "reset_recurrent":
         return run_reset_recurrent(baseline.model, batch)  # type: ignore[arg-type]
     if baseline.kind == "feedforward":
-        return baseline.model(batch["sensory"], batch["lang_in"])  # type: ignore[operator]
+        return baseline.model(batch["sensory"], batch["lang_in"], batch.get("private_in"))  # type: ignore[operator]
     raise ValueError(f"unknown baseline kind: {baseline.kind}")
 
 
@@ -321,7 +351,7 @@ def train_capacity_baselines(config_name: str, device: str = "cpu") -> List[Trai
 
 def observation_schema_dump(device: str = "cpu") -> Dict[str, object]:
     batch = generate_batch(2, seq_len=12, base_seed=991, device=device)
-    observation_keys = ["sensory", "lang_in"]
+    observation_keys = ["sensory", "lang_in", "private_in"]
     supervision_keys = sorted(key for key in batch if key not in observation_keys)
     fields = [
         {
@@ -331,13 +361,13 @@ def observation_schema_dump(device: str = "cpu") -> Dict[str, object]:
         },
         {"field": "orientation", "slice": f"{GRID_SIZE}:{GRID_SIZE + 2}", "encoding": "one-hot"},
         {
-            "field": "body_energy_and_fatigue",
-            "slice": f"{GRID_SIZE + 2}:{GRID_SIZE + 4}",
-            "encoding": "two scalar body variables",
+            "field": "body_energy_fatigue_damage_resource",
+            "slice": f"{GRID_SIZE + 2}:{GRID_SIZE + 2 + NUM_BODY_SCALARS}",
+            "encoding": "four scalar body variables",
         },
         {
             "field": "visible_object_color",
-            "slice": f"{GRID_SIZE + 4}:{GRID_SIZE + 4 + NUM_COLORS + 1}",
+            "slice": f"{GRID_SIZE + 2 + NUM_BODY_SCALARS}:{GRID_SIZE + 2 + NUM_BODY_SCALARS + NUM_COLORS + 1}",
             "encoding": "one-hot color plus unknown sentinel",
         },
         {
@@ -355,19 +385,25 @@ def observation_schema_dump(device: str = "cpu") -> Dict[str, object]:
             "slice": "separate integer token",
             "encoding": "local toy-environment token id",
         },
+        {
+            "field": "private_in",
+            "slice": "separate private integer token",
+            "encoding": "internally generated token from the prior recurrent tick",
+        },
     ]
     forbidden = sorted(set(observation_keys) & set(supervision_keys))
     return {
         "model_input_keys": observation_keys,
         "sensory_shape": list(batch["sensory"].shape),
         "lang_in_shape": list(batch["lang_in"].shape),
+        "private_in_shape": list(batch["private_in"].shape),
         "sensory_dim": SENSOR_DIM,
         "fields": fields,
         "supervision_only_keys": supervision_keys,
         "disallowed_supervision_keys_in_model_input": forbidden,
         "hidden_state_exclusion": (
             "Targets, masks, provenance labels, and hidden simulator labels are separate batch keys "
-            "used only for losses or scoring. The model.step call receives only sensory and lang_in."
+            "used only for losses or scoring. The model.step call receives sensory, lang_in, and private_in."
         ),
         "post_occlusion_unknown_sentinel_check": {
             "tick_0_visible_flag_mean": float(batch["sensory"][:, 0, SENSOR_VISIBLE].mean().item()),
@@ -514,7 +550,8 @@ def evaluate_frozen_heldout(
 
 def set_query_token(batch: Dict[str, torch.Tensor], tick: int, token: int) -> None:
     current_pos = batch["sensory"][:, tick, SENSOR_POS].argmax(dim=-1)
-    energy = batch["sensory"][:, tick, SENSOR_BODY.start]
+    energy = batch["sensory"][:, tick, SENSOR_BODY.start + BODY_ENERGY]
+    damage = batch["sensory"][:, tick, SENSOR_BODY.start + BODY_DAMAGE]
     target_color = batch["world_color_target"][:, tick]
     target_pos = batch["world_pos_target"][:, tick]
     start_pos = batch["self_start_target"][:, tick]
@@ -528,6 +565,7 @@ def set_query_token(batch: Dict[str, torch.Tensor], tick: int, token: int) -> No
         current_pos,
         energy,
         action,
+        damage,
     )
     batch["provenance_target"][:, tick] = provenance_target(token, tick)
     batch["action_mask"][:, tick] = token == TOK_ASK_ACTION
@@ -783,6 +821,7 @@ def latent_causal_probe(
                 {
                     "sensory": intervention_batch["sensory"][:, tick],
                     "lang_in": intervention_batch["lang_in"][:, tick],
+                    "private_in": intervention_batch["private_in"][:, tick],
                 },
                 z,
             )
@@ -851,7 +890,11 @@ def restart_consolidation_test(
             if tick == restart_tick:
                 z = model.initial_state(batch_size, device=device)
             output, z = model.step(
-                {"sensory": batch["sensory"][:, tick], "lang_in": batch["lang_in"][:, tick]},
+                {
+                    "sensory": batch["sensory"][:, tick],
+                    "lang_in": batch["lang_in"][:, tick],
+                    "private_in": batch["private_in"][:, tick],
+                },
                 z,
             )
             outputs.append(output)

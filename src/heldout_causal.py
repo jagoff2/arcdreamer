@@ -22,6 +22,9 @@ from .adversarial import (
 )
 from .env import (
     ACTION_STAY,
+    BODY_DAMAGE,
+    BODY_ENERGY,
+    BODY_FATIGUE,
     GRID_SIZE,
     NUM_COLORS,
     PROV_IMAGINED,
@@ -165,8 +168,9 @@ def blank_heldout_batch(batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tenso
 
 def energy_pressure_batch(batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
     altered = clone_batch(batch)
-    altered["sensory"][:, 70:, SENSOR_BODY.start] = 0.01
-    altered["sensory"][:, 70:, SENSOR_BODY.start + 1] = 0.99
+    altered["sensory"][:, 70:, SENSOR_BODY.start + BODY_ENERGY] = 0.01
+    altered["sensory"][:, 70:, SENSOR_BODY.start + BODY_FATIGUE] = 0.99
+    altered["sensory"][:, 70:, SENSOR_BODY.start + BODY_DAMAGE] = 0.90
     altered["action_target"][:, 90:] = ACTION_STAY
     altered["action_mask"][:, 90:] = True
     return altered
@@ -178,9 +182,15 @@ def step_with_optional_language_mask(
     lang_in: torch.Tensor,
     z_prev: torch.Tensor,
     mask_language_embedding: bool,
+    private_in: torch.Tensor | None = None,
 ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
     if not mask_language_embedding:
-        return model.step({"sensory": sensory, "lang_in": lang_in}, z_prev)
+        observation = {"sensory": sensory, "lang_in": lang_in}
+        if private_in is not None:
+            observation["private_in"] = private_in
+        return model.step(observation, z_prev)
+    if private_in is None:
+        private_in = torch.zeros_like(lang_in)
     sensor_features = model.sensor_encoder(sensory)
     token_features = torch.zeros(
         lang_in.shape[0],
@@ -188,12 +198,14 @@ def step_with_optional_language_mask(
         device=sensory.device,
         dtype=sensory.dtype,
     )
-    mixed = model.input_mixer(torch.cat([sensor_features, token_features], dim=-1))
+    private_features = model.private_embedding(private_in)
+    mixed = model.input_mixer(torch.cat([sensor_features, token_features, private_features], dim=-1))
     z_next = model.core(mixed, z_prev)
     z_view = model.norm(z_next)
     output = {
         "action_logits": model.action_head(z_view),
         "language_logits": model.language_head(z_view),
+        "private_logits": model.private_head(z_view),
         "provenance_logits": model.provenance_head(z_view),
         "world_color_logits": model.world_color_head(z_view),
         "world_pos_logits": model.world_pos_head(z_view),
@@ -225,16 +237,23 @@ def run_sequence_heldout(
 
     batch_size, seq_len, _ = batch["sensory"].shape
     z = model.initial_state(batch_size, device=batch["sensory"].device)
+    private_in_batch = batch.get("private_in")
     outputs: List[Dict[str, torch.Tensor]] = []
     latents: List[torch.Tensor] = []
     mask_embedding = baseline == "internal_language_mask"
     for tick in range(seq_len):
+        lang_in = batch["lang_in"][:, tick]
+        if private_in_batch is not None:
+            private_in = private_in_batch[:, tick]
+        else:
+            private_in = torch.zeros_like(lang_in)
         output, z = step_with_optional_language_mask(
             model,
             batch["sensory"][:, tick],
-            batch["lang_in"][:, tick],
+            lang_in,
             z,
             mask_language_embedding=mask_embedding,
+            private_in=private_in,
         )
         outputs.append(output)
         latents.append(z)
