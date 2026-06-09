@@ -70,12 +70,18 @@ AUDITED_PATHS = [
     "src/human_memory.py",
     "src/memory_replay.py",
     "src/memory_eval.py",
+    "src/language_organ.py",
+    "src/dialogue_env.py",
+    "src/dialogue_train.py",
+    "src/dialogue_eval.py",
     "src/train.py",
     "src/evaluate.py",
     "src/metrics.py",
+    "tests/test_dialogue_organ.py",
     "README.md",
     "docs/living_system_report.json",
     "docs/evidence_dossier.json",
+    "docs/dialogue_report.json",
 ]
 
 ACTION_NAMES = {
@@ -707,7 +713,7 @@ def run_audit(checkpoint: str | Path, config: str, json_output: str | Path, devi
         "commands_required": [
             "pytest -q",
             "python -m audit.leakage_scan",
-            "python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_proof.json",
+            "python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_dialogue.json",
             "python -m audit.probe_examples --checkpoint frozen/recurrent_latent_fast.pt --output docs/audit_probe_examples.md",
         ],
         "hashes": {

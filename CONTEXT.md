@@ -1274,3 +1274,102 @@
   - None. Commit pending.
 - Exact next action:
   - Stage and commit the CUDA migration atomically, then verify clean status.
+
+## Step 0052 - Grounded text speech objective intake
+
+- Files touched: `CONTEXT.md`
+- Commands run:
+  - `Get-Content -Raw GOAL.MD`
+  - `Get-Content -Raw CONTEXT.MD`
+  - `Get-Content -Raw docs\audit_after_human_memory.json`
+  - `Get-Content -Raw docs\human_memory_report.json`
+  - `git status --short --branch`
+  - `Get-FileHash` over frozen checkpoint, manifest, model/device/memory/eval sources, and current reports
+  - `Test-Path` over required dialogue source/test/report files
+  - `git log --oneline -5`
+- Observed results/errors:
+  - Worktree is clean on `main` at `c309433 Prefer CUDA device placement`.
+  - Required dialogue implementation files are missing: `src/language_organ.py`, `src/dialogue_env.py`, `src/dialogue_train.py`, `src/dialogue_eval.py`, `tests/test_dialogue_organ.py`, and `docs/dialogue_report.json`.
+  - Starting frozen checkpoint SHA256: `D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD`.
+  - Starting frozen manifest SHA256: `DC1B411C5B33A70DE352DC5D3789DB3CED4283A17D8E7926AB2B9BB7D8FEB1C2`.
+  - Starting `src/model.py` SHA256: `CE2838225E6852E64CA22D5A934B8ABAC6922D7377058F01F91CF5188CAC8DAF`.
+  - Starting `src/device.py` SHA256: `39DE3FFE33C752376B510FE7511071457D443995A7AB0D3778C3F970972999EE`.
+  - Starting `src/human_memory.py` SHA256: `F25FC79DBEC8FA7445DACFA03A16916990C865961609B6704ABBD2F70630BC30`.
+  - Starting `docs/human_memory_report.json` SHA256: `93CA048B9F576FA763314108FB7637BC5CA15EB3CCE47216C1FBC53C8793266C`.
+  - Starting `docs/audit_after_human_memory.json` SHA256: `AAFDAF482311A71721CF815BA317EA859869B401C5587DC6A085852A83AA4F19`.
+- Plan:
+  - Add `src/dialogue_env.py` to synthesize grounded text episodes from toy-world latent trajectories, source states, contradiction events, commands, memory questions, and held-out paraphrase/template splits.
+  - Add `src/language_organ.py` with a local character tokenizer, neural listener that maps text events into latent/memory update vectors, speech-act head, private-speech bridge, and character speaker conditioned on recurrent `z_t`, recalled memory, private state, and listener state.
+  - Add `src/dialogue_train.py` to train the local dialogue organ from randomly initialized weights on generated grounded synthetic tokens and save `runs/dialogue_tiny.pt`.
+  - Add `src/dialogue_eval.py` to verify grounded QA, paraphrases, non-canned behavior, state/memory causality, source/contradiction handling, listener effects on organism state, private-speech ablation, and prior-property preservation.
+  - Add `tests/test_dialogue_organ.py` covering local tokenizer, non-text persistent state, listener/speaker device behavior, and smoke dialogue proof.
+  - Regenerate `docs/dialogue_report.json` and run the required command sequence.
+- Current blockers:
+  - Dialogue organ, synthetic dialogue generator, trainer, evaluator, tests, and report are not implemented.
+- Exact next action:
+  - Implement the dialogue modules and focused tests, then run `python -m py_compile` and targeted pytest.
+
+## Step 0053 - Grounded text speech implementation proven
+
+- Files touched:
+  - `src/language_organ.py`
+  - `src/dialogue_env.py`
+  - `src/dialogue_train.py`
+  - `src/dialogue_eval.py`
+  - `tests/test_dialogue_organ.py`
+  - `audit/independent_verify.py`
+  - `docs/dialogue_report.json`
+  - `docs/dialogue_report.md`
+  - `docs/audit_after_dialogue.json`
+  - `docs/audit_after_dialogue.md`
+  - `CONTEXT.md`
+- Changes made:
+  - Added a local character tokenizer, local word tokenizer, neural listener, recurrent z/memory update projections, speech-act/source/action/private heads, and character speaker in `src/language_organ.py`.
+  - Added a grounded dialogue generator that derives synthetic language records from frozen recurrent latent trajectories, tensor memory, source labels, private tokens, contradictions, wrong-cue rejections, commands, heldout forms, and paraphrase forms.
+  - Added dialogue training and evaluation entrypoints with explicit gates for heldout QA, paraphrase QA, memory/z/private causality, listener ablation, source reports, contradiction resolution, wrong-cue rejection, copy-rate control, no form overlap, and prior-property preservation.
+  - Added focused dialogue tests and extended independent audit hashing to cover dialogue files and reports.
+- Commands run:
+  - `pytest -q tests/test_dialogue_organ.py`
+  - `python -m src.dialogue_train --config tiny --output runs/dialogue_tiny.pt`
+  - `python -m src.dialogue_eval --checkpoint frozen/recurrent_latent_fast.pt --language-checkpoint runs/dialogue_tiny.pt --config tiny --json-output docs/dialogue_report.json --skip-prior`
+  - `python -m src.dialogue_eval --checkpoint frozen/recurrent_latent_fast.pt --language-checkpoint runs/dialogue_tiny.pt --config tiny --json-output docs/dialogue_report.json`
+  - `pytest -q`
+  - `python -m audit.leakage_scan`
+  - `python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_dialogue.json`
+  - `Get-FileHash` over frozen checkpoint, manifest, dialogue sources, dialogue tests, and final reports
+- Observed results/errors:
+  - Initial character-only dialogue model failed heldout/paraphrase and causality gates; fixed by adding local word-level listener, wider train-only phrasing coverage, learned modality projections, z-required row masking, private-token-only private dialogue rows, and stronger recurrent update amplitude.
+  - Focused dialogue tests: `4 passed in 5.30s`.
+  - Tiny dialogue training generated `runs/dialogue_tiny.pt` from `1,297,885` synthetic tokens.
+  - Full dialogue evaluator: `GROUNDED TEXT SPEECH PROVEN`, no limitations.
+  - Full tests: `36 passed in 41.09s`.
+  - Leakage scan: `passes: true`, no findings.
+  - Independent verifier after dialogue: `AUDIT PROVEN`, no limitations.
+- Final dialogue gates:
+  - Heldout QA accuracy: `0.8660714626312256`.
+  - Paraphrase QA accuracy: `0.9972098469734192`.
+  - Same-question different-memory accuracy: `1.0`.
+  - Exact training sentence copy rate: `0.0`.
+  - Memory corruption delta: `0.7470703125`.
+  - Zero-z dialogue delta: `0.6382978558540344`.
+  - Shuffled-z dialogue delta: `0.36968085169792175`.
+  - Listener action ablation delta: `0.4375`.
+  - Text command state shift: `0.01587264984846115`.
+  - Private speech delta: `0.78125`.
+  - Source report accuracy: `0.9765625`.
+  - Contradiction resolution accuracy: `1.0`.
+  - Wrong-cue rejection: `1.0`.
+- Final hashes:
+  - `frozen/recurrent_latent_fast.pt`: `D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD`.
+  - `frozen/manifest.json`: `DC1B411C5B33A70DE352DC5D3789DB3CED4283A17D8E7926AB2B9BB7D8FEB1C2`.
+  - `src/language_organ.py`: `B275BF03F6267159DBFFC26687103C79CAB6D6A8D16C16A2566CEA77BF5AC1E5`.
+  - `src/dialogue_env.py`: `ACF5187DA20D0176F273D3F15E6AB03B600FDEBDE877A3A17A953624270BF68D`.
+  - `src/dialogue_train.py`: `EC3D88E5082F0DC6961A69BB04A11DCD725F3DB57F7508F6962DFFCF38CAAE6A`.
+  - `src/dialogue_eval.py`: `AA7405911A3F37C4D1C55E92AE6E0CD27B9F15DFD40A7EA6EE3D6120174AEDAB`.
+  - `tests/test_dialogue_organ.py`: `3912E8E00CC0D267F63A6389C800F2223130F85324636D22E299E23F8CBEA1F4`.
+  - `docs/dialogue_report.json`: `6E933275A0490D2AE0D27641682F6BA91C555F7C7840E76325967414054402E5`.
+  - `docs/audit_after_dialogue.json`: `BC2DCEFC1AB4ECE63E69E492A906752FC4C71E0BB8E54A160A0B0DF57C2A1353`.
+- Current blockers:
+  - None. Commit pending.
+- Exact next action:
+  - Stage and commit the grounded text speech implementation atomically, then verify clean status.
