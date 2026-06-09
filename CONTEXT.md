@@ -718,6 +718,38 @@
 - Exact next action:
   - Stage and commit freeze/evaluator changes, then verify clean status.
 
+## Step 0039 - Evidence dossier generated and verified
+
+- Files touched:
+  - `src/evidence_dossier.py`
+  - `tests/test_evidence_dossier.py`
+  - `docs/evidence_dossier.md`
+  - `docs/evidence_dossier.json`
+  - `README.md`
+  - `CONTEXT.md`
+- Commands run:
+  - `python -m py_compile src\evidence_dossier.py`
+  - `python -m src.evidence_dossier --checkpoint frozen/recurrent_latent_fast.pt --config smoke --output runs\evidence_smoke.md --json-output runs\evidence_smoke.json`
+  - `pytest -q tests\test_evidence_dossier.py`
+  - `python -m src.evidence_dossier --checkpoint frozen/recurrent_latent_fast.pt --config fast --output docs\evidence_dossier.md --json-output docs\evidence_dossier.json`
+  - `pytest -q`
+  - `git diff -- src\model.py frozen\manifest.json frozen\recurrent_latent_fast.pt`
+- Observed results/errors:
+  - Full evidence dossier generated under `docs/` and reports dossier verdict `passes: true`.
+  - Full test suite passed: `20 passed in 17.01s`.
+  - Frozen model code, frozen manifest, and frozen checkpoint have no diff.
+  - Held-out recurrent mean remains `0.8453022213587912`.
+  - Separately trained capacity-matched baseline means: reset recurrent `0.329386425128197`, feedforward capacity `0.3418762734706834`.
+  - Latent intervention shifted target memory and downstream action with world-position shift rate `1.0` and action-change rate `1.0`.
+  - Restart test distinguishes transient state from durable learned weights: normal late delayed memory `1.0`, restarted late delayed memory `0.31862745098039214`.
+  - Idle-mode test after 96 blank ticks preserved memory `1.0` and object position `0.9791666666666666`, with latent active fraction `1.0`.
+- GOAL.md requirement advanced:
+  - Provides the requested comprehensive evidence dossier: per-subtest held-out metrics, success/failure trajectories, observation schema, dependency graph, separately trained baselines, randomized post-freeze templates, OOD coverage, latent causal probes, restart/consolidation behavior, and idle-mode behavior.
+- Current blockers:
+  - None known.
+- Exact next action:
+  - Stage and commit the evidence dossier changes atomically, then verify clean status.
+
 ## Step 0029 - Added false-told conflict criterion and training view
 
 - Files touched:

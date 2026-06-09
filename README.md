@@ -12,6 +12,8 @@ The core state carrier is a live recurrent tensor `z_t` updated by `RecurrentLat
 - `src/evaluate.py`: unseen-seed evaluation, including closed-loop action scoring.
 - `src/run_unbroken.py`: resident runtime loop.
 - `src/metrics.py`: accuracy and latent non-collapse metrics.
+- `src/evidence_dossier.py`: generated evidence dossier with per-subtest tables, trajectories, trained baselines, latent probes, restart, and idle tests.
+- `docs/evidence_dossier.md`: generated comprehensive technical evidence report.
 - `tests/`: architecture, no-pretrained, smoke training, and runtime tests.
 
 Generated checkpoints and logs belong under `runs/` and are ignored by Git.
@@ -25,6 +27,7 @@ python -m src.evaluate --checkpoint runs/latest.pt --config fast
 python -m src.run_unbroken --checkpoint runs/latest.pt --max-ticks 100000
 python -m src.adversarial --checkpoint runs/latest.pt --config fast
 python -m src.heldout_causal --checkpoint frozen/recurrent_latent_fast.pt --config fast
+python -m src.evidence_dossier --checkpoint frozen/recurrent_latent_fast.pt --config fast --output docs/evidence_dossier.md --json-output docs/evidence_dossier.json
 ```
 
 Smoke profile:
@@ -114,6 +117,31 @@ Current fast adversarial results:
 | Blank-input latent effective rank | 9.006064 |
 | Multi-event episodic probe mean | 1.000000 |
 | Terminal A adversarial verdict | pass |
+
+## Evidence Dossier
+
+The evidence dossier is generated from the frozen checkpoint and committed under `docs/`:
+
+```bash
+python -m src.evidence_dossier --checkpoint frozen/recurrent_latent_fast.pt --config fast --output docs/evidence_dossier.md --json-output docs/evidence_dossier.json
+```
+
+It includes full held-out per-subtest metrics, success and failure trajectories, the observation tensor schema, a dependency graph, separately trained capacity-matched baselines, randomized post-freeze OOD templates, latent causal interventions, restart/consolidation behavior, and idle-mode behavior.
+
+Current dossier headline results:
+
+| Dossier Metric | Result |
+| --- | ---: |
+| Dossier verdict | pass |
+| Recurrent held-out causal mean | 0.845302 |
+| Trained reset-recurrent baseline mean | 0.329386 |
+| Trained feedforward-capacity baseline mean | 0.341876 |
+| Latent intervention world-position shift rate | 1.000000 |
+| Latent intervention action-change rate | 1.000000 |
+| Restart late delayed-memory accuracy | 0.318627 |
+| Idle final memory accuracy after 96 blank ticks | 1.000000 |
+| Idle final object-position accuracy after 96 blank ticks | 0.979167 |
+| Idle latent effective rank | 7.313669 |
 
 ## Notes
 
