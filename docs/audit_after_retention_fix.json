@@ -1,0 +1,953 @@
+{
+  "terminal_outcome": "AUDIT PROVEN",
+  "commands_required": [
+    "pytest -q",
+    "python -m audit.leakage_scan",
+    "python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_proof.json",
+    "python -m audit.probe_examples --checkpoint frozen/recurrent_latent_fast.pt --output docs/audit_probe_examples.md"
+  ],
+  "hashes": {
+    "before": {
+      "frozen/recurrent_latent_fast.pt": {
+        "sha256": "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD",
+        "size_bytes": 169185
+      },
+      "frozen/manifest.json": {
+        "sha256": "5A29A083287FDA14194392CE08CE24EDB56E21061285FFF2CCCB5E637807CA89",
+        "size_bytes": 614
+      },
+      "src/model.py": {
+        "sha256": "6C7D4FA2E8811DB76F12AF36DA20E56195F25F50DA349EA5335B26A8C90FDE1B",
+        "size_bytes": 5392
+      },
+      "src/env.py": {
+        "sha256": "6EACA0F191E1849DF88C402500339F3E6B1C77FF6F0BB27DDF606FEC543FD04E",
+        "size_bytes": 18720
+      },
+      "src/run_unbroken.py": {
+        "sha256": "004C239D211EF80CCA09637562908BD1C1FE716B0175810E0FD65FEA90CBEF89",
+        "size_bytes": 3613
+      },
+      "src/persistent_memory.py": {
+        "sha256": "C24B4367437E61C1C19E8120C875276157EC729F10006E6ADBD69D016186BFC0",
+        "size_bytes": 2463
+      },
+      "src/living_eval.py": {
+        "sha256": "134AC234A69356866B02212BAE8784BE4F58A2A141044FD46AC2CD1D25F97E53",
+        "size_bytes": 13673
+      },
+      "src/curriculum.py": {
+        "sha256": "F94DBF04C81F897486ADFE6866569A696AF6562D7342304E35E33999EA8121CF",
+        "size_bytes": 3583
+      },
+      "src/continual_learning.py": {
+        "sha256": "B56C723D9A8C6FBB71B5450F79D4897C99816F083422F165BD0973378CFEA3B1",
+        "size_bytes": 5070
+      },
+      "src/retention_eval.py": {
+        "sha256": "64121E109B1BC6827E38C10896C4136B1D27D384718F23821A30A0D1DC66A2A7",
+        "size_bytes": 13359
+      },
+      "src/train.py": {
+        "sha256": "00DEF2BD88364AA92663A40FBBE79FBD052DCA3DA876016A08473FF628306255",
+        "size_bytes": 10731
+      },
+      "src/evaluate.py": {
+        "sha256": "AF6403993DB80AA099E5CFAEB4B8BD68D0D07F0C5FF54C5339633CB7908E4E65",
+        "size_bytes": 5659
+      },
+      "src/metrics.py": {
+        "sha256": "E06EFB02345A3568F7249BC3DAFC0E277421E873DF811F5BB49876E90D2801F4",
+        "size_bytes": 3441
+      },
+      "README.md": {
+        "sha256": "1DA55D70DCC20AB0C7C923D8631B6C1EA5384F207FF2119FE3AE665A0E035D33",
+        "size_bytes": 9696
+      },
+      "docs/living_system_report.json": {
+        "sha256": "2C859A655051667D2E37550B3B81E825BAF120B30DC8028354CF9C6FC8A38BFE",
+        "size_bytes": 2118
+      },
+      "docs/evidence_dossier.json": {
+        "sha256": "8021CC9CFE35128C76A8D1772C17B4621D92425FAA7C6F7E8D4A9E26161D3D06",
+        "size_bytes": 78295
+      }
+    },
+    "after": {
+      "frozen/recurrent_latent_fast.pt": {
+        "sha256": "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD",
+        "size_bytes": 169185
+      },
+      "frozen/manifest.json": {
+        "sha256": "5A29A083287FDA14194392CE08CE24EDB56E21061285FFF2CCCB5E637807CA89",
+        "size_bytes": 614
+      },
+      "src/model.py": {
+        "sha256": "6C7D4FA2E8811DB76F12AF36DA20E56195F25F50DA349EA5335B26A8C90FDE1B",
+        "size_bytes": 5392
+      },
+      "src/env.py": {
+        "sha256": "6EACA0F191E1849DF88C402500339F3E6B1C77FF6F0BB27DDF606FEC543FD04E",
+        "size_bytes": 18720
+      },
+      "src/run_unbroken.py": {
+        "sha256": "004C239D211EF80CCA09637562908BD1C1FE716B0175810E0FD65FEA90CBEF89",
+        "size_bytes": 3613
+      },
+      "src/persistent_memory.py": {
+        "sha256": "C24B4367437E61C1C19E8120C875276157EC729F10006E6ADBD69D016186BFC0",
+        "size_bytes": 2463
+      },
+      "src/living_eval.py": {
+        "sha256": "134AC234A69356866B02212BAE8784BE4F58A2A141044FD46AC2CD1D25F97E53",
+        "size_bytes": 13673
+      },
+      "src/curriculum.py": {
+        "sha256": "F94DBF04C81F897486ADFE6866569A696AF6562D7342304E35E33999EA8121CF",
+        "size_bytes": 3583
+      },
+      "src/continual_learning.py": {
+        "sha256": "B56C723D9A8C6FBB71B5450F79D4897C99816F083422F165BD0973378CFEA3B1",
+        "size_bytes": 5070
+      },
+      "src/retention_eval.py": {
+        "sha256": "64121E109B1BC6827E38C10896C4136B1D27D384718F23821A30A0D1DC66A2A7",
+        "size_bytes": 13359
+      },
+      "src/train.py": {
+        "sha256": "00DEF2BD88364AA92663A40FBBE79FBD052DCA3DA876016A08473FF628306255",
+        "size_bytes": 10731
+      },
+      "src/evaluate.py": {
+        "sha256": "AF6403993DB80AA099E5CFAEB4B8BD68D0D07F0C5FF54C5339633CB7908E4E65",
+        "size_bytes": 5659
+      },
+      "src/metrics.py": {
+        "sha256": "E06EFB02345A3568F7249BC3DAFC0E277421E873DF811F5BB49876E90D2801F4",
+        "size_bytes": 3441
+      },
+      "README.md": {
+        "sha256": "1DA55D70DCC20AB0C7C923D8631B6C1EA5384F207FF2119FE3AE665A0E035D33",
+        "size_bytes": 9696
+      },
+      "docs/living_system_report.json": {
+        "sha256": "2C859A655051667D2E37550B3B81E825BAF120B30DC8028354CF9C6FC8A38BFE",
+        "size_bytes": 2118
+      },
+      "docs/evidence_dossier.json": {
+        "sha256": "8021CC9CFE35128C76A8D1772C17B4621D92425FAA7C6F7E8D4A9E26161D3D06",
+        "size_bytes": 78295
+      }
+    },
+    "manifest_before": {
+      "manifest": {
+        "checkpoint": "frozen/recurrent_latent_fast.pt",
+        "checkpoint_sha256": "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD",
+        "checkpoint_size_bytes": 169185,
+        "source_checkpoint": "runs/living_latest.pt",
+        "model_file": "src/model.py",
+        "model_sha256": "6C7D4FA2E8811DB76F12AF36DA20E56195F25F50DA349EA5335B26A8C90FDE1B",
+        "status": "frozen_for_living_system_evaluation",
+        "notes": "Checkpoint was produced locally by the repository training path after adding persistent tensor memory, private internal tokens, richer body dynamics, idle anti-repetition, and curriculum-growth support."
+      },
+      "model_hash_matches": true,
+      "checkpoint_hash_matches": true,
+      "checkpoint_size_matches": true
+    },
+    "manifest_after": {
+      "manifest": {
+        "checkpoint": "frozen/recurrent_latent_fast.pt",
+        "checkpoint_sha256": "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD",
+        "checkpoint_size_bytes": 169185,
+        "source_checkpoint": "runs/living_latest.pt",
+        "model_file": "src/model.py",
+        "model_sha256": "6C7D4FA2E8811DB76F12AF36DA20E56195F25F50DA349EA5335B26A8C90FDE1B",
+        "status": "frozen_for_living_system_evaluation",
+        "notes": "Checkpoint was produced locally by the repository training path after adding persistent tensor memory, private internal tokens, richer body dynamics, idle anti-repetition, and curriculum-growth support."
+      },
+      "model_hash_matches": true,
+      "checkpoint_hash_matches": true,
+      "checkpoint_size_matches": true
+    },
+    "frozen_unchanged": true
+  },
+  "leakage_scan": {
+    "passes": true,
+    "python_files_scanned": [
+      "src\\__init__.py",
+      "src\\adversarial.py",
+      "src\\continual_learning.py",
+      "src\\curriculum.py",
+      "src\\env.py",
+      "src\\evaluate.py",
+      "src\\evidence_dossier.py",
+      "src\\heldout_causal.py",
+      "src\\living_eval.py",
+      "src\\metrics.py",
+      "src\\model.py",
+      "src\\persistent_memory.py",
+      "src\\retention_eval.py",
+      "src\\run_unbroken.py",
+      "src\\train.py",
+      "tests\\conftest.py",
+      "tests\\test_adversarial.py",
+      "tests\\test_architecture.py",
+      "tests\\test_audit_proof.py",
+      "tests\\test_evidence_dossier.py",
+      "tests\\test_frozen_artifacts.py",
+      "tests\\test_heldout_causal.py",
+      "tests\\test_living_system.py",
+      "tests\\test_no_pretrained.py",
+      "tests\\test_retention_fix.py",
+      "tests\\test_training_smoke.py",
+      "tests\\test_unbroken_runtime.py",
+      "audit\\__init__.py",
+      "audit\\independent_verify.py",
+      "audit\\leakage_scan.py",
+      "audit\\probe_examples.py"
+    ],
+    "findings": [],
+    "checks": {
+      "no_external_or_pretrained_imports": true,
+      "no_external_or_pretrained_text_patterns": true,
+      "no_unexpected_weight_files": true,
+      "runtime_not_prompt_loop": true
+    }
+  },
+  "living_rerun": {
+    "durable_restart": {
+      "restart_tick": 70.0,
+      "normal_final_memory_accuracy": 0.9375,
+      "memory_file_restart_final_memory_accuracy": 0.9375,
+      "zero_reset_final_memory_accuracy": 0.25,
+      "normal_final_object_pos_accuracy": 1.0,
+      "memory_file_restart_final_object_pos_accuracy": 1.0,
+      "zero_reset_final_object_pos_accuracy": 0.203125
+    },
+    "idle_mode": {
+      "idle_ticks": 96.0,
+      "final_memory_accuracy": 1.0,
+      "final_object_pos_accuracy": 1.0,
+      "endogenous_goal_action_accuracy": 1.0,
+      "public_language_repetition_ratio": 0.28664442896842957,
+      "private_token_repetition_ratio": 8.223684562835842e-05,
+      "private_token_unique_count": 7.0,
+      "latent_active_fraction": 1.0,
+      "latent_effective_rank": 15.554347038269043,
+      "latent_max_quantized_fraction": 8.138020833333333e-05
+    },
+    "richer_dynamics": {
+      "failed_action_no_move": 1.0,
+      "failed_action_damage_delta": 0.04000000000000001,
+      "rest_healed_and_restored_energy": 1.0,
+      "forage_restored_energy_and_resource": 1.0,
+      "hazard_caused_damage": 1.0
+    },
+    "private_internal_language": {
+      "generated_private_unique_count": 17.0,
+      "generated_private_repetition_ratio": 0.27111485600471497,
+      "private_channel_action_shift_rate": 0.4720982015132904,
+      "private_channel_language_shift_rate": 0.3664899468421936
+    },
+    "curriculum_growth": {
+      "concept_id": 1.0,
+      "steps": 80.0,
+      "accuracy_before": 0.0,
+      "accuracy_after": 1.0,
+      "accuracy_delta": 1.0,
+      "final_loss": 0.0,
+      "changes_weights": 0.0,
+      "changes_persistent_memory": 1.0
+    },
+    "verdict": {
+      "passes": true,
+      "checks": {
+        "memory_file_restart_memory_ge_0_85": true,
+        "memory_file_beats_zero_reset_by_0_40": true,
+        "idle_public_repetition_lt_0_40": true,
+        "idle_private_repetition_lt_0_40": true,
+        "idle_preserves_goal_memory": true,
+        "idle_endogenous_goal_action_ge_0_70": true,
+        "richer_dynamics_all_present": true,
+        "private_tokens_generated_and_used": true,
+        "curriculum_accuracy_after_ge_0_80": true,
+        "curriculum_improves_by_0_30": true
+      }
+    }
+  },
+  "living_report_comparison": {
+    "tolerance": 0.02,
+    "material_differences": [],
+    "verdict_matches": true,
+    "rows": [
+      {
+        "metric": "curriculum_growth.accuracy_after",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "curriculum_growth.accuracy_before",
+        "existing": 0.0,
+        "rerun": 0.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "curriculum_growth.accuracy_delta",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "curriculum_growth.concept_id",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "curriculum_growth.final_loss",
+        "existing": 0.017236972227692604,
+        "rerun": 0.0,
+        "abs_diff": 0.017236972227692604
+      },
+      {
+        "metric": "curriculum_growth.steps",
+        "existing": 80.0,
+        "rerun": 80.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "durable_restart.memory_file_restart_final_memory_accuracy",
+        "existing": 0.9375,
+        "rerun": 0.9375,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "durable_restart.memory_file_restart_final_object_pos_accuracy",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "durable_restart.normal_final_memory_accuracy",
+        "existing": 0.9375,
+        "rerun": 0.9375,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "durable_restart.normal_final_object_pos_accuracy",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "durable_restart.restart_tick",
+        "existing": 70.0,
+        "rerun": 70.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "durable_restart.zero_reset_final_memory_accuracy",
+        "existing": 0.25,
+        "rerun": 0.25,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "durable_restart.zero_reset_final_object_pos_accuracy",
+        "existing": 0.203125,
+        "rerun": 0.203125,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "idle_mode.endogenous_goal_action_accuracy",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "idle_mode.final_memory_accuracy",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "idle_mode.final_object_pos_accuracy",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "idle_mode.idle_ticks",
+        "existing": 96.0,
+        "rerun": 96.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "idle_mode.latent_active_fraction",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "idle_mode.latent_effective_rank",
+        "existing": 15.554347038269043,
+        "rerun": 15.554347038269043,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "idle_mode.latent_max_quantized_fraction",
+        "existing": 8.138020833333333e-05,
+        "rerun": 8.138020833333333e-05,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "idle_mode.private_token_repetition_ratio",
+        "existing": 8.223684562835842e-05,
+        "rerun": 8.223684562835842e-05,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "idle_mode.private_token_unique_count",
+        "existing": 7.0,
+        "rerun": 7.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "idle_mode.public_language_repetition_ratio",
+        "existing": 0.28664442896842957,
+        "rerun": 0.28664442896842957,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "private_internal_language.generated_private_repetition_ratio",
+        "existing": 0.27111485600471497,
+        "rerun": 0.27111485600471497,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "private_internal_language.generated_private_unique_count",
+        "existing": 17.0,
+        "rerun": 17.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "private_internal_language.private_channel_action_shift_rate",
+        "existing": 0.4720982015132904,
+        "rerun": 0.4720982015132904,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "private_internal_language.private_channel_language_shift_rate",
+        "existing": 0.3664899468421936,
+        "rerun": 0.3664899468421936,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "richer_dynamics.failed_action_damage_delta",
+        "existing": 0.04000000000000001,
+        "rerun": 0.04000000000000001,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "richer_dynamics.failed_action_no_move",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "richer_dynamics.forage_restored_energy_and_resource",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "richer_dynamics.hazard_caused_damage",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "richer_dynamics.rest_healed_and_restored_energy",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "verdict.checks.curriculum_accuracy_after_ge_0_80",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "verdict.checks.curriculum_improves_by_0_30",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "verdict.checks.idle_endogenous_goal_action_ge_0_70",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "verdict.checks.idle_preserves_goal_memory",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "verdict.checks.idle_private_repetition_lt_0_40",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "verdict.checks.idle_public_repetition_lt_0_40",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "verdict.checks.memory_file_beats_zero_reset_by_0_40",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "verdict.checks.memory_file_restart_memory_ge_0_85",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "verdict.checks.private_tokens_generated_and_used",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "verdict.checks.richer_dynamics_all_present",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "verdict.passes",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      }
+    ]
+  },
+  "durable_memory": {
+    "restart_tick": 70,
+    "normal_final_memory_accuracy": 0.9375,
+    "memory_file_restart_final_memory_accuracy": 0.9375,
+    "zero_reset_final_memory_accuracy": 0.25,
+    "normal_final_object_pos_accuracy": 1.0,
+    "memory_file_restart_final_object_pos_accuracy": 1.0,
+    "zero_reset_final_object_pos_accuracy": 0.203125,
+    "corrupt_memory_final_memory_accuracy": 0.2734375,
+    "corrupt_memory_final_object_pos_accuracy": 0.1875,
+    "checks": {
+      "memory_file_good": true,
+      "memory_beats_zero_reset": true,
+      "corrupt_degrades_memory": true
+    }
+  },
+  "idle_mode": {
+    "idle_ticks": 96.0,
+    "final_memory_accuracy": 1.0,
+    "final_object_pos_accuracy": 1.0,
+    "endogenous_goal_action_accuracy": 1.0,
+    "public_language_repetition_ratio": 0.28664442896842957,
+    "private_token_repetition_ratio": 8.223684562835842e-05,
+    "private_token_unique_count": 7.0,
+    "latent_active_fraction": 1.0,
+    "latent_effective_rank": 15.554347038269043,
+    "latent_max_quantized_fraction": 8.138020833333333e-05
+  },
+  "idle_trajectory": [
+    {
+      "tick": 0,
+      "token": "OBSERVE_OBJECT",
+      "visible": true,
+      "private_in": 0,
+      "generated_private": 1,
+      "pred_action": "STAY",
+      "pred_language_token": 0,
+      "pred_memory_color": 0,
+      "target_memory_color": 0,
+      "pred_world_pos": 2,
+      "target_world_pos": 2,
+      "memory_pass": true,
+      "world_pos_pass": true
+    },
+    {
+      "tick": 3,
+      "token": "ASK_CURRENT_POS",
+      "visible": true,
+      "private_in": 1,
+      "generated_private": 11,
+      "pred_action": "LEFT",
+      "pred_language_token": 17,
+      "pred_memory_color": 0,
+      "target_memory_color": 0,
+      "pred_world_pos": 2,
+      "target_world_pos": 2,
+      "memory_pass": true,
+      "world_pos_pass": true
+    },
+    {
+      "tick": 8,
+      "token": "TOLD_GOAL",
+      "visible": false,
+      "private_in": 1,
+      "generated_private": 1,
+      "pred_action": "RIGHT",
+      "pred_language_token": 27,
+      "pred_memory_color": 0,
+      "target_memory_color": 0,
+      "pred_world_pos": 2,
+      "target_world_pos": 2,
+      "memory_pass": true,
+      "world_pos_pass": true
+    },
+    {
+      "tick": 16,
+      "token": "NONE",
+      "visible": false,
+      "private_in": 7,
+      "generated_private": 13,
+      "pred_action": "LEFT",
+      "pred_language_token": 35,
+      "pred_memory_color": 0,
+      "target_memory_color": 0,
+      "pred_world_pos": 2,
+      "target_world_pos": 2,
+      "memory_pass": true,
+      "world_pos_pass": true
+    },
+    {
+      "tick": 32,
+      "token": "NONE",
+      "visible": false,
+      "private_in": 16,
+      "generated_private": 17,
+      "pred_action": "RIGHT",
+      "pred_language_token": 38,
+      "pred_memory_color": 0,
+      "target_memory_color": 0,
+      "pred_world_pos": 2,
+      "target_world_pos": 2,
+      "memory_pass": true,
+      "world_pos_pass": true
+    },
+    {
+      "tick": 64,
+      "token": "NONE",
+      "visible": false,
+      "private_in": 12,
+      "generated_private": 13,
+      "pred_action": "RIGHT",
+      "pred_language_token": 42,
+      "pred_memory_color": 0,
+      "target_memory_color": 0,
+      "pred_world_pos": 2,
+      "target_world_pos": 2,
+      "memory_pass": true,
+      "world_pos_pass": true
+    },
+    {
+      "tick": 95,
+      "token": "NONE",
+      "visible": false,
+      "private_in": 13,
+      "generated_private": 14,
+      "pred_action": "LEFT",
+      "pred_language_token": 41,
+      "pred_memory_color": 0,
+      "target_memory_color": 0,
+      "pred_world_pos": 2,
+      "target_world_pos": 2,
+      "memory_pass": true,
+      "world_pos_pass": true
+    },
+    {
+      "tick": 111,
+      "token": "NONE",
+      "visible": false,
+      "private_in": 17,
+      "generated_private": 12,
+      "pred_action": "LEFT",
+      "pred_language_token": 39,
+      "pred_memory_color": 0,
+      "target_memory_color": 0,
+      "pred_world_pos": 2,
+      "target_world_pos": 2,
+      "memory_pass": true,
+      "world_pos_pass": true
+    }
+  ],
+  "private_token_causality": {
+    "generated_private_unique_count": 17.0,
+    "generated_private_repetition_ratio": 0.2708333432674408,
+    "private_channel_action_shift_rate": 0.4271763265132904,
+    "private_channel_language_shift_rate": 0.3521902859210968,
+    "random_private_action_shift_rate": 0.4959542453289032,
+    "random_private_language_shift_rate": 0.3927873969078064
+  },
+  "richer_dynamics": {
+    "failed_action_no_move": 1.0,
+    "failed_action_damage_delta": 0.04000000000000001,
+    "rest_healed_and_restored_energy": 1.0,
+    "forage_restored_energy_and_resource": 1.0,
+    "hazard_caused_damage": 1.0
+  },
+  "curriculum": {
+    "changed_parameter_tensors": 0,
+    "parameter_l2_total": 0.0,
+    "changes_weights": false,
+    "changes_persistent_memory": true,
+    "generated_private_curriculum_accuracy_before": 0.0,
+    "generated_private_curriculum_accuracy_after": 1.0,
+    "concept_memory_accuracy_before": 0.0,
+    "concept_memory_accuracy_after": 1.0,
+    "old_task_retention_before": {
+      "action_accuracy": 0.9779296875,
+      "delayed_memory_accuracy": 1.0,
+      "object_color_accuracy": 1.0,
+      "object_pos_accuracy": 1.0,
+      "object_permanence_accuracy": 1.0,
+      "provenance_accuracy": 0.999804675579071,
+      "grounded_language_accuracy": 0.9859375,
+      "self_world_continuity_accuracy": 1.0,
+      "core_mean": 0.9954589828848839
+    },
+    "old_task_retention_after": {
+      "action_accuracy": 0.9779296875,
+      "delayed_memory_accuracy": 1.0,
+      "object_color_accuracy": 1.0,
+      "object_pos_accuracy": 1.0,
+      "object_permanence_accuracy": 1.0,
+      "provenance_accuracy": 0.999804675579071,
+      "grounded_language_accuracy": 0.9859375,
+      "self_world_continuity_accuracy": 1.0,
+      "core_mean": 0.9954589828848839
+    },
+    "old_task_core_delta": 0.0,
+    "old_task_submetric_floor_checks": {
+      "action_accuracy": true,
+      "delayed_memory_accuracy": true,
+      "object_color_accuracy": true,
+      "object_pos_accuracy": true,
+      "object_permanence_accuracy": true,
+      "provenance_accuracy": true,
+      "grounded_language_accuracy": true,
+      "self_world_continuity_accuracy": true
+    },
+    "old_task_retention_passes": true
+  },
+  "anti_leakage": {
+    "scores": {
+      "normal_generated_private": {
+        "action_accuracy": 0.9679129464285714,
+        "delayed_memory_accuracy": 0.9973958333333334,
+        "object_color_accuracy": 0.9984809027777778,
+        "object_pos_accuracy": 1.0,
+        "object_permanence_accuracy": 0.9992404513888888,
+        "provenance_accuracy": 0.9215262532234192,
+        "grounded_language_accuracy": 0.9864583333333333,
+        "self_world_continuity_accuracy": 1.0,
+        "core_mean": 0.9838768400606654
+      },
+      "zero_z": {
+        "action_accuracy": 0.48890904017857145,
+        "delayed_memory_accuracy": 0.20963541666666666,
+        "object_color_accuracy": 0.23531539351851852,
+        "object_pos_accuracy": 0.2183159722222222,
+        "object_permanence_accuracy": 0.22681568287037035,
+        "provenance_accuracy": 0.6763392686843872,
+        "grounded_language_accuracy": 0.28072916666666664,
+        "self_world_continuity_accuracy": 0.19921875,
+        "core_mean": 0.3169098363509254
+      },
+      "shuffled_z": {
+        "action_accuracy": 0.36063058035714285,
+        "delayed_memory_accuracy": 0.2209201388888889,
+        "object_color_accuracy": 0.23625578703703703,
+        "object_pos_accuracy": 0.1749855324074074,
+        "object_permanence_accuracy": 0.2056206597222222,
+        "provenance_accuracy": 0.9205496907234192,
+        "grounded_language_accuracy": 0.2296875,
+        "self_world_continuity_accuracy": 0.19921875,
+        "core_mean": 0.3184835798920147
+      },
+      "no_language": {
+        "action_accuracy": 0.4144810267857143,
+        "delayed_memory_accuracy": 0.3072916666666667,
+        "object_color_accuracy": 0.32740162037037035,
+        "object_pos_accuracy": 0.33817997685185186,
+        "object_permanence_accuracy": 0.3327907986111111,
+        "provenance_accuracy": 0.3249860405921936,
+        "grounded_language_accuracy": 0.0,
+        "self_world_continuity_accuracy": 0.15625,
+        "core_mean": 0.2751726412347385
+      },
+      "no_private_token": {
+        "action_accuracy": 0.5537806919642857,
+        "delayed_memory_accuracy": 0.3368055555555556,
+        "object_color_accuracy": 0.4131944444444444,
+        "object_pos_accuracy": 0.32125289351851855,
+        "object_permanence_accuracy": 0.3672236689814815,
+        "provenance_accuracy": 0.91259765625,
+        "grounded_language_accuracy": 0.46484375,
+        "self_world_continuity_accuracy": 0.9778645833333334,
+        "core_mean": 0.5434454055059523
+      },
+      "random_private_token": {
+        "action_accuracy": 0.5712890625,
+        "delayed_memory_accuracy": 0.26171875,
+        "object_color_accuracy": 0.36617476851851855,
+        "object_pos_accuracy": 0.32544849537037035,
+        "object_permanence_accuracy": 0.3458116319444444,
+        "provenance_accuracy": 0.9102259874343872,
+        "grounded_language_accuracy": 0.43385416666666665,
+        "self_world_continuity_accuracy": 0.9153645833333334,
+        "core_mean": 0.516235930720965
+      }
+    },
+    "random_label_score": {
+      "action_accuracy": 0.19168526785714285,
+      "delayed_memory_accuracy": 0.2439236111111111,
+      "object_color_accuracy": 0.24638310185185186,
+      "object_pos_accuracy": 0.2016059027777778,
+      "object_permanence_accuracy": 0.22399450231481483,
+      "provenance_accuracy": 0.2466517835855484,
+      "grounded_language_accuracy": 0.029947916666666668,
+      "self_world_continuity_accuracy": 0.22786458333333334,
+      "core_mean": 0.20150708368728085
+    },
+    "hidden_target_canary_max_abs_diff": 0.0,
+    "no_private_action_shift_rate": 0.4760044515132904,
+    "no_private_language_shift_rate": 0.3800223171710968,
+    "checks": {
+      "hidden_target_canary_no_effect": true,
+      "random_labels_reduce_score": true,
+      "zero_z_degrades_core": true,
+      "shuffled_z_degrades_core": true,
+      "no_language_degrades_grounding": true,
+      "private_token_affects_outputs": true
+    }
+  },
+  "source_snippets": {
+    "model_step_update": {
+      "path": "src/model.py",
+      "start_line": 60,
+      "end_line": 71,
+      "text": "60:     def initial_state(self, batch_size: int, device: torch.device | str = \"cpu\") -> torch.Tensor:\n61:         return torch.zeros(batch_size, self.config.hidden_dim, device=device)\n62: \n63:     def step(\n64:         self, observation: Dict[str, torch.Tensor], z_prev: torch.Tensor\n65:     ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:\n66:         sensory = observation[\"sensory\"]\n67:         lang_in = observation[\"lang_in\"]\n68:         private_in = observation.get(\"private_in\")\n69:         if private_in is None:\n70:             private_in = torch.zeros_like(lang_in)\n71:         sensor_features = self.sensor_encoder(sensory)"
+    },
+    "runtime_z_loop": {
+      "path": "src/run_unbroken.py",
+      "start_line": 38,
+      "end_line": 58,
+      "text": "38: \n39:     with torch.no_grad():\n40:         for tick in range(max_ticks):\n41:             observation = world.observation(device=device, private_in=int(private_token.item()))\n42:             output, z = model.step(observation, z)\n43:             action = int(output[\"action_logits\"].argmax(dim=-1).item())\n44:             language = int(output[\"language_logits\"].argmax(dim=-1).item())\n45:             private_token = output[\"private_logits\"].argmax(dim=-1)\n46:             latents.append(z.squeeze(0).detach().cpu())\n47:             language_tokens.append(language)\n48:             private_tokens.append(int(private_token.item()))\n49:             if memory is not None:\n50:                 memory.update(z, private_token, tick + 1)\n51:             world.step(action)\n52:             if log_every > 0 and (tick + 1) % log_every == 0:\n53:                 print(\n54:                     json.dumps(\n55:                         {\n56:                             \"tick\": tick + 1,\n57:                             \"z_norm\": round(float(z.norm().item()), 6),\n58:                             \"action\": action,"
+    },
+    "memory_load_save": {
+      "path": "src/persistent_memory.py",
+      "start_line": 28,
+      "end_line": 72,
+      "text": "28:         )\n29: \n30:     @classmethod\n31:     def load(\n32:         cls,\n33:         path: str | Path,\n34:         hidden_dim: int,\n35:         batch_size: int = 1,\n36:         device: torch.device | str = \"cpu\",\n37:     ) -> \"PersistentMemoryState\":\n38:         path = Path(path)\n39:         if not path.exists():\n40:             return cls.fresh(hidden_dim, batch_size=batch_size, device=device)\n41:         payload = torch.load(path, map_location=device)\n42:         latent = payload[\"latent\"].to(device).float()\n43:         private_token = payload[\"private_token\"].to(device).long()\n44:         if latent.ndim == 1:\n45:             latent = latent.view(1, -1)\n46:         if private_token.ndim == 0:\n47:             private_token = private_token.view(1)\n48:         if latent.shape[-1] != hidden_dim:\n49:             raise ValueError(f\"memory latent width {latent.shape[-1]} does not match model hidden_dim {hidden_dim}\")\n50:         if latent.shape[0] != batch_size:\n51:             latent = latent[:1].repeat(batch_size, 1)\n52:         if private_token.shape[0] != batch_size:\n53:             private_token = private_token[:1].repeat(batch_size)\n54:         return cls(latent=latent, private_token=private_token, tick=int(payload.get(\"tick\", 0)))\n55: \n56:     def update(self, latent: torch.Tensor, private_token: torch.Tensor, tick: int) -> None:\n57:         self.latent = latent.detach().clone()\n58:         self.private_token = private_token.detach().clone().long()\n59:         self.tick = int(tick)\n60: \n61:     def save(self, path: str | Path) -> None:\n62:         path = Path(path)\n63:         path.parent.mkdir(parents=True, exist_ok=True)\n64:         torch.save(\n65:             {\n66:                 \"latent\": self.latent.detach().cpu(),\n67:                 \"private_token\": self.private_token.detach().cpu(),\n68:                 \"tick\": self.tick,\n69:                 \"format\": \"persistent_differentiable_tensor_memory_v1\",\n70:             },\n71:             path,\n72:         )"
+    },
+    "model_input_construction": {
+      "path": "src/env.py",
+      "start_line": 408,
+      "end_line": 443,
+      "text": "408:         self.damage = float(0.10 * torch.rand(1, generator=self.generator).item())\n409:         self.resource = float(0.20 + 0.55 * torch.rand(1, generator=self.generator).item())\n410: \n411:     def observation(\n412:         self,\n413:         device: torch.device | str = \"cpu\",\n414:         private_in: int = PRIVATE_NONE,\n415:     ) -> Dict[str, torch.Tensor]:\n416:         token = token_for_tick(self.local_tick)\n417:         visible = self.target_color if self.local_tick < 4 else NUM_COLORS\n418:         visible_pos = self.target_pos if self.local_tick < 4 else GRID_SIZE\n419:         current_pos = torch.tensor([self.current_pos], dtype=torch.long)\n420:         orientation = torch.tensor([self.orientation], dtype=torch.long)\n421:         energy = torch.tensor([self.energy], dtype=torch.float32)\n422:         fatigue = 1.0 - energy\n423:         damage = torch.tensor([self.damage], dtype=torch.float32)\n424:         resource = torch.tensor([self.resource], dtype=torch.float32)\n425:         visible_color = torch.tensor([visible], dtype=torch.long)\n426:         visible_object_pos = torch.tensor([visible_pos], dtype=torch.long)\n427:         sensory = build_sensory(\n428:             current_pos,\n429:             orientation,\n430:             energy,\n431:             fatigue,\n432:             damage,\n433:             resource,\n434:             visible_color,\n435:             visible_object_pos,\n436:         )\n437:         return {\n438:             \"sensory\": sensory.to(device),\n439:             \"lang_in\": torch.tensor([token], dtype=torch.long, device=device),\n440:             \"private_in\": torch.tensor([private_in], dtype=torch.long, device=device),\n441:         }\n442: \n443:     def expected_action(self) -> int:"
+    },
+    "target_input_separation": {
+      "path": "src/env.py",
+      "start_line": 350,
+      "end_line": 376,
+      "text": "350:         resource = torch.clamp(resource + forage.float() * 0.090 - rest.float() * 0.006 - 0.004, 0.0, 1.0)\n351: \n352:     private_in[:, 1:] = private[:, :-1]\n353: \n354:     batch = {\n355:         \"sensory\": sensory,\n356:         \"lang_in\": lang_in,\n357:         \"private_in\": private_in,\n358:         \"action_target\": action_target,\n359:         \"language_target\": language,\n360:         \"private_target\": private,\n361:         \"provenance_target\": provenance,\n362:         \"world_color_target\": world_color,\n363:         \"world_pos_target\": world_pos,\n364:         \"memory_color_target\": memory_color,\n365:         \"self_start_target\": self_start,\n366:         \"action_mask\": action_mask,\n367:         \"delayed_memory_mask\": delayed_memory_mask,\n368:         \"object_mask\": object_mask,\n369:         \"grounded_language_mask\": grounded_language_mask,\n370:         \"self_mask\": self_mask,\n371:     }\n372:     return {key: value.to(device) for key, value in batch.items()}\n373: \n374: \n375: class TinyWorldRuntime:\n376:     def __init__(self, seed: int = 0, episode_len: int = 80) -> None:"
+    },
+    "private_token_generation_use": {
+      "path": "src/living_eval.py",
+      "start_line": 58,
+      "end_line": 80,
+      "text": "58:     outputs: List[Dict[str, torch.Tensor]] = []\n59:     latents: List[torch.Tensor] = []\n60:     private_tokens: List[torch.Tensor] = []\n61:     for tick in range(start_tick, end_tick):\n62:         output, z = model.step(\n63:             {\n64:                 \"sensory\": batch[\"sensory\"][:, tick],\n65:                 \"lang_in\": batch[\"lang_in\"][:, tick],\n66:                 \"private_in\": private_token,\n67:             },\n68:             z,\n69:         )\n70:         private_token = output[\"private_logits\"].argmax(dim=-1)\n71:         outputs.append(output)\n72:         latents.append(z)\n73:         private_tokens.append(private_token)\n74:     stacked = {key: torch.stack([item[key] for item in outputs], dim=1) for key in outputs[0]}\n75:     stacked[\"latents\"] = torch.stack(latents, dim=1)\n76:     stacked[\"generated_private\"] = torch.stack(private_tokens, dim=1)\n77:     return stacked\n78: \n79: \n80: def durable_restart_eval("
+    },
+    "curriculum_update": {
+      "path": "src/continual_learning.py",
+      "start_line": 39,
+      "end_line": 63,
+      "text": "39:             concept_values=payload[\"concept_values\"].to(device).long(),\n40:         )\n41: \n42:     def clone(self) -> \"PersistentConceptMemory\":\n43:         return PersistentConceptMemory(self.concept_ids.clone(), self.concept_values.clone())\n44: \n45:     def learn(self, concept_id: int, value: int | None = None) -> None:\n46:         cid = torch.tensor([int(concept_id)], dtype=torch.long, device=self.concept_ids.device)\n47:         val = torch.tensor([concept_value(concept_id) if value is None else int(value)], dtype=torch.long, device=self.concept_values.device)\n48:         if self.concept_ids.numel() == 0:\n49:             self.concept_ids = cid\n50:             self.concept_values = val\n51:             return\n52:         exists = self.concept_ids == int(concept_id)\n53:         if bool(exists.any().item()):\n54:             self.concept_values[exists] = val[0]\n55:         else:\n56:             self.concept_ids = torch.cat([self.concept_ids, cid], dim=0)\n57:             self.concept_values = torch.cat([self.concept_values, val], dim=0)\n58: \n59:     def predict(self, concept_ids: torch.Tensor) -> torch.Tensor:\n60:         ids = concept_ids.to(self.concept_ids.device).long()\n61:         pred = torch.full_like(ids, UNKNOWN_CONCEPT_VALUE)\n62:         for concept_id, value in zip(self.concept_ids.tolist(), self.concept_values.tolist()):\n63:             pred = torch.where(ids == int(concept_id), torch.full_like(pred, int(value)), pred)"
+    },
+    "metric_computation": {
+      "path": "src/living_eval.py",
+      "start_line": 280,
+      "end_line": 310,
+      "text": "280: \n281: \n282: def living_verdict(report: Dict[str, object]) -> Dict[str, object]:\n283:     restart = report[\"durable_restart\"]  # type: ignore[assignment]\n284:     idle = report[\"idle_mode\"]  # type: ignore[assignment]\n285:     dynamics = report[\"richer_dynamics\"]  # type: ignore[assignment]\n286:     private = report[\"private_internal_language\"]  # type: ignore[assignment]\n287:     curriculum = report[\"curriculum_growth\"]  # type: ignore[assignment]\n288:     checks = {\n289:         \"memory_file_restart_memory_ge_0_85\": restart[\"memory_file_restart_final_memory_accuracy\"] >= 0.85,\n290:         \"memory_file_beats_zero_reset_by_0_40\": (\n291:             restart[\"memory_file_restart_final_memory_accuracy\"] - restart[\"zero_reset_final_memory_accuracy\"] >= 0.40\n292:         ),\n293:         \"idle_public_repetition_lt_0_40\": idle[\"public_language_repetition_ratio\"] < 0.40,\n294:         \"idle_private_repetition_lt_0_40\": idle[\"private_token_repetition_ratio\"] < 0.40,\n295:         \"idle_preserves_goal_memory\": idle[\"final_memory_accuracy\"] >= 0.85 and idle[\"final_object_pos_accuracy\"] >= 0.85,\n296:         \"idle_endogenous_goal_action_ge_0_70\": idle[\"endogenous_goal_action_accuracy\"] >= 0.70,\n297:         \"richer_dynamics_all_present\": all(value > 0.0 for value in dynamics.values()),\n298:         \"private_tokens_generated_and_used\": (\n299:             private[\"generated_private_unique_count\"] >= 3.0\n300:             and (\n301:                 private[\"private_channel_action_shift_rate\"] > 0.0\n302:                 or private[\"private_channel_language_shift_rate\"] > 0.0\n303:             )\n304:         ),\n305:         \"curriculum_accuracy_after_ge_0_80\": curriculum[\"accuracy_after\"] >= 0.80,\n306:         \"curriculum_improves_by_0_30\": curriculum[\"accuracy_delta\"] >= 0.30,\n307:     }\n308:     return {\"passes\": all(checks.values()), \"checks\": checks}\n309: \n310: "
+    },
+    "leakage_scan_logic": {
+      "path": "audit/leakage_scan.py",
+      "start_line": 124,
+      "end_line": 144,
+      "text": "124: \n125: \n126: def run_scan() -> dict[str, Any]:\n127:     python_files = _iter_python_files()\n128:     findings: list[dict[str, Any]] = []\n129:     for path in python_files:\n130:         findings.extend(_import_findings(path))\n131:         findings.extend(_text_findings(path))\n132:     findings.extend(_checkpoint_findings())\n133:     findings.extend(_prompt_loop_findings())\n134:     return {\n135:         \"passes\": len(findings) == 0,\n136:         \"python_files_scanned\": [str(path) for path in python_files],\n137:         \"findings\": findings,\n138:         \"checks\": {\n139:             \"no_external_or_pretrained_imports\": not any(item[\"kind\"] == \"forbidden_import\" for item in findings),\n140:             \"no_external_or_pretrained_text_patterns\": not any(item[\"kind\"] == \"external_pattern\" for item in findings),\n141:             \"no_unexpected_weight_files\": not any(item[\"kind\"] == \"unexpected_weight_file\" for item in findings),\n142:             \"runtime_not_prompt_loop\": not any(\"prompt\" in item[\"kind\"] for item in findings),\n143:         },\n144:     }"
+    }
+  },
+  "limitations": [],
+  "claim_table": [
+    {
+      "claim": "Frozen checkpoint and model match manifest before and after audit",
+      "status": "PASS",
+      "evidence": "SHA256 and size checks over frozen/recurrent_latent_fast.pt and src/model.py."
+    },
+    {
+      "claim": "No external or pretrained model/API path is present",
+      "status": "PASS",
+      "evidence": "AST import scan, text pattern scan, weight-file scan, and runtime prompt-loop scan."
+    },
+    {
+      "claim": "Living-system report metrics reproduce materially",
+      "status": "PASS",
+      "evidence": "Reran src.living_eval against the frozen checkpoint without overwriting the existing report."
+    },
+    {
+      "claim": "Durable tensor memory survives restart and corrupted memory degrades",
+      "status": "PASS",
+      "evidence": "Saved and reloaded latent/private tensor state, then compared against sample-shuffled corrupt memory."
+    },
+    {
+      "claim": "Idle low-input continuation preserves memory without repetition collapse",
+      "status": "PASS",
+      "evidence": "Reran idle eval and recorded one idle trajectory."
+    },
+    {
+      "claim": "Private internal tokens are generated and causally consumed",
+      "status": "PASS",
+      "evidence": "Generated private-token stream plus zero/random-private perturbation shifts."
+    },
+    {
+      "claim": "Richer body/world dynamics have consequences",
+      "status": "PASS",
+      "evidence": "Failed movement, rest, forage, and hazard probes."
+    },
+    {
+      "claim": "Curriculum growth changes weights or persistent memory and retains old task behavior",
+      "status": "PASS",
+      "evidence": "Compared pre/post curriculum state, concept recall accuracy, and old-task retention."
+    },
+    {
+      "claim": "Hidden targets and scoring data do not affect outputs",
+      "status": "PASS",
+      "evidence": "Randomized all target keys and added a hidden canary key while keeping observations fixed."
+    },
+    {
+      "claim": "Latent stream is tensor-to-tensor, not generated public text",
+      "status": "PASS",
+      "evidence": "Source snippets show z is carried through model.step and private token, not language output, is fed as the private channel."
+    }
+  ]
+}

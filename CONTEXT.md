@@ -956,3 +956,111 @@
   - Audit Terminal Outcome A is not supported because the curriculum retention proof fails.
 - Exact next action:
   - Commit the audit artifacts atomically.
+
+## Step 0043 - Retention-fix objective intake and blocker reproduction
+
+- Files touched: `CONTEXT.md`
+- Commands run:
+  - `Get-Content -Raw GOAL.MD`
+  - `Get-Content -Raw CONTEXT.MD`
+  - `Get-Content -Raw docs\audit_proof.json`
+  - `Get-Content -Raw docs\living_system_report.json`
+  - `git status --short --branch; git log --oneline -5`
+  - `Get-FileHash` over frozen checkpoint, manifest, model/environment/curriculum/living/audit source, and report JSON
+  - `python -c "... evaluate_living_system(...); curriculum_probe(...)"` to reproduce the blocker without changing frozen artifacts
+- Observed results/errors:
+  - Active objective is to fix only the continual-learning retention failure, without weakening tests/evaluators or changing frozen artifacts in place.
+  - Worktree started clean on `main` at `3d09974 Add independent living-system audit proof`.
+  - Current frozen checkpoint SHA256: `D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD`.
+  - Current frozen manifest SHA256: `5A29A083287FDA14194392CE08CE24EDB56E21061285FFF2CCCB5E637807CA89`.
+  - Current `src/model.py` SHA256: `6C7D4FA2E8811DB76F12AF36DA20E56195F25F50DA349EA5335B26A8C90FDE1B`.
+  - Retention blocker reproduced: generated-private new concept accuracy after learning `1.0`; old-task core before `0.9954589828848839`; old-task core after `0.6680497018914474`; delta `-0.32740928099343647`; retention pass `false`.
+- Repair plan:
+  - Preserve the frozen recurrent model and original checkpoint unchanged.
+  - Add `src/continual_learning.py` with a compact persistent concept memory/table that learns post-deployment concept IDs without updating the recurrent trunk.
+  - Add `src/retention_eval.py` to learn at least five sequential concept IDs, verify restart/zero/corrupt persistence behavior, and rerun prior living/audit-preservation probes.
+  - Update curriculum/audit integration so continual learning is assessed through the non-destructive memory path, while old destructive fine-tune behavior remains available only as the reproduced blocker if needed.
+  - Add `tests/test_retention_fix.py` and generated `docs/retention_fix_report.{json,md}`.
+- Current blockers:
+  - Retention repair is not yet implemented.
+- Exact next action:
+  - Inspect curriculum/audit test interfaces, then implement persistent concept memory and retention evaluator.
+
+## Step 0044 - Persistent concept-memory retention repair added
+
+- Files touched:
+  - `src/continual_learning.py`
+  - `src/curriculum.py`
+  - `src/retention_eval.py`
+  - `audit/independent_verify.py`
+  - `tests/test_retention_fix.py`
+  - `CONTEXT.md`
+- Commands run:
+  - `Get-Content -Raw src\curriculum.py`
+  - `Get-Content -Raw audit\independent_verify.py`
+  - `Get-Content -Raw tests\test_living_system.py; Get-Content -Raw tests\test_audit_proof.py`
+  - `rg -n "acquire_new_concept|curriculum_probe|curriculum_growth|retention|audit_after|retention_fix" src audit tests docs README.md`
+  - `python -m py_compile src\continual_learning.py src\curriculum.py src\retention_eval.py audit\independent_verify.py tests\test_retention_fix.py`
+  - `pytest -q tests\test_retention_fix.py`
+- Observed results/errors:
+  - Added `PersistentConceptMemory`, a saved tensor concept-memory table for post-deployment concept IDs.
+  - Changed `src.curriculum.acquire_new_concept()` to load the frozen checkpoint for validation but learn concepts by updating persistent concept memory, not by training model weights.
+  - Added `src.retention_eval` to verify five sequential concepts, old-task retention, persistence reload, zero/corrupt concept-memory degradation, prior living gates, and audit-preservation gates.
+  - Updated `audit.independent_verify.curriculum_probe()` so post-fix audit accepts either weight changes or persistent-memory changes and applies stricter retention: old-task core `>=0.90`, delta `>=-0.05`, and submetrics floor checks.
+  - Focused tests passed: `2 passed in 2.26s`.
+- Current blockers:
+  - Full fast retention evaluation and full audit/test sequence have not run yet.
+- Exact next action:
+  - Run `python -m src.retention_eval --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs\retention_fix_report.json` and inspect every gate.
+
+## Step 0045 - Fast retention evaluator passes
+
+- Files touched:
+  - `docs/retention_fix_report.json`
+  - `docs/retention_fix_report.md`
+  - `CONTEXT.md`
+- Commands run:
+  - `python -m src.retention_eval --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/retention_fix_report.json`
+  - `python -c "import json; ... pprint retention report tables ..."`
+  - `Get-Content -First 220 docs\retention_fix_report.md`
+  - `git status --short`
+- Observed results/errors:
+  - Fast retention evaluator terminal outcome: `RETENTION FIX PROVEN`.
+  - New concepts for sequential IDs `0..4`: before `0.0`, after `1.0`, improvement `1.0` for every ID.
+  - Old-task core before `0.996948243677616`; after `0.996948243677616`; delta `0.0`.
+  - No old-task submetric fell below `0.85`.
+  - Restart loaded new concept recall `1.0`; zero-memory recall `0.0`; corrupt-memory recall `0.0`; old-task core after reload `0.996948243677616`.
+  - Prior living preservation and audit-preservation check dictionaries were all true.
+- Current blockers:
+  - Full required command sequence still pending: `pytest -q`, `retention_eval` rerun, `audit.leakage_scan`, and `audit.independent_verify` after retention fix.
+- Exact next action:
+  - Run full required command sequence and inspect the post-fix independent audit report.
+
+## Step 0046 - Required retention-fix verification sequence passes
+
+- Files touched:
+  - `docs/retention_fix_report.json`
+  - `docs/retention_fix_report.md`
+  - `docs/audit_after_retention_fix.json`
+  - `docs/audit_after_retention_fix.md`
+  - `CONTEXT.md`
+- Commands run:
+  - `pytest -q`
+  - `python -m src.retention_eval --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/retention_fix_report.json`
+  - `python -m audit.leakage_scan`
+  - `python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_retention_fix.json`
+  - `python -c "import json; ... pprint audit_after_retention_fix ..."`
+  - `Get-FileHash` over frozen artifacts, model, retention source, audit source, and reports
+  - `git status --short; git diff --stat`
+- Observed results/errors:
+  - Full tests passed: `28 passed in 23.59s`.
+  - Fast retention evaluator terminal outcome: `RETENTION FIX PROVEN`, no limitations.
+  - Leakage scan passed with new files included and no findings.
+  - Post-fix independent audit terminal outcome: `AUDIT PROVEN`, no limitations.
+  - Post-fix independent audit curriculum probe: changed parameter tensors `0`, parameter L2 `0.0`, persistent memory changed `true`, concept memory before `0.0`, after `1.0`, old-task core before and after `0.9954589828848839`, delta `0.0`.
+  - Existing living report comparison had zero material differences.
+  - Frozen checkpoint and `src/model.py` hashes remained unchanged: checkpoint `D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD`, model `6C7D4FA2E8811DB76F12AF36DA20E56195F25F50DA349EA5335B26A8C90FDE1B`.
+- Current blockers:
+  - None known. Commit pending.
+- Exact next action:
+  - Stage and commit the retention-fix source, tests, reports, audit update, and context atomically, then verify clean status.

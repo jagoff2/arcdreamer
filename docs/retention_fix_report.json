@@ -1,0 +1,357 @@
+{
+  "terminal_outcome": "RETENTION FIX PROVEN",
+  "checkpoint": "frozen/recurrent_latent_fast.pt",
+  "config": "fast",
+  "hash_manifest_summary": {
+    "hashes": {
+      "frozen/recurrent_latent_fast.pt": {
+        "sha256": "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD",
+        "size_bytes": 169185
+      },
+      "frozen/manifest.json": {
+        "sha256": "5A29A083287FDA14194392CE08CE24EDB56E21061285FFF2CCCB5E637807CA89",
+        "size_bytes": 614
+      },
+      "src/model.py": {
+        "sha256": "6C7D4FA2E8811DB76F12AF36DA20E56195F25F50DA349EA5335B26A8C90FDE1B",
+        "size_bytes": 5392
+      },
+      "src/continual_learning.py": {
+        "sha256": "B56C723D9A8C6FBB71B5450F79D4897C99816F083422F165BD0973378CFEA3B1",
+        "size_bytes": 5070
+      },
+      "src/retention_eval.py": {
+        "sha256": "64121E109B1BC6827E38C10896C4136B1D27D384718F23821A30A0D1DC66A2A7",
+        "size_bytes": 13359
+      },
+      "src/curriculum.py": {
+        "sha256": "F94DBF04C81F897486ADFE6866569A696AF6562D7342304E35E33999EA8121CF",
+        "size_bytes": 3583
+      },
+      "audit/independent_verify.py": {
+        "sha256": "20F150983B99A0D267A9D0B330876E0BE16F3B7F532CA35C1B1954304A5B8D92",
+        "size_bytes": 35573
+      }
+    },
+    "manifest": {
+      "checkpoint": "frozen/recurrent_latent_fast.pt",
+      "checkpoint_sha256": "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD",
+      "checkpoint_size_bytes": 169185,
+      "source_checkpoint": "runs/living_latest.pt",
+      "model_file": "src/model.py",
+      "model_sha256": "6C7D4FA2E8811DB76F12AF36DA20E56195F25F50DA349EA5335B26A8C90FDE1B",
+      "status": "frozen_for_living_system_evaluation",
+      "notes": "Checkpoint was produced locally by the repository training path after adding persistent tensor memory, private internal tokens, richer body dynamics, idle anti-repetition, and curriculum-growth support."
+    },
+    "model_hash_matches_manifest": true,
+    "checkpoint_hash_matches_manifest": true,
+    "checkpoint_size_matches_manifest": true
+  },
+  "new_concepts": {
+    "rows": [
+      {
+        "concept_id": 0.0,
+        "accuracy_before": 0.0,
+        "accuracy_after": 1.0,
+        "improvement": 1.0,
+        "passes": true
+      },
+      {
+        "concept_id": 1.0,
+        "accuracy_before": 0.0,
+        "accuracy_after": 1.0,
+        "improvement": 1.0,
+        "passes": true
+      },
+      {
+        "concept_id": 2.0,
+        "accuracy_before": 0.0,
+        "accuracy_after": 1.0,
+        "improvement": 1.0,
+        "passes": true
+      },
+      {
+        "concept_id": 3.0,
+        "accuracy_before": 0.0,
+        "accuracy_after": 1.0,
+        "improvement": 1.0,
+        "passes": true
+      },
+      {
+        "concept_id": 4.0,
+        "accuracy_before": 0.0,
+        "accuracy_after": 1.0,
+        "improvement": 1.0,
+        "passes": true
+      }
+    ],
+    "final_recall_accuracy": 1.0,
+    "passes": true
+  },
+  "old_task_retention": {
+    "before": {
+      "action_accuracy": 0.98134765625,
+      "delayed_memory_accuracy": 1.0,
+      "object_color_accuracy": 1.0,
+      "object_pos_accuracy": 1.0,
+      "object_permanence_accuracy": 1.0,
+      "provenance_accuracy": 0.999707043170929,
+      "grounded_language_accuracy": 0.99453125,
+      "self_world_continuity_accuracy": 1.0,
+      "core_mean": 0.996948243677616
+    },
+    "after": {
+      "action_accuracy": 0.98134765625,
+      "delayed_memory_accuracy": 1.0,
+      "object_color_accuracy": 1.0,
+      "object_pos_accuracy": 1.0,
+      "object_permanence_accuracy": 1.0,
+      "provenance_accuracy": 0.999707043170929,
+      "grounded_language_accuracy": 0.99453125,
+      "self_world_continuity_accuracy": 1.0,
+      "core_mean": 0.996948243677616
+    },
+    "delta": 0.0,
+    "submetric_floor_checks": {
+      "action_accuracy": true,
+      "delayed_memory_accuracy": true,
+      "object_color_accuracy": true,
+      "object_pos_accuracy": true,
+      "object_permanence_accuracy": true,
+      "provenance_accuracy": true,
+      "grounded_language_accuracy": true,
+      "self_world_continuity_accuracy": true
+    },
+    "checks": {
+      "old_task_core_ge_0_90": true,
+      "old_task_delta_ge_minus_0_05": true,
+      "old_submetrics_ge_0_85_or_na": true
+    },
+    "passes": true
+  },
+  "restart": {
+    "memory_path": "runs\\retention_concepts_fast.pt",
+    "loaded_new_concept_recall": 1.0,
+    "zero_memory_new_concept_recall": 0.0,
+    "corrupt_memory_new_concept_recall": 0.0,
+    "old_task_core_after_reload": 0.996948243677616,
+    "checks": {
+      "loaded_new_recall_ge_0_85": true,
+      "old_task_core_ge_0_90": true,
+      "zero_memory_degrades_new_recall": true,
+      "corrupt_memory_degrades_new_recall": true
+    }
+  },
+  "prior_living": {
+    "durable_restart": {
+      "restart_tick": 70.0,
+      "normal_final_memory_accuracy": 0.9375,
+      "memory_file_restart_final_memory_accuracy": 0.9375,
+      "zero_reset_final_memory_accuracy": 0.25,
+      "normal_final_object_pos_accuracy": 1.0,
+      "memory_file_restart_final_object_pos_accuracy": 1.0,
+      "zero_reset_final_object_pos_accuracy": 0.203125
+    },
+    "idle_mode": {
+      "idle_ticks": 96.0,
+      "final_memory_accuracy": 1.0,
+      "final_object_pos_accuracy": 1.0,
+      "endogenous_goal_action_accuracy": 1.0,
+      "public_language_repetition_ratio": 0.28664442896842957,
+      "private_token_repetition_ratio": 8.223684562835842e-05,
+      "private_token_unique_count": 7.0,
+      "latent_active_fraction": 1.0,
+      "latent_effective_rank": 15.554347038269043,
+      "latent_max_quantized_fraction": 8.138020833333333e-05
+    },
+    "private_internal_language": {
+      "generated_private_unique_count": 17.0,
+      "generated_private_repetition_ratio": 0.27111485600471497,
+      "private_channel_action_shift_rate": 0.4720982015132904,
+      "private_channel_language_shift_rate": 0.3664899468421936
+    },
+    "richer_dynamics": {
+      "failed_action_no_move": 1.0,
+      "failed_action_damage_delta": 0.04000000000000001,
+      "rest_healed_and_restored_energy": 1.0,
+      "forage_restored_energy_and_resource": 1.0,
+      "hazard_caused_damage": 1.0
+    },
+    "checks": {
+      "durable_restart_memory_ge_0_85": true,
+      "memory_beats_zero_reset_by_0_40": true,
+      "idle_memory_ge_0_95": true,
+      "idle_object_pos_ge_0_95": true,
+      "idle_goal_action_ge_0_70": true,
+      "public_repetition_lt_0_40": true,
+      "private_repetition_lt_0_40": true,
+      "private_tokens_generated_and_causal": true,
+      "richer_dynamics_all_present": true
+    },
+    "passes": true
+  },
+  "audit_preservation": {
+    "leakage_scan": {
+      "passes": true,
+      "python_files_scanned": [
+        "src\\__init__.py",
+        "src\\adversarial.py",
+        "src\\continual_learning.py",
+        "src\\curriculum.py",
+        "src\\env.py",
+        "src\\evaluate.py",
+        "src\\evidence_dossier.py",
+        "src\\heldout_causal.py",
+        "src\\living_eval.py",
+        "src\\metrics.py",
+        "src\\model.py",
+        "src\\persistent_memory.py",
+        "src\\retention_eval.py",
+        "src\\run_unbroken.py",
+        "src\\train.py",
+        "tests\\conftest.py",
+        "tests\\test_adversarial.py",
+        "tests\\test_architecture.py",
+        "tests\\test_audit_proof.py",
+        "tests\\test_evidence_dossier.py",
+        "tests\\test_frozen_artifacts.py",
+        "tests\\test_heldout_causal.py",
+        "tests\\test_living_system.py",
+        "tests\\test_no_pretrained.py",
+        "tests\\test_retention_fix.py",
+        "tests\\test_training_smoke.py",
+        "tests\\test_unbroken_runtime.py",
+        "audit\\__init__.py",
+        "audit\\independent_verify.py",
+        "audit\\leakage_scan.py",
+        "audit\\probe_examples.py"
+      ],
+      "findings": [],
+      "checks": {
+        "no_external_or_pretrained_imports": true,
+        "no_external_or_pretrained_text_patterns": true,
+        "no_unexpected_weight_files": true,
+        "runtime_not_prompt_loop": true
+      }
+    },
+    "anti_leakage": {
+      "scores": {
+        "normal_generated_private": {
+          "action_accuracy": 0.9654017857142857,
+          "delayed_memory_accuracy": 0.9908854166666666,
+          "object_color_accuracy": 0.9964554398148148,
+          "object_pos_accuracy": 1.0,
+          "object_permanence_accuracy": 0.9982277199074074,
+          "provenance_accuracy": 0.9232701063156128,
+          "grounded_language_accuracy": 0.9822916666666667,
+          "self_world_continuity_accuracy": 1.0,
+          "core_mean": 0.9820665168856817
+        },
+        "zero_z": {
+          "action_accuracy": 0.4471958705357143,
+          "delayed_memory_accuracy": 0.21614583333333334,
+          "object_color_accuracy": 0.2185329861111111,
+          "object_pos_accuracy": 0.2134693287037037,
+          "object_permanence_accuracy": 0.21600115740740738,
+          "provenance_accuracy": 0.6829659342765808,
+          "grounded_language_accuracy": 0.26614583333333336,
+          "self_world_continuity_accuracy": 0.22786458333333334,
+          "core_mean": 0.3110401908793147
+        },
+        "shuffled_z": {
+          "action_accuracy": 0.35986328125,
+          "delayed_memory_accuracy": 0.2547743055555556,
+          "object_color_accuracy": 0.25925925925925924,
+          "object_pos_accuracy": 0.19328703703703703,
+          "object_permanence_accuracy": 0.22627314814814814,
+          "provenance_accuracy": 0.9234793782234192,
+          "grounded_language_accuracy": 0.24296875,
+          "self_world_continuity_accuracy": 0.171875,
+          "core_mean": 0.3289725199341774
+        },
+        "no_language": {
+          "action_accuracy": 0.4229213169642857,
+          "delayed_memory_accuracy": 0.24088541666666666,
+          "object_color_accuracy": 0.30844907407407407,
+          "object_pos_accuracy": 0.3445457175925926,
+          "object_permanence_accuracy": 0.32649739583333337,
+          "provenance_accuracy": 0.3240094780921936,
+          "grounded_language_accuracy": 0.0,
+          "self_world_continuity_accuracy": 0.21875,
+          "core_mean": 0.27325729990289327
+        },
+        "no_private_token": {
+          "action_accuracy": 0.5555245535714286,
+          "delayed_memory_accuracy": 0.40625,
+          "object_color_accuracy": 0.48922164351851855,
+          "object_pos_accuracy": 0.38722511574074076,
+          "object_permanence_accuracy": 0.43822337962962965,
+          "provenance_accuracy": 0.9138532280921936,
+          "grounded_language_accuracy": 0.503125,
+          "self_world_continuity_accuracy": 0.98828125,
+          "core_mean": 0.5852130213190639
+        },
+        "random_private_token": {
+          "action_accuracy": 0.5281808035714286,
+          "delayed_memory_accuracy": 0.2790798611111111,
+          "object_color_accuracy": 0.38859953703703703,
+          "object_pos_accuracy": 0.3362991898148148,
+          "object_permanence_accuracy": 0.36244936342592593,
+          "provenance_accuracy": 0.9110630750656128,
+          "grounded_language_accuracy": 0.4265625,
+          "self_world_continuity_accuracy": 0.91015625,
+          "core_mean": 0.5177988225032413
+        }
+      },
+      "random_label_score": {
+        "action_accuracy": 0.19698660714285715,
+        "delayed_memory_accuracy": 0.23350694444444445,
+        "object_color_accuracy": 0.2458767361111111,
+        "object_pos_accuracy": 0.20131655092592593,
+        "object_permanence_accuracy": 0.22359664351851852,
+        "provenance_accuracy": 0.2458844929933548,
+        "grounded_language_accuracy": 0.030208333333333334,
+        "self_world_continuity_accuracy": 0.19270833333333334,
+        "core_mean": 0.19626058022535983
+      },
+      "hidden_target_canary_max_abs_diff": 0.0,
+      "no_private_action_shift_rate": 0.4763532280921936,
+      "no_private_language_shift_rate": 0.34912109375,
+      "checks": {
+        "hidden_target_canary_no_effect": true,
+        "random_labels_reduce_score": true,
+        "zero_z_degrades_core": true,
+        "shuffled_z_degrades_core": true,
+        "no_language_degrades_grounding": true,
+        "private_token_affects_outputs": true
+      }
+    },
+    "tensor_memory_corrupt_probe": {
+      "restart_tick": 70,
+      "memory_file_restart_final_memory_accuracy": 0.9609375,
+      "memory_file_restart_final_object_pos_accuracy": 1.0,
+      "corrupt_memory_final_memory_accuracy": 0.3046875,
+      "corrupt_memory_final_object_pos_accuracy": 0.15625
+    },
+    "checks": {
+      "leakage_scan_passes": true,
+      "hidden_target_canary_diff_zero": true,
+      "tensor_z_stream_no_text_loop": true,
+      "zero_z_degrades": true,
+      "shuffled_z_degrades": true,
+      "no_language_degrades_grounding": true,
+      "no_private_perturbs_outputs": true,
+      "random_private_perturbs_outputs": true,
+      "corrupt_tensor_memory_degrades": true
+    },
+    "passes": true
+  },
+  "top_level_checks": {
+    "new_concepts": true,
+    "old_task_retention": true,
+    "restart": true,
+    "prior_living": true,
+    "audit_preservation": true
+  },
+  "limitations": []
+}
