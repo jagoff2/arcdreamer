@@ -1193,3 +1193,84 @@
   - None. Commit pending.
 - Exact next action:
   - Stage and commit the human-memory implementation, tests, reports, audit update, and context atomically.
+
+## Step 0051 - CUDA-first device migration
+
+- Files touched:
+  - `src/device.py`
+  - `src/env.py`
+  - `src/model.py`
+  - `src/train.py`
+  - `src/evaluate.py`
+  - `src/run_unbroken.py`
+  - `src/living_eval.py`
+  - `src/retention_eval.py`
+  - `src/memory_eval.py`
+  - `src/human_memory.py`
+  - `src/metrics.py`
+  - `src/persistent_memory.py`
+  - `src/continual_learning.py`
+  - `src/curriculum.py`
+  - `src/adversarial.py`
+  - `src/heldout_causal.py`
+  - `src/evidence_dossier.py`
+  - `audit/independent_verify.py`
+  - `audit/probe_examples.py`
+  - `tests/test_device_placement.py`
+  - `tests/test_living_system.py`
+  - `README.md`
+  - `frozen/manifest.json`
+  - `docs/living_system_report.json`
+  - `docs/human_memory_report.json`
+  - `docs/human_memory_report.md`
+  - `docs/audit_after_human_memory.json`
+  - `docs/audit_after_human_memory.md`
+- Changes made:
+  - Added `src.device.resolve_device` and `src.device.make_generator`, with `auto` preferring CUDA when available and falling back to CPU.
+  - Changed public training, evaluation, audit, runtime, retention, curriculum, human-memory, adversarial, held-out, and dossier device defaults from CPU to `auto`.
+  - Moved default generated batches, runtime observations, new model construction, checkpoint loading, persistent memory state, human-memory traces, and concept-memory operations onto the resolved device.
+  - Moved deterministic RNG for batch generation, human-memory projections/vectors, adversarial perturbations, and audit target-mutation probes onto the resolved device.
+  - Removed avoidable CPU transfers from latent non-collapse stats, runtime latent history, human-memory evaluator metadata, and concept-memory prediction.
+  - Kept `.cpu()` only for portable save-file serialization in persistent memories and generated memory artifacts.
+  - Updated `frozen/manifest.json` `model_sha256` because `src/model.py` changed for CUDA-aware construction/loading; checkpoint hash and size are unchanged.
+  - Added `tests/test_device_placement.py` to prove `auto` chooses CUDA when available and default tensors follow that device.
+- Commands run:
+  - `python -c "import torch; ... cuda availability/device count/name ..."`
+  - `python -m py_compile src\device.py src\env.py src\model.py src\train.py src\run_unbroken.py src\metrics.py src\persistent_memory.py src\continual_learning.py src\human_memory.py src\memory_eval.py src\evaluate.py src\living_eval.py src\curriculum.py src\retention_eval.py src\heldout_causal.py src\adversarial.py src\evidence_dossier.py audit\independent_verify.py audit\probe_examples.py`
+  - `pytest -q tests\test_architecture.py tests\test_unbroken_runtime.py tests\test_living_system.py tests\test_human_memory.py tests\test_training_smoke.py`
+  - `pytest -q`
+  - `python -c "from src.device import resolve_device; ... print default batch/model/checkpoint/memory devices ..."`
+  - `python -m src.evaluate --checkpoint frozen/recurrent_latent_fast.pt --config smoke --runtime-ticks 128`
+  - `pytest -q tests\test_evidence_dossier.py`
+  - `python -m src.living_eval --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/living_system_report.json`
+  - `python -m src.memory_eval --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/human_memory_report.json`
+  - `python -m audit.leakage_scan`
+  - `python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_human_memory.json`
+  - `git diff --check`
+- Observed results/errors:
+  - CUDA available: `torch 2.11.0.dev20260120+cu128`, two devices, `NVIDIA GeForce RTX 5060 Ti`.
+  - Device probe result: resolved `cuda`; default batch, new model, loaded checkpoint, and persistent memory state were all on `cuda:0`.
+  - Targeted CUDA-sensitive tests: `11 passed in 17.75s`.
+  - After moving RNG onto CUDA, `tests/test_evidence_dossier.py` initially failed because the smoke latent intervention no longer changed the selected prediction; fixed by applying the centroid-delta intervention for six ticks at higher strength.
+  - Full tests after final patches: `32 passed in 40.36s`.
+  - Smoke evaluation on frozen checkpoint with default `auto`: all gates passed; runtime tensors ran on CUDA by default.
+  - Fast living-system report regenerated under CUDA RNG and passed.
+  - Fast human-memory evaluator: `HUMAN MEMORY PROVEN`, no limitations.
+  - Leakage scan: `passes: true`, no findings.
+  - Post-CUDA independent audit first found stale CPU-era living metrics in `docs/living_system_report.json`; after regenerating that report, audit rerun returned `AUDIT PROVEN`, no limitations.
+  - `git diff --check` passed after stripping generated Markdown trailing whitespace.
+- Final hashes:
+  - `frozen/recurrent_latent_fast.pt`: `D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD`.
+  - `frozen/manifest.json`: `DC1B411C5B33A70DE352DC5D3789DB3CED4283A17D8E7926AB2B9BB7D8FEB1C2`.
+  - `src/device.py`: `39DE3FFE33C752376B510FE7511071457D443995A7AB0D3778C3F970972999EE`.
+  - `src/model.py`: `CE2838225E6852E64CA22D5A934B8ABAC6922D7377058F01F91CF5188CAC8DAF`.
+  - `src/env.py`: `E1828F03448431F0989F828136743BB5A999F92A2356E39FF8A1D6484EE54195`.
+  - `src/human_memory.py`: `F25FC79DBEC8FA7445DACFA03A16916990C865961609B6704ABBD2F70630BC30`.
+  - `audit/independent_verify.py`: `DE9241032F41F5055D41A9A99DBE2561BAF024E94E96EA8CA6E3CA2849C7BD08`.
+  - `docs/living_system_report.json`: `90155A6701C66A50EEAC0720ED5FA2049AC8B622EECDB9539E6C303A0A741C8B`.
+  - `docs/human_memory_report.json`: `93CA048B9F576FA763314108FB7637BC5CA15EB3CCE47216C1FBC53C8793266C`.
+  - `docs/audit_after_human_memory.json`: `AAFDAF482311A71721CF815BA317EA859869B401C5587DC6A085852A83AA4F19`.
+- Current blockers:
+  - None. Commit pending.
+- Exact next action:
+  - Stage and commit the CUDA migration atomically, then verify clean status.

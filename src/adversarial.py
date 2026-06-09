@@ -7,6 +7,7 @@ from typing import Callable, Dict, Iterable, List, Tuple
 
 import torch
 
+from .device import AUTO_DEVICE, DeviceLike, make_generator, resolve_device
 from .env import (
     ACTION_STAY,
     ANS_COLOR,
@@ -94,9 +95,8 @@ def run_sequence(
         elif mode == "shuffle_z" and tick >= ablation_start:
             z = z[torch.randperm(batch_size, device=device)]
         elif mode == "perturb_z" and tick >= ablation_start:
-            generator = torch.Generator(device="cpu")
-            generator.manual_seed(99173 + tick)
-            noise = torch.randn(z.shape, generator=generator, device="cpu").to(device)
+            generator = make_generator(99173 + tick, device)
+            noise = torch.randn(z.shape, generator=generator, device=device)
             z = z + noise_scale * noise
 
         observation = {"sensory": sensory, "lang_in": lang_in}
@@ -199,10 +199,11 @@ def told_only_batch(batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
 
 def distractor_batch(batch: Dict[str, torch.Tensor], seed: int = 123) -> Dict[str, torch.Tensor]:
     altered = clone_batch(batch)
-    generator = torch.Generator(device="cpu")
-    generator.manual_seed(seed)
+    generator = make_generator(seed, batch["sensory"].device)
     batch_size = batch["sensory"].shape[0]
-    distractor_color = torch.randint(0, NUM_COLORS, (batch_size,), generator=generator, device=batch["sensory"].device)
+    distractor_color = torch.randint(
+        0, NUM_COLORS, (batch_size,), generator=generator, device=batch["sensory"].device
+    )
     distractor_pos = torch.randint(0, GRID_SIZE, (batch_size,), generator=generator, device=batch["sensory"].device)
     for tick in (12, 28, 44):
         altered["sensory"][:, tick, SENSOR_COLOR] = torch.nn.functional.one_hot(
@@ -503,10 +504,10 @@ def episodic_probe_tests(
     x_train, y_train = samples(train_batch, train_outputs)
     x_test, y_test = samples(test_batch, test_outputs)
     heads = {
-        "event_index": torch.nn.Linear(x_train.shape[-1], len(event_ticks)),
-        "content": torch.nn.Linear(x_train.shape[-1], int(train_batch["language_target"].max().item()) + 1),
-        "source": torch.nn.Linear(x_train.shape[-1], 4),
-        "time": torch.nn.Linear(x_train.shape[-1], len(event_ticks)),
+        "event_index": torch.nn.Linear(x_train.shape[-1], len(event_ticks)).to(x_train.device),
+        "content": torch.nn.Linear(x_train.shape[-1], int(train_batch["language_target"].max().item()) + 1).to(x_train.device),
+        "source": torch.nn.Linear(x_train.shape[-1], 4).to(x_train.device),
+        "time": torch.nn.Linear(x_train.shape[-1], len(event_ticks)).to(x_train.device),
     }
     params: List[torch.nn.Parameter] = []
     for head in heads.values():
@@ -571,8 +572,9 @@ def terminal_a_adversarial_verdict(report: Dict[str, object]) -> Dict[str, objec
 def evaluate_adversarial(
     checkpoint: str,
     config_name: str = "fast",
-    device: str = "cpu",
+    device: DeviceLike = AUTO_DEVICE,
 ) -> Dict[str, object]:
+    device = str(resolve_device(device))
     cfg = ADVERSARIAL_CONFIGS[config_name]
     model = load_checkpoint(checkpoint, device=device)
     model.eval()
@@ -602,7 +604,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--config", choices=sorted(ADVERSARIAL_CONFIGS), default="fast")
-    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--device", default=AUTO_DEVICE)
     args = parser.parse_args()
     evaluate_adversarial(args.checkpoint, args.config, args.device)
 

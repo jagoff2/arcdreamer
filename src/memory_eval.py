@@ -10,6 +10,7 @@ import torch
 
 from audit.independent_verify import anti_leakage_probes
 from audit.leakage_scan import run_scan
+from .device import AUTO_DEVICE, DeviceLike, resolve_device
 from .env import GRID_SIZE, NUM_BODY_SCALARS, generate_batch
 from .human_memory import (
     NUM_SOURCES,
@@ -34,6 +35,7 @@ MEMORY_CONFIGS = {
 HASH_PATHS = [
     "frozen/recurrent_latent_fast.pt",
     "frozen/manifest.json",
+    "src/device.py",
     "src/model.py",
     "src/human_memory.py",
     "src/memory_replay.py",
@@ -61,10 +63,12 @@ def hash_manifest_summary() -> dict[str, Any]:
 
 
 def _cue_for(content: torch.Tensor, source_id: int, serial: int, cfg: HumanMemoryConfig) -> torch.Tensor:
-    cue = torch.zeros(cfg.cue_dim)
+    cue = torch.zeros(cfg.cue_dim, device=content.device)
     cue[: cfg.content_dim] = content
-    cue[cfg.content_dim : cfg.content_dim + NUM_SOURCES] = 0.15 * one_hot(source_id, NUM_SOURCES)
-    cue = cue + 0.06 * deterministic_vector(12000 + serial, cfg.cue_dim)
+    cue[cfg.content_dim : cfg.content_dim + NUM_SOURCES] = 0.15 * one_hot(
+        source_id, NUM_SOURCES, device=content.device
+    )
+    cue = cue + 0.06 * deterministic_vector(12000 + serial, cfg.cue_dim, device=content.device)
     return cue
 
 
@@ -75,12 +79,12 @@ def _partial(cue: torch.Tensor) -> torch.Tensor:
 
 
 def _noisy(cue: torch.Tensor, serial: int, scale: float = 0.10) -> torch.Tensor:
-    return cue + scale * deterministic_vector(22000 + serial, cue.numel())
+    return cue + scale * deterministic_vector(22000 + serial, cue.numel(), device=cue.device)
 
 
 def _body_from_batch(batch: dict[str, torch.Tensor], sample: int, tick: int) -> torch.Tensor:
     start = GRID_SIZE + 2
-    return batch["sensory"][sample, tick, start : start + NUM_BODY_SCALARS].detach().cpu()
+    return batch["sensory"][sample, tick, start : start + NUM_BODY_SCALARS].detach()
 
 
 def build_memory(checkpoint: str | Path, cfg: dict[str, int], device: str) -> tuple[HumanAnalogueMemory, dict[str, Any]]:
@@ -95,10 +99,10 @@ def build_memory(checkpoint: str | Path, cfg: dict[str, int], device: str) -> tu
     sources = []
     trace_ids = []
     for idx in range(int(cfg["episodes"])):
-        content = deterministic_vector(idx, mem_cfg.content_dim).to(device)
+        content = deterministic_vector(idx, mem_cfg.content_dim, device=device)
         source_id = idx % NUM_SOURCES
         tick = [0, 8, 11, 17, 29, 31][source_id]
-        cue = _cue_for(content.cpu(), source_id, idx, mem_cfg).to(device)
+        cue = _cue_for(content, source_id, idx, mem_cfg)
         latent = outputs["latents"][idx, tick].detach()
         body = _body_from_batch(batch, idx, tick).to(device)
         affect = torch.tensor([
@@ -119,8 +123,8 @@ def build_memory(checkpoint: str | Path, cfg: dict[str, int], device: str) -> tu
             content=content,
             time_index=float(tick + idx * 100),
         )
-        contents.append(content.detach().cpu())
-        cues.append(cue.detach().cpu())
+        contents.append(content.detach())
+        cues.append(cue.detach())
         sources.append(source_id)
         trace_ids.append(trace_id)
     return memory, {
@@ -137,7 +141,10 @@ def content_recall_metrics(memory: HumanAnalogueMemory, meta: dict[str, Any]) ->
     targets = [item.to(memory.device) for item in meta["content_bank"]]
     partial_preds = [memory.recall(_partial(cue).to(memory.device)).content for cue in meta["cues"]]
     noisy_preds = [memory.recall(_noisy(cue, idx).to(memory.device)).content for idx, cue in enumerate(meta["cues"])]
-    wrong = [not memory.recall(deterministic_vector(50000 + idx, memory.config.cue_dim).to(memory.device)).accepted for idx in range(len(targets))]
+    wrong = [
+        not memory.recall(deterministic_vector(50000 + idx, memory.config.cue_dim, device=memory.device)).accepted
+        for idx in range(len(targets))
+    ]
     return {
         "partial_cue_accuracy": nearest_accuracy(partial_preds, targets, bank),
         "noisy_cue_accuracy": nearest_accuracy(noisy_preds, targets, bank),
@@ -147,18 +154,18 @@ def content_recall_metrics(memory: HumanAnalogueMemory, meta: dict[str, Any]) ->
 
 def separation_completion_metrics(checkpoint: str | Path, cfg: dict[str, int], device: str) -> dict[str, float]:
     memory, meta = build_memory(checkpoint, {"episodes": int(cfg["similar"]), "seed": int(cfg["seed"]) + 500}, device)
-    similar_base = deterministic_vector(70000, memory.config.cue_dim)
+    similar_base = deterministic_vector(70000, memory.config.cue_dim, device=memory.device)
     for idx, trace_id in enumerate(meta["trace_ids"]):
         content = meta["content_bank"][idx]
         cue = (
             0.68 * _cue_for(content, meta["sources"][idx], idx, memory.config)
             + 0.32 * similar_base
-            + 0.09 * deterministic_vector(71000 + idx, memory.config.cue_dim)
+            + 0.09 * deterministic_vector(71000 + idx, memory.config.cue_dim, device=memory.device)
         ).to(device)
         memory._cues[trace_id] = cue
         memory._keys[trace_id] = memory._key(cue, latent=memory._latents[trace_id], body=memory._bodies[trace_id], source_id=meta["sources"][idx])
         memory._sparse[trace_id] = memory._sparse_code(memory._keys[trace_id])
-        meta["cues"][idx] = cue.detach().cpu()
+        meta["cues"][idx] = cue.detach()
         memory._contents[trace_id] = content.to(device)
     bank = meta["content_bank"].to(device)
     targets = [item.to(device) for item in meta["content_bank"]]
@@ -237,9 +244,12 @@ def replay_metrics(memory: HumanAnalogueMemory, meta: dict[str, Any], model, dev
 def reconsolidation_metrics(memory: HumanAnalogueMemory, meta: dict[str, Any]) -> dict[str, float]:
     checks_history = []
     checks_current = []
-    bank = torch.cat([meta["content_bank"], torch.stack([deterministic_vector(80000 + i, memory.config.content_dim) for i in range(8)])], dim=0).to(memory.device)
+    distractors = torch.stack(
+        [deterministic_vector(80000 + i, memory.config.content_dim, device=memory.device) for i in range(8)]
+    )
+    bank = torch.cat([meta["content_bank"].to(memory.device), distractors], dim=0)
     for offset, trace_id in enumerate(meta["trace_ids"][:8]):
-        new_content = deterministic_vector(80000 + offset, memory.config.content_dim).to(memory.device)
+        new_content = deterministic_vector(80000 + offset, memory.config.content_dim, device=memory.device)
         original_source = meta["sources"][offset]
         memory.reconsolidate(trace_id, new_content, (original_source + 1) % NUM_SOURCES)
         recalled = memory.recall(meta["cues"][offset].to(memory.device))
@@ -384,8 +394,9 @@ def evaluate_human_memory(
     checkpoint: str | Path,
     config_name: str = "fast",
     json_output: str | Path | None = None,
-    device: str = "cpu",
+    device: DeviceLike = AUTO_DEVICE,
 ) -> dict[str, Any]:
+    device = str(resolve_device(device))
     cfg = MEMORY_CONFIGS[config_name]
     memory, meta = build_memory(checkpoint, cfg, device)
     model = meta["model"]
@@ -436,7 +447,7 @@ def main() -> None:
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--config", choices=sorted(MEMORY_CONFIGS), default="fast")
     parser.add_argument("--json-output", default="docs/human_memory_report.json")
-    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--device", default=AUTO_DEVICE)
     args = parser.parse_args()
     evaluate_human_memory(args.checkpoint, args.config, args.json_output, args.device)
 

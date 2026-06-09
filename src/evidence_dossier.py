@@ -22,6 +22,7 @@ from .adversarial import (
     clone_batch,
     score_outputs,
 )
+from .device import AUTO_DEVICE, DeviceLike, resolve_device
 from .env import (
     ACTION_LEFT,
     ACTION_FORAGE,
@@ -293,7 +294,8 @@ def baseline_training_loss(
     return total
 
 
-def train_capacity_baselines(config_name: str, device: str = "cpu") -> List[TrainedBaseline]:
+def train_capacity_baselines(config_name: str, device: DeviceLike = AUTO_DEVICE) -> List[TrainedBaseline]:
+    device = str(resolve_device(device))
     cfg = EVIDENCE_CONFIGS[config_name]
     recurrent_hidden = 64
     baseline_specs = [
@@ -349,7 +351,8 @@ def train_capacity_baselines(config_name: str, device: str = "cpu") -> List[Trai
     return trained
 
 
-def observation_schema_dump(device: str = "cpu") -> Dict[str, object]:
+def observation_schema_dump(device: DeviceLike = AUTO_DEVICE) -> Dict[str, object]:
+    device = str(resolve_device(device))
     batch = generate_batch(2, seq_len=12, base_seed=991, device=device)
     observation_keys = ["sensory", "lang_in", "private_in"]
     supervision_keys = sorted(key for key in batch if key not in observation_keys)
@@ -811,6 +814,7 @@ def latent_causal_probe(
     source_pos = intervention_batch["world_pos_target"][:, intervention_tick]
     dest_pos = (source_pos + 2) % GRID_SIZE
     current_at_action = intervention_batch["sensory"][:, action_tick, SENSOR_POS].argmax(dim=-1)
+    intervention_delta = centroid_tensor[dest_pos] - centroid_tensor[source_pos]
 
     def run(intervene: bool) -> Dict[str, torch.Tensor]:
         z = model.initial_state(batch_size, device=device)
@@ -825,9 +829,8 @@ def latent_causal_probe(
                 },
                 z,
             )
-            if intervene and tick == intervention_tick:
-                delta = centroid_tensor[dest_pos] - centroid_tensor[source_pos]
-                z = z + 1.5 * delta
+            if intervene and intervention_tick <= tick < intervention_tick + 6:
+                z = z + 3.0 * intervention_delta
             outputs.append(output)
             latents_after.append(z)
         stacked = {key: torch.stack([item[key] for item in outputs], dim=1) for key in outputs[0]}
@@ -858,7 +861,7 @@ def latent_causal_probe(
                 "aligned_intervened_action": ACTION_NAMES[int(dest_action[index].item())],
             }
         )
-    separation = torch.pdist(centroid_tensor.detach().cpu()).mean().item()
+    separation = torch.pdist(centroid_tensor.detach()).mean().item()
     return {
         "intervention_tick": intervention_tick,
         "readout_tick": action_tick,
@@ -1020,8 +1023,9 @@ def generate_evidence_dossier(
     config_name: str = "fast",
     output: str | None = None,
     json_output: str | None = None,
-    device: str = "cpu",
+    device: DeviceLike = AUTO_DEVICE,
 ) -> Dict[str, object]:
+    device = str(resolve_device(device))
     cfg = EVIDENCE_CONFIGS[config_name]
     model = load_checkpoint(checkpoint, device=device)
     model.eval()
@@ -1378,7 +1382,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", default=FROZEN_CHECKPOINT)
     parser.add_argument("--config", choices=sorted(EVIDENCE_CONFIGS), default="fast")
-    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--device", default=AUTO_DEVICE)
     parser.add_argument("--output", default="docs/evidence_dossier.md")
     parser.add_argument("--json-output", default="docs/evidence_dossier.json")
     args = parser.parse_args()

@@ -4,7 +4,7 @@
   "checkpoint_size_bytes": 169185,
   "source_checkpoint": "runs/living_latest.pt",
   "model_file": "src/model.py",
-  "model_sha256": "6C7D4FA2E8811DB76F12AF36DA20E56195F25F50DA349EA5335B26A8C90FDE1B",
+  "model_sha256": "CE2838225E6852E64CA22D5A934B8ABAC6922D7377058F01F91CF5188CAC8DAF",
   "status": "frozen_for_living_system_evaluation",
   "notes": "Checkpoint was produced locally by the repository training path after adding persistent tensor memory, private internal tokens, richer body dynamics, idle anti-repetition, and curriculum-growth support."
 }

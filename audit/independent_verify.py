@@ -10,6 +10,7 @@ from typing import Any, Iterable
 import torch
 
 from audit.leakage_scan import run_scan
+from src.device import AUTO_DEVICE, DeviceLike, make_generator, resolve_device
 from src.continual_learning import PersistentConceptMemory, recall_accuracy
 from src.curriculum import curriculum_batch
 from src.env import (
@@ -57,6 +58,7 @@ from src.train import blank_training_batch
 AUDITED_PATHS = [
     "frozen/recurrent_latent_fast.pt",
     "frozen/manifest.json",
+    "src/device.py",
     "src/model.py",
     "src/env.py",
     "src/run_unbroken.py",
@@ -176,8 +178,7 @@ def run_mode(model, batch: dict[str, torch.Tensor], mode: str = "normal") -> dic
     device = batch["sensory"].device
     z = model.initial_state(batch_size, device=device)
     private_token = torch.zeros(batch_size, dtype=torch.long, device=device)
-    generator = torch.Generator(device="cpu")
-    generator.manual_seed(9917)
+    generator = make_generator(9917, device)
     random_private = torch.randint(0, NUM_PRIVATE_TOKENS, (batch_size, seq_len), generator=generator, device=device)
     outputs: list[dict[str, torch.Tensor]] = []
     latents: list[torch.Tensor] = []
@@ -247,21 +248,21 @@ def max_output_diff(left: dict[str, torch.Tensor], right: dict[str, torch.Tensor
 
 def mutate_targets(batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
     out = {key: value.clone() for key, value in batch.items()}
-    generator = torch.Generator(device="cpu")
-    generator.manual_seed(9918)
+    generator = make_generator(9918, out["sensory"].device)
     for key in list(out):
         if key.endswith("_target"):
             high = int(out[key].max().item()) + 1
             if high > 1:
                 out[key] = torch.randint(0, high, out[key].shape, generator=generator, device=out[key].device)
-    out["hidden_target_canary"] = torch.randint(0, 97, (out["sensory"].shape[0], out["sensory"].shape[1]), generator=generator)
+    out["hidden_target_canary"] = torch.randint(
+        0, 97, (out["sensory"].shape[0], out["sensory"].shape[1]), generator=generator, device=out["sensory"].device
+    )
     return out
 
 
 def random_label_batch_like(batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
     out = {key: value.clone() for key, value in batch.items()}
-    generator = torch.Generator(device="cpu")
-    generator.manual_seed(9919)
+    generator = make_generator(9919, out["sensory"].device)
     maxima = {
         "action_target": 5,
         "language_target": int(batch["language_target"].max().item()) + 1,
@@ -656,7 +657,8 @@ def render_markdown(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def run_audit(checkpoint: str | Path, config: str, json_output: str | Path, device: str = "cpu") -> dict[str, Any]:
+def run_audit(checkpoint: str | Path, config: str, json_output: str | Path, device: DeviceLike = AUTO_DEVICE) -> dict[str, Any]:
+    device = str(resolve_device(device))
     before_hashes = collect_hashes(AUDITED_PATHS)
     manifest_before = manifest_status(before_hashes)
     cfg = LIVING_CONFIGS[config]
@@ -759,7 +761,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--config", choices=sorted(LIVING_CONFIGS), default="fast")
-    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--device", default=AUTO_DEVICE)
     parser.add_argument("--json-output", default="docs/audit_proof.json")
     args = parser.parse_args()
     report = run_audit(args.checkpoint, args.config, args.json_output, args.device)

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import torch
 
+from .device import AUTO_DEVICE, DeviceLike, resolve_device
 from .env import PRIVATE_NONE
 
 
@@ -19,11 +20,12 @@ class PersistentMemoryState:
         cls,
         hidden_dim: int,
         batch_size: int = 1,
-        device: torch.device | str = "cpu",
+        device: DeviceLike = AUTO_DEVICE,
     ) -> "PersistentMemoryState":
+        target_device = resolve_device(device)
         return cls(
-            latent=torch.zeros(batch_size, hidden_dim, device=device),
-            private_token=torch.full((batch_size,), PRIVATE_NONE, dtype=torch.long, device=device),
+            latent=torch.zeros(batch_size, hidden_dim, device=target_device),
+            private_token=torch.full((batch_size,), PRIVATE_NONE, dtype=torch.long, device=target_device),
             tick=0,
         )
 
@@ -33,14 +35,15 @@ class PersistentMemoryState:
         path: str | Path,
         hidden_dim: int,
         batch_size: int = 1,
-        device: torch.device | str = "cpu",
+        device: DeviceLike = AUTO_DEVICE,
     ) -> "PersistentMemoryState":
+        target_device = resolve_device(device)
         path = Path(path)
         if not path.exists():
-            return cls.fresh(hidden_dim, batch_size=batch_size, device=device)
-        payload = torch.load(path, map_location=device)
-        latent = payload["latent"].to(device).float()
-        private_token = payload["private_token"].to(device).long()
+            return cls.fresh(hidden_dim, batch_size=batch_size, device=target_device)
+        payload = torch.load(path, map_location=target_device)
+        latent = payload["latent"].to(target_device).float()
+        private_token = payload["private_token"].to(target_device).long()
         if latent.ndim == 1:
             latent = latent.view(1, -1)
         if private_token.ndim == 0:
@@ -54,8 +57,9 @@ class PersistentMemoryState:
         return cls(latent=latent, private_token=private_token, tick=int(payload.get("tick", 0)))
 
     def update(self, latent: torch.Tensor, private_token: torch.Tensor, tick: int) -> None:
-        self.latent = latent.detach().clone()
-        self.private_token = private_token.detach().clone().long()
+        target_device = self.latent.device
+        self.latent = latent.detach().to(target_device).clone()
+        self.private_token = private_token.detach().to(target_device).clone().long()
         self.tick = int(tick)
 
     def save(self, path: str | Path) -> None:

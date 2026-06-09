@@ -9,6 +9,7 @@ from typing import Dict, List
 import torch
 
 from .curriculum import acquire_new_concept
+from .device import AUTO_DEVICE, DeviceLike, resolve_device
 from .env import (
     ACTION_FORAGE,
     ACTION_LEFT,
@@ -82,8 +83,9 @@ def durable_restart_eval(
     batch_size: int,
     seq_len: int,
     seed: int,
-    device: str = "cpu",
+    device: DeviceLike = AUTO_DEVICE,
 ) -> Dict[str, float]:
+    device = str(resolve_device(device))
     batch = generate_batch(batch_size, seq_len, seed, device=device)
     restart_tick = min(70, seq_len // 2 + 16)
     with torch.no_grad(), TemporaryDirectory() as tmp:
@@ -141,8 +143,9 @@ def idle_mode_eval(
     batch_size: int,
     seq_len: int,
     seed: int,
-    device: str = "cpu",
+    device: DeviceLike = AUTO_DEVICE,
 ) -> Dict[str, float]:
+    device = str(resolve_device(device))
     base = generate_batch(batch_size, seq_len, seed, device=device)
     idle = blank_training_batch(base, blank_after=16)
     with torch.no_grad():
@@ -217,8 +220,9 @@ def private_language_eval(
     batch_size: int,
     seq_len: int,
     seed: int,
-    device: str = "cpu",
+    device: DeviceLike = AUTO_DEVICE,
 ) -> Dict[str, float]:
+    device = str(resolve_device(device))
     batch = generate_batch(batch_size, seq_len, seed, device=device)
     zero_private = {key: value.clone() for key, value in batch.items()}
     zero_private["private_in"].zero_()
@@ -247,10 +251,11 @@ def private_language_eval(
 def evaluate_living_system(
     checkpoint: str | Path,
     config_name: str = "fast",
-    device: str = "cpu",
+    device: DeviceLike = AUTO_DEVICE,
     curriculum_output: str | Path = "runs/curriculum_latest.pt",
     json_output: str | Path | None = None,
 ) -> Dict[str, object]:
+    device = str(resolve_device(device))
     cfg = LIVING_CONFIGS[config_name]
     model = load_checkpoint(checkpoint, device=device)
     model.eval()
@@ -312,7 +317,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--config", choices=sorted(LIVING_CONFIGS), default="fast")
-    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--device", default=AUTO_DEVICE)
     parser.add_argument("--curriculum-output", default="runs/curriculum_latest.pt")
     parser.add_argument("--json-output", default=None)
     args = parser.parse_args()

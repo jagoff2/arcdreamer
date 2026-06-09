@@ -3,21 +3,21 @@
     "restart_tick": 70.0,
     "normal_final_memory_accuracy": 0.9375,
     "memory_file_restart_final_memory_accuracy": 0.9375,
-    "zero_reset_final_memory_accuracy": 0.25,
+    "zero_reset_final_memory_accuracy": 0.1796875,
     "normal_final_object_pos_accuracy": 1.0,
     "memory_file_restart_final_object_pos_accuracy": 1.0,
-    "zero_reset_final_object_pos_accuracy": 0.203125
+    "zero_reset_final_object_pos_accuracy": 0.1875
   },
   "idle_mode": {
     "idle_ticks": 96.0,
     "final_memory_accuracy": 1.0,
     "final_object_pos_accuracy": 1.0,
     "endogenous_goal_action_accuracy": 1.0,
-    "public_language_repetition_ratio": 0.28664442896842957,
-    "private_token_repetition_ratio": 8.223684562835842e-05,
-    "private_token_unique_count": 7.0,
+    "public_language_repetition_ratio": 0.28159844875335693,
+    "private_token_repetition_ratio": 0.0,
+    "private_token_unique_count": 8.0,
     "latent_active_fraction": 1.0,
-    "latent_effective_rank": 15.554347038269043,
+    "latent_effective_rank": 15.644668579101562,
     "latent_max_quantized_fraction": 8.138020833333333e-05
   },
   "richer_dynamics": {
@@ -29,9 +29,9 @@
   },
   "private_internal_language": {
     "generated_private_unique_count": 17.0,
-    "generated_private_repetition_ratio": 0.27111485600471497,
-    "private_channel_action_shift_rate": 0.4720982015132904,
-    "private_channel_language_shift_rate": 0.3664899468421936
+    "generated_private_repetition_ratio": 0.27111488580703735,
+    "private_channel_action_shift_rate": 0.468052476644516,
+    "private_channel_language_shift_rate": 0.3676758110523224
   },
   "curriculum_growth": {
     "concept_id": 1.0,
@@ -39,7 +39,9 @@
     "accuracy_before": 0.0,
     "accuracy_after": 1.0,
     "accuracy_delta": 1.0,
-    "final_loss": 0.017236972227692604
+    "final_loss": 0.0,
+    "changes_weights": 0.0,
+    "changes_persistent_memory": 1.0
   },
   "verdict": {
     "passes": true,

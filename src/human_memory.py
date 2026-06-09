@@ -7,6 +7,8 @@ from typing import Iterable
 import torch
 import torch.nn.functional as F
 
+from .device import AUTO_DEVICE, DeviceLike, make_generator, resolve_device
+
 
 SOURCE_NAMES = ("observed", "told", "imagined", "inferred", "replayed", "reconstructed")
 NUM_SOURCES = len(SOURCE_NAMES)
@@ -51,32 +53,45 @@ def _unit(x: torch.Tensor) -> torch.Tensor:
     return F.normalize(x.float(), dim=-1)
 
 
-def deterministic_vector(index: int, dim: int, seed: int = 40000) -> torch.Tensor:
-    generator = torch.Generator(device="cpu")
-    generator.manual_seed(seed + int(index) * 104729)
-    return _unit(torch.randn(dim, generator=generator))
+def deterministic_vector(index: int, dim: int, seed: int = 40000, device: DeviceLike = AUTO_DEVICE) -> torch.Tensor:
+    target_device = resolve_device(device)
+    generator = make_generator(seed + int(index) * 104729, target_device)
+    return _unit(torch.randn(dim, generator=generator, device=target_device))
 
 
-def one_hot(index: int, dim: int) -> torch.Tensor:
-    out = torch.zeros(dim)
+def one_hot(index: int, dim: int, device: DeviceLike = AUTO_DEVICE) -> torch.Tensor:
+    out = torch.zeros(dim, device=resolve_device(device))
     out[int(index) % dim] = 1.0
     return out
 
 
 class HumanAnalogueMemory:
-    def __init__(self, config: HumanMemoryConfig | None = None, device: torch.device | str = "cpu") -> None:
+    def __init__(self, config: HumanMemoryConfig | None = None, device: DeviceLike = AUTO_DEVICE) -> None:
         self.config = config or HumanMemoryConfig()
-        self.device = torch.device(device)
-        generator = torch.Generator(device="cpu")
-        generator.manual_seed(self.config.seed)
-        self.cue_projection = _unit(torch.randn(self.config.cue_dim, self.config.key_dim, generator=generator)).to(self.device)
-        self.latent_projection = _unit(torch.randn(self.config.latent_dim, self.config.key_dim, generator=generator)).to(self.device)
-        self.body_projection = _unit(torch.randn(self.config.body_dim, self.config.key_dim, generator=generator)).to(self.device)
-        self.source_projection = _unit(torch.randn(NUM_SOURCES, self.config.key_dim, generator=generator)).to(self.device)
-        self.separation_projection = _unit(torch.randn(self.config.key_dim, self.config.sparse_dim, generator=generator)).to(self.device)
-        self.action_projection = _unit(torch.randn(self.config.content_dim, self.config.action_dim, generator=generator)).to(self.device)
-        self.private_projection = _unit(torch.randn(self.config.content_dim, self.config.private_dim, generator=generator)).to(self.device)
-        self.language_projection = _unit(torch.randn(self.config.content_dim, self.config.language_dim, generator=generator)).to(self.device)
+        self.device = resolve_device(device)
+        generator = make_generator(self.config.seed, self.device)
+        self.cue_projection = _unit(
+            torch.randn(self.config.cue_dim, self.config.key_dim, generator=generator, device=self.device)
+        )
+        self.latent_projection = _unit(
+            torch.randn(self.config.latent_dim, self.config.key_dim, generator=generator, device=self.device)
+        )
+        self.body_projection = _unit(
+            torch.randn(self.config.body_dim, self.config.key_dim, generator=generator, device=self.device)
+        )
+        self.source_projection = _unit(torch.randn(NUM_SOURCES, self.config.key_dim, generator=generator, device=self.device))
+        self.separation_projection = _unit(
+            torch.randn(self.config.key_dim, self.config.sparse_dim, generator=generator, device=self.device)
+        )
+        self.action_projection = _unit(
+            torch.randn(self.config.content_dim, self.config.action_dim, generator=generator, device=self.device)
+        )
+        self.private_projection = _unit(
+            torch.randn(self.config.content_dim, self.config.private_dim, generator=generator, device=self.device)
+        )
+        self.language_projection = _unit(
+            torch.randn(self.config.content_dim, self.config.language_dim, generator=generator, device=self.device)
+        )
         self.semantic_weight: torch.Tensor | None = None
         self._keys: list[torch.Tensor] = []
         self._sparse: list[torch.Tensor] = []
@@ -155,7 +170,7 @@ class HumanAnalogueMemory:
     ) -> int:
         key = self._key(cue, latent=latent, body=body, source_id=source_id)
         sparse = self._sparse_code(key)
-        source = one_hot(source_id, NUM_SOURCES).to(self.device)
+        source = one_hot(source_id, NUM_SOURCES, device=self.device)
         self._keys.append(key)
         self._sparse.append(sparse)
         self._cues.append(cue.to(self.device).float().clone())
@@ -252,7 +267,7 @@ class HumanAnalogueMemory:
 
     def perturb_trace(self, trace_index: int, noise_scale: float = 0.85) -> None:
         idx = int(trace_index)
-        noise = deterministic_vector(9000 + idx, self.config.content_dim).to(self.device)
+        noise = deterministic_vector(9000 + idx, self.config.content_dim, device=self.device)
         self._contents[idx] = _unit(self._contents[idx] + noise_scale * noise)
 
     def reconsolidate(
@@ -264,7 +279,7 @@ class HumanAnalogueMemory:
     ) -> None:
         idx = int(trace_index)
         self._contents[idx] = _unit(new_content.to(self.device).float())
-        source = one_hot(new_source_id, NUM_SOURCES).to(self.device)
+        source = one_hot(new_source_id, NUM_SOURCES, device=self.device)
         self._sources[idx] = source
         self._source_history[idx] = torch.clamp(self._source_history[idx] + source, 0.0, 1.0)
         if affect_delta is not None:
@@ -307,11 +322,12 @@ class HumanAnalogueMemory:
         torch.save(payload, path)
 
     @classmethod
-    def load(cls, path: str | Path, device: torch.device | str = "cpu") -> "HumanAnalogueMemory":
-        payload = torch.load(Path(path), map_location=device)
+    def load(cls, path: str | Path, device: DeviceLike = AUTO_DEVICE) -> "HumanAnalogueMemory":
+        target_device = resolve_device(device)
+        payload = torch.load(Path(path), map_location=target_device)
         if payload.get("format") != "human_analogue_memory_v1":
             raise ValueError(f"{path} is not a human analogue memory file")
-        memory = cls(HumanMemoryConfig(**payload["config"]), device=device)
+        memory = cls(HumanMemoryConfig(**payload["config"]), device=target_device)
         for name in (
             "keys",
             "sparse",
@@ -325,12 +341,12 @@ class HumanAnalogueMemory:
             "sources",
             "source_history",
         ):
-            tensor = payload[name].to(device).float()
+            tensor = payload[name].to(target_device).float()
             setattr(memory, f"_{name}", [row.clone() for row in tensor] if tensor.numel() else [])
         memory._times = [float(item) for item in payload["times"].tolist()]
         memory._confidence = [float(item) for item in payload["confidence"].tolist()]
         semantic = payload.get("semantic_weight")
-        memory.semantic_weight = None if semantic is None else semantic.to(device).float()
+        memory.semantic_weight = None if semantic is None else semantic.to(target_device).float()
         return memory
 
 

@@ -7,6 +7,7 @@ from typing import Dict, Tuple
 import torch
 from torch import nn
 
+from .device import AUTO_DEVICE, DeviceLike, resolve_device
 from .env import (
     GRID_SIZE,
     NUM_ACTIONS,
@@ -31,7 +32,7 @@ class ModelConfig:
 
 
 class RecurrentLatentModel(nn.Module):
-    def __init__(self, config: ModelConfig | None = None) -> None:
+    def __init__(self, config: ModelConfig | None = None, device: DeviceLike = AUTO_DEVICE) -> None:
         super().__init__()
         self.config = config or ModelConfig()
         self.sensor_encoder = nn.Sequential(
@@ -56,9 +57,11 @@ class RecurrentLatentModel(nn.Module):
         self.world_pos_head = nn.Linear(self.config.hidden_dim, GRID_SIZE)
         self.memory_color_head = nn.Linear(self.config.hidden_dim, NUM_COLORS)
         self.self_start_head = nn.Linear(self.config.hidden_dim, GRID_SIZE)
+        self.to(resolve_device(device))
 
-    def initial_state(self, batch_size: int, device: torch.device | str = "cpu") -> torch.Tensor:
-        return torch.zeros(batch_size, self.config.hidden_dim, device=device)
+    def initial_state(self, batch_size: int, device: DeviceLike = None) -> torch.Tensor:
+        target_device = next(self.parameters()).device if device is None else resolve_device(device)
+        return torch.zeros(batch_size, self.config.hidden_dim, device=target_device)
 
     def step(
         self, observation: Dict[str, torch.Tensor], z_prev: torch.Tensor
@@ -133,10 +136,11 @@ def save_checkpoint(
     torch.save(payload, path)
 
 
-def load_checkpoint(path: str | Path, device: torch.device | str = "cpu") -> RecurrentLatentModel:
-    payload = torch.load(Path(path), map_location=device)
+def load_checkpoint(path: str | Path, device: DeviceLike = AUTO_DEVICE) -> RecurrentLatentModel:
+    target_device = resolve_device(device)
+    payload = torch.load(Path(path), map_location=target_device)
     config = ModelConfig(**payload["model_config"])
-    model = RecurrentLatentModel(config).to(device)
+    model = RecurrentLatentModel(config, device=target_device)
     model.load_state_dict(payload["model_state"])
     model.eval()
     return model

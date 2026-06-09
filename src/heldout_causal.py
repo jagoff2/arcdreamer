@@ -20,6 +20,7 @@ from .adversarial import (
     run_sequence,
     score_outputs,
 )
+from .device import AUTO_DEVICE, DeviceLike, resolve_device
 from .env import (
     ACTION_STAY,
     BODY_DAMAGE,
@@ -328,8 +329,9 @@ def summarize(report: Dict[str, Dict[str, Dict[str, float]]], baselines: List[st
 def evaluate_heldout_causal(
     checkpoint: str = FROZEN_CHECKPOINT,
     config_name: str = "fast",
-    device: str = "cpu",
+    device: DeviceLike = AUTO_DEVICE,
 ) -> Dict[str, object]:
+    device = str(resolve_device(device))
     cfg = HELDOUT_CONFIGS[config_name]
     model = load_checkpoint(checkpoint, device=device)
     model.eval()
@@ -369,7 +371,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", default=FROZEN_CHECKPOINT)
     parser.add_argument("--config", choices=sorted(HELDOUT_CONFIGS), default="fast")
-    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--device", default=AUTO_DEVICE)
     args = parser.parse_args()
     evaluate_heldout_causal(args.checkpoint, args.config, args.device)
 

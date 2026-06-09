@@ -8,6 +8,7 @@ from typing import Dict
 import torch
 
 from .continual_learning import PersistentConceptMemory, recall_accuracy
+from .device import AUTO_DEVICE, DeviceLike, resolve_device
 from .env import (
     ANS_CURRICULUM,
     NUM_CURRICULUM_CONCEPTS,
@@ -23,8 +24,9 @@ def curriculum_batch(
     seq_len: int,
     concept_id: int,
     base_seed: int,
-    device: str = "cpu",
+    device: DeviceLike = AUTO_DEVICE,
 ) -> Dict[str, torch.Tensor]:
+    device = str(resolve_device(device))
     concept = concept_id % NUM_CURRICULUM_CONCEPTS
     batch = generate_batch(batch_size, seq_len, base_seed=base_seed, device=device)
     query_start = max(8, seq_len // 3)
@@ -48,7 +50,8 @@ def curriculum_batch(
     return batch
 
 
-def curriculum_accuracy(model, concept_id: int, seed: int, device: str = "cpu") -> float:
+def curriculum_accuracy(model, concept_id: int, seed: int, device: DeviceLike = AUTO_DEVICE) -> float:
+    device = str(resolve_device(device))
     batch = curriculum_batch(64, 48, concept_id, seed, device=device)
     with torch.no_grad():
         outputs = model(batch["sensory"], batch["lang_in"], batch["private_in"])
@@ -65,8 +68,9 @@ def acquire_new_concept(
     steps: int = 80,
     batch_size: int = 32,
     seq_len: int = 48,
-    device: str = "cpu",
+    device: DeviceLike = AUTO_DEVICE,
 ) -> Dict[str, float]:
+    device = str(resolve_device(device))
     del batch_size, seq_len
     load_checkpoint(checkpoint, device=device).eval()
     memory = PersistentConceptMemory.fresh(device=device)
@@ -93,7 +97,7 @@ def main() -> None:
     parser.add_argument("--output", default="runs/curriculum_latest.pt")
     parser.add_argument("--concept-id", type=int, default=1)
     parser.add_argument("--steps", type=int, default=80)
-    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--device", default=AUTO_DEVICE)
     args = parser.parse_args()
     print(
         json.dumps(

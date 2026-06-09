@@ -9,6 +9,7 @@ from typing import Dict
 import torch
 import torch.nn.functional as F
 
+from .device import AUTO_DEVICE, DeviceLike, resolve_device
 from .env import (
     BODY_DAMAGE,
     BODY_ENERGY,
@@ -184,14 +185,15 @@ def train_model(
     config_name: str = "fast",
     output: str | Path = "runs/latest.pt",
     steps: int | None = None,
-    device: str = "cpu",
+    device: DeviceLike = AUTO_DEVICE,
 ) -> Dict[str, float]:
+    target_device = resolve_device(device)
     cfg = CONFIGS[config_name]
     if steps is not None:
         cfg = TrainConfig(**{**asdict(cfg), "steps": steps})
 
     torch.manual_seed(cfg.seed)
-    model = RecurrentLatentModel(ModelConfig(hidden_dim=cfg.hidden_dim)).to(device)
+    model = RecurrentLatentModel(ModelConfig(hidden_dim=cfg.hidden_dim)).to(target_device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=1e-4)
     model.train()
 
@@ -201,7 +203,7 @@ def train_model(
             batch_size=cfg.batch_size,
             seq_len=cfg.seq_len,
             base_seed=cfg.seed + step * cfg.batch_size,
-            device=device,
+            device=target_device,
         )
         outputs = model(batch["sensory"], batch["lang_in"], batch["private_in"])
         losses = compute_losses(outputs, batch)
@@ -252,7 +254,7 @@ def main() -> None:
     parser.add_argument("--config", choices=sorted(CONFIGS), default="fast")
     parser.add_argument("--output", default="runs/latest.pt")
     parser.add_argument("--steps", type=int, default=None)
-    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--device", default=AUTO_DEVICE)
     args = parser.parse_args()
     summary = train_model(args.config, args.output, args.steps, args.device)
     print(json.dumps({"checkpoint": args.output, **summary}, indent=2))

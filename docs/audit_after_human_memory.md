@@ -7,23 +7,24 @@ Terminal outcome: **AUDIT PROVEN**
 | Path | Before SHA256 | After SHA256 | Unchanged |
 | --- | --- | --- | --- |
 | `frozen/recurrent_latent_fast.pt` | `D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD` | `D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD` | True |
-| `frozen/manifest.json` | `5A29A083287FDA14194392CE08CE24EDB56E21061285FFF2CCCB5E637807CA89` | `5A29A083287FDA14194392CE08CE24EDB56E21061285FFF2CCCB5E637807CA89` | True |
-| `src/model.py` | `6C7D4FA2E8811DB76F12AF36DA20E56195F25F50DA349EA5335B26A8C90FDE1B` | `6C7D4FA2E8811DB76F12AF36DA20E56195F25F50DA349EA5335B26A8C90FDE1B` | True |
-| `src/env.py` | `6EACA0F191E1849DF88C402500339F3E6B1C77FF6F0BB27DDF606FEC543FD04E` | `6EACA0F191E1849DF88C402500339F3E6B1C77FF6F0BB27DDF606FEC543FD04E` | True |
-| `src/run_unbroken.py` | `004C239D211EF80CCA09637562908BD1C1FE716B0175810E0FD65FEA90CBEF89` | `004C239D211EF80CCA09637562908BD1C1FE716B0175810E0FD65FEA90CBEF89` | True |
-| `src/persistent_memory.py` | `C24B4367437E61C1C19E8120C875276157EC729F10006E6ADBD69D016186BFC0` | `C24B4367437E61C1C19E8120C875276157EC729F10006E6ADBD69D016186BFC0` | True |
-| `src/living_eval.py` | `134AC234A69356866B02212BAE8784BE4F58A2A141044FD46AC2CD1D25F97E53` | `134AC234A69356866B02212BAE8784BE4F58A2A141044FD46AC2CD1D25F97E53` | True |
-| `src/curriculum.py` | `F94DBF04C81F897486ADFE6866569A696AF6562D7342304E35E33999EA8121CF` | `F94DBF04C81F897486ADFE6866569A696AF6562D7342304E35E33999EA8121CF` | True |
-| `src/continual_learning.py` | `B56C723D9A8C6FBB71B5450F79D4897C99816F083422F165BD0973378CFEA3B1` | `B56C723D9A8C6FBB71B5450F79D4897C99816F083422F165BD0973378CFEA3B1` | True |
-| `src/retention_eval.py` | `64121E109B1BC6827E38C10896C4136B1D27D384718F23821A30A0D1DC66A2A7` | `64121E109B1BC6827E38C10896C4136B1D27D384718F23821A30A0D1DC66A2A7` | True |
-| `src/human_memory.py` | `A0AE42F8A9B12902AA6C6ADCFEA05BE8D10C0767FAB037147948148638C94713` | `A0AE42F8A9B12902AA6C6ADCFEA05BE8D10C0767FAB037147948148638C94713` | True |
+| `frozen/manifest.json` | `DC1B411C5B33A70DE352DC5D3789DB3CED4283A17D8E7926AB2B9BB7D8FEB1C2` | `DC1B411C5B33A70DE352DC5D3789DB3CED4283A17D8E7926AB2B9BB7D8FEB1C2` | True |
+| `src/device.py` | `39DE3FFE33C752376B510FE7511071457D443995A7AB0D3778C3F970972999EE` | `39DE3FFE33C752376B510FE7511071457D443995A7AB0D3778C3F970972999EE` | True |
+| `src/model.py` | `CE2838225E6852E64CA22D5A934B8ABAC6922D7377058F01F91CF5188CAC8DAF` | `CE2838225E6852E64CA22D5A934B8ABAC6922D7377058F01F91CF5188CAC8DAF` | True |
+| `src/env.py` | `E1828F03448431F0989F828136743BB5A999F92A2356E39FF8A1D6484EE54195` | `E1828F03448431F0989F828136743BB5A999F92A2356E39FF8A1D6484EE54195` | True |
+| `src/run_unbroken.py` | `63991C9CA9AA6C11F10E2FADD8DF1BD234E803FA4D747BD47CA98CF532CDB0F1` | `63991C9CA9AA6C11F10E2FADD8DF1BD234E803FA4D747BD47CA98CF532CDB0F1` | True |
+| `src/persistent_memory.py` | `FE98387F699F3BD9842D6DD831C84210ACDC587ECDB5D3141D0A0CE9BD597124` | `FE98387F699F3BD9842D6DD831C84210ACDC587ECDB5D3141D0A0CE9BD597124` | True |
+| `src/living_eval.py` | `35F183494A228248C8729634BBE213DBFF5E752EC7708C6545CB7B73F41F53DD` | `35F183494A228248C8729634BBE213DBFF5E752EC7708C6545CB7B73F41F53DD` | True |
+| `src/curriculum.py` | `8B780E839C90DF3746EECE2D75640C86EBB2E7708C2AB28A91F90E6D01EE6A9C` | `8B780E839C90DF3746EECE2D75640C86EBB2E7708C2AB28A91F90E6D01EE6A9C` | True |
+| `src/continual_learning.py` | `D48D3B2E09FAC56896EEAFCC6F3AFB26420EAD7A920A36BFFAC73E4801AE6A44` | `D48D3B2E09FAC56896EEAFCC6F3AFB26420EAD7A920A36BFFAC73E4801AE6A44` | True |
+| `src/retention_eval.py` | `91ECD1536C3CDF5C5EF01874596904631D4789CC2BBF77B12907451B1E397A4E` | `91ECD1536C3CDF5C5EF01874596904631D4789CC2BBF77B12907451B1E397A4E` | True |
+| `src/human_memory.py` | `F25FC79DBEC8FA7445DACFA03A16916990C865961609B6704ABBD2F70630BC30` | `F25FC79DBEC8FA7445DACFA03A16916990C865961609B6704ABBD2F70630BC30` | True |
 | `src/memory_replay.py` | `5CF8DD8D8AD98CF2DE9031849C0EBCAF5F6835AEFA10EAB4432C30B9AE325F9D` | `5CF8DD8D8AD98CF2DE9031849C0EBCAF5F6835AEFA10EAB4432C30B9AE325F9D` | True |
-| `src/memory_eval.py` | `D9C895D602F4CB7E09B1DC451342785EE35A636EF64592B05AC7B108DF28DD2A` | `D9C895D602F4CB7E09B1DC451342785EE35A636EF64592B05AC7B108DF28DD2A` | True |
-| `src/train.py` | `00DEF2BD88364AA92663A40FBBE79FBD052DCA3DA876016A08473FF628306255` | `00DEF2BD88364AA92663A40FBBE79FBD052DCA3DA876016A08473FF628306255` | True |
-| `src/evaluate.py` | `AF6403993DB80AA099E5CFAEB4B8BD68D0D07F0C5FF54C5339633CB7908E4E65` | `AF6403993DB80AA099E5CFAEB4B8BD68D0D07F0C5FF54C5339633CB7908E4E65` | True |
-| `src/metrics.py` | `E06EFB02345A3568F7249BC3DAFC0E277421E873DF811F5BB49876E90D2801F4` | `E06EFB02345A3568F7249BC3DAFC0E277421E873DF811F5BB49876E90D2801F4` | True |
-| `README.md` | `1DA55D70DCC20AB0C7C923D8631B6C1EA5384F207FF2119FE3AE665A0E035D33` | `1DA55D70DCC20AB0C7C923D8631B6C1EA5384F207FF2119FE3AE665A0E035D33` | True |
-| `docs/living_system_report.json` | `2C859A655051667D2E37550B3B81E825BAF120B30DC8028354CF9C6FC8A38BFE` | `2C859A655051667D2E37550B3B81E825BAF120B30DC8028354CF9C6FC8A38BFE` | True |
+| `src/memory_eval.py` | `1DD45666FAD55E4431AE2CE97B8DE850959574F7CEED07A20DFD6F7EAF2D53BE` | `1DD45666FAD55E4431AE2CE97B8DE850959574F7CEED07A20DFD6F7EAF2D53BE` | True |
+| `src/train.py` | `C571828637D7CB55A4110EE7EDCF32EAD4B4177B9173E021BA7EF151D0935373` | `C571828637D7CB55A4110EE7EDCF32EAD4B4177B9173E021BA7EF151D0935373` | True |
+| `src/evaluate.py` | `5B2FAE47B0A39930715215457D700D1999B03E7225B53A62026DE7E9DFE8AD45` | `5B2FAE47B0A39930715215457D700D1999B03E7225B53A62026DE7E9DFE8AD45` | True |
+| `src/metrics.py` | `4060284E09909EDE9B832E0EAB98FE560D493FB389104A81C5473B1A445E755B` | `4060284E09909EDE9B832E0EAB98FE560D493FB389104A81C5473B1A445E755B` | True |
+| `README.md` | `0D96EEC67ADB0A0EE351DDE89DEFD7339C846B15A5DD652CCDE24A321A038DAD` | `0D96EEC67ADB0A0EE351DDE89DEFD7339C846B15A5DD652CCDE24A321A038DAD` | True |
+| `docs/living_system_report.json` | `90155A6701C66A50EEAC0720ED5FA2049AC8B622EECDB9539E6C303A0A741C8B` | `90155A6701C66A50EEAC0720ED5FA2049AC8B622EECDB9539E6C303A0A741C8B` | True |
 | `docs/evidence_dossier.json` | `8021CC9CFE35128C76A8D1772C17B4621D92425FAA7C6F7E8D4A9E26161D3D06` | `8021CC9CFE35128C76A8D1772C17B4621D92425FAA7C6F7E8D4A9E26161D3D06` | True |
 
 ## Claim Proof Table
@@ -52,86 +53,86 @@ Material metric differences over tolerance `0.02`: `0`.
 {
   "scores": {
     "normal_generated_private": {
-      "action_accuracy": 0.9679129464285714,
+      "action_accuracy": 0.9695870535714286,
       "delayed_memory_accuracy": 0.9973958333333334,
-      "object_color_accuracy": 0.9984809027777778,
+      "object_color_accuracy": 0.9993489583333334,
       "object_pos_accuracy": 1.0,
-      "object_permanence_accuracy": 0.9992404513888888,
-      "provenance_accuracy": 0.9215262532234192,
-      "grounded_language_accuracy": 0.9864583333333333,
+      "object_permanence_accuracy": 0.9996744791666667,
+      "provenance_accuracy": 0.9229910969734192,
+      "grounded_language_accuracy": 0.9875,
       "self_world_continuity_accuracy": 1.0,
-      "core_mean": 0.9838768400606654
+      "core_mean": 0.9845621776722726
     },
     "zero_z": {
-      "action_accuracy": 0.48890904017857145,
-      "delayed_memory_accuracy": 0.20963541666666666,
-      "object_color_accuracy": 0.23531539351851852,
-      "object_pos_accuracy": 0.2183159722222222,
-      "object_permanence_accuracy": 0.22681568287037035,
-      "provenance_accuracy": 0.6763392686843872,
-      "grounded_language_accuracy": 0.28072916666666664,
-      "self_world_continuity_accuracy": 0.19921875,
-      "core_mean": 0.3169098363509254
+      "action_accuracy": 0.4476841517857143,
+      "delayed_memory_accuracy": 0.3142361111111111,
+      "object_color_accuracy": 0.29477719907407407,
+      "object_pos_accuracy": 0.2003761574074074,
+      "object_permanence_accuracy": 0.24757667824074076,
+      "provenance_accuracy": 0.6823381781578064,
+      "grounded_language_accuracy": 0.2953125,
+      "self_world_continuity_accuracy": 0.1953125,
+      "core_mean": 0.33470168447210674
     },
     "shuffled_z": {
-      "action_accuracy": 0.36063058035714285,
-      "delayed_memory_accuracy": 0.2209201388888889,
-      "object_color_accuracy": 0.23625578703703703,
-      "object_pos_accuracy": 0.1749855324074074,
-      "object_permanence_accuracy": 0.2056206597222222,
-      "provenance_accuracy": 0.9205496907234192,
-      "grounded_language_accuracy": 0.2296875,
-      "self_world_continuity_accuracy": 0.19921875,
-      "core_mean": 0.3184835798920147
+      "action_accuracy": 0.36000279017857145,
+      "delayed_memory_accuracy": 0.2608506944444444,
+      "object_color_accuracy": 0.25296585648148145,
+      "object_pos_accuracy": 0.1804832175925926,
+      "object_permanence_accuracy": 0.21672453703703703,
+      "provenance_accuracy": 0.9250837564468384,
+      "grounded_language_accuracy": 0.2518229166666667,
+      "self_world_continuity_accuracy": 0.20442708333333334,
+      "core_mean": 0.33154510652262065
     },
     "no_language": {
-      "action_accuracy": 0.4144810267857143,
-      "delayed_memory_accuracy": 0.3072916666666667,
-      "object_color_accuracy": 0.32740162037037035,
-      "object_pos_accuracy": 0.33817997685185186,
-      "object_permanence_accuracy": 0.3327907986111111,
-      "provenance_accuracy": 0.3249860405921936,
+      "action_accuracy": 0.42222377232142855,
+      "delayed_memory_accuracy": 0.3094618055555556,
+      "object_color_accuracy": 0.42397280092592593,
+      "object_pos_accuracy": 0.3122829861111111,
+      "object_permanence_accuracy": 0.3681278935185185,
+      "provenance_accuracy": 0.3316127359867096,
       "grounded_language_accuracy": 0.0,
-      "self_world_continuity_accuracy": 0.15625,
-      "core_mean": 0.2751726412347385
+      "self_world_continuity_accuracy": 0.1796875,
+      "core_mean": 0.2934211868024062
     },
     "no_private_token": {
-      "action_accuracy": 0.5537806919642857,
-      "delayed_memory_accuracy": 0.3368055555555556,
-      "object_color_accuracy": 0.4131944444444444,
-      "object_pos_accuracy": 0.32125289351851855,
-      "object_permanence_accuracy": 0.3672236689814815,
-      "provenance_accuracy": 0.91259765625,
-      "grounded_language_accuracy": 0.46484375,
-      "self_world_continuity_accuracy": 0.9778645833333334,
-      "core_mean": 0.5434454055059523
+      "action_accuracy": 0.5396902901785714,
+      "delayed_memory_accuracy": 0.3823784722222222,
+      "object_color_accuracy": 0.40458622685185186,
+      "object_pos_accuracy": 0.37094907407407407,
+      "object_permanence_accuracy": 0.38776765046296297,
+      "provenance_accuracy": 0.9150391221046448,
+      "grounded_language_accuracy": 0.46588541666666666,
+      "self_world_continuity_accuracy": 0.98828125,
+      "core_mean": 0.5568221878201243
     },
     "random_private_token": {
-      "action_accuracy": 0.5712890625,
-      "delayed_memory_accuracy": 0.26171875,
-      "object_color_accuracy": 0.36617476851851855,
-      "object_pos_accuracy": 0.32544849537037035,
-      "object_permanence_accuracy": 0.3458116319444444,
-      "provenance_accuracy": 0.9102259874343872,
-      "grounded_language_accuracy": 0.43385416666666665,
-      "self_world_continuity_accuracy": 0.9153645833333334,
-      "core_mean": 0.516235930720965
+      "action_accuracy": 0.5086495535714286,
+      "delayed_memory_accuracy": 0.3450520833333333,
+      "object_color_accuracy": 0.4176070601851852,
+      "object_pos_accuracy": 0.31980613425925924,
+      "object_permanence_accuracy": 0.3687065972222222,
+      "provenance_accuracy": 0.9128767251968384,
+      "grounded_language_accuracy": 0.43020833333333336,
+      "self_world_continuity_accuracy": 0.8736979166666666,
+      "core_mean": 0.5220755504710334
     }
   },
   "random_label_score": {
-    "action_accuracy": 0.19168526785714285,
-    "delayed_memory_accuracy": 0.2439236111111111,
-    "object_color_accuracy": 0.24638310185185186,
-    "object_pos_accuracy": 0.2016059027777778,
-    "object_permanence_accuracy": 0.22399450231481483,
-    "provenance_accuracy": 0.2466517835855484,
-    "grounded_language_accuracy": 0.029947916666666668,
-    "self_world_continuity_accuracy": 0.22786458333333334,
-    "core_mean": 0.20150708368728085
+    "action_accuracy": 0.20026506696428573,
+    "delayed_memory_accuracy": 0.2638888888888889,
+    "object_color_accuracy": 0.2468894675925926,
+    "object_pos_accuracy": 0.1953125,
+    "object_permanence_accuracy": 0.22110098379629628,
+    "provenance_accuracy": 0.250279039144516,
+    "grounded_language_accuracy": 0.029166666666666667,
+    "self_world_continuity_accuracy": 0.2109375,
+    "core_mean": 0.20223001413165576
   },
   "hidden_target_canary_max_abs_diff": 0.0,
-  "no_private_action_shift_rate": 0.4760044515132904,
-  "no_private_language_shift_rate": 0.3800223171710968,
+  "no_private_action_shift_rate": 0.488072007894516,
+  "no_private_language_shift_rate": 0.3657924234867096,
   "checks": {
     "hidden_target_canary_no_effect": true,
     "random_labels_reduce_score": true,
@@ -150,12 +151,12 @@ Material metric differences over tolerance `0.02`: `0`.
   "restart_tick": 70,
   "normal_final_memory_accuracy": 0.9375,
   "memory_file_restart_final_memory_accuracy": 0.9375,
-  "zero_reset_final_memory_accuracy": 0.25,
+  "zero_reset_final_memory_accuracy": 0.1796875,
   "normal_final_object_pos_accuracy": 1.0,
   "memory_file_restart_final_object_pos_accuracy": 1.0,
-  "zero_reset_final_object_pos_accuracy": 0.203125,
-  "corrupt_memory_final_memory_accuracy": 0.2734375,
-  "corrupt_memory_final_object_pos_accuracy": 0.1875,
+  "zero_reset_final_object_pos_accuracy": 0.1875,
+  "corrupt_memory_final_memory_accuracy": 0.25,
+  "corrupt_memory_final_object_pos_accuracy": 0.203125,
   "checks": {
     "memory_file_good": true,
     "memory_beats_zero_reset": true,
@@ -168,14 +169,14 @@ Material metric differences over tolerance `0.02`: `0`.
 
 | Tick | Token | Visible | Private In | Generated Private | Action | Memory | Object Pos | Pass |
 | ---: | --- | --- | ---: | ---: | --- | --- | --- | --- |
-| 0 | OBSERVE_OBJECT | True | 0 | 1 | STAY | 0/0 | 2/2 | True |
-| 3 | ASK_CURRENT_POS | True | 1 | 11 | LEFT | 0/0 | 2/2 | True |
-| 8 | TOLD_GOAL | False | 1 | 1 | RIGHT | 0/0 | 2/2 | True |
-| 16 | NONE | False | 7 | 13 | LEFT | 0/0 | 2/2 | True |
-| 32 | NONE | False | 16 | 17 | RIGHT | 0/0 | 2/2 | True |
-| 64 | NONE | False | 12 | 13 | RIGHT | 0/0 | 2/2 | True |
-| 95 | NONE | False | 13 | 14 | LEFT | 0/0 | 2/2 | True |
-| 111 | NONE | False | 17 | 12 | LEFT | 0/0 | 2/2 | True |
+| 0 | OBSERVE_OBJECT | True | 0 | 1 | RIGHT | 0/0 | 4/4 | True |
+| 3 | ASK_CURRENT_POS | True | 1 | 11 | STAY | 0/0 | 4/4 | True |
+| 8 | TOLD_GOAL | False | 1 | 1 | LEFT | 0/0 | 4/4 | True |
+| 16 | NONE | False | 9 | 17 | LEFT | 0/0 | 4/4 | True |
+| 32 | NONE | False | 14 | 15 | LEFT | 0/0 | 4/4 | True |
+| 64 | NONE | False | 16 | 17 | STAY | 0/0 | 4/4 | True |
+| 95 | NONE | False | 17 | 12 | STAY | 0/0 | 4/4 | True |
+| 111 | NONE | False | 15 | 16 | LEFT | 0/0 | 4/4 | True |
 
 ## Curriculum
 
@@ -190,26 +191,26 @@ Material metric differences over tolerance `0.02`: `0`.
   "concept_memory_accuracy_before": 0.0,
   "concept_memory_accuracy_after": 1.0,
   "old_task_retention_before": {
-    "action_accuracy": 0.9779296875,
+    "action_accuracy": 0.980859375,
     "delayed_memory_accuracy": 1.0,
     "object_color_accuracy": 1.0,
     "object_pos_accuracy": 1.0,
     "object_permanence_accuracy": 1.0,
-    "provenance_accuracy": 0.999804675579071,
-    "grounded_language_accuracy": 0.9859375,
+    "provenance_accuracy": 1.0,
+    "grounded_language_accuracy": 0.98828125,
     "self_world_continuity_accuracy": 1.0,
-    "core_mean": 0.9954589828848839
+    "core_mean": 0.996142578125
   },
   "old_task_retention_after": {
-    "action_accuracy": 0.9779296875,
+    "action_accuracy": 0.980859375,
     "delayed_memory_accuracy": 1.0,
     "object_color_accuracy": 1.0,
     "object_pos_accuracy": 1.0,
     "object_permanence_accuracy": 1.0,
-    "provenance_accuracy": 0.999804675579071,
-    "grounded_language_accuracy": 0.9859375,
+    "provenance_accuracy": 1.0,
+    "grounded_language_accuracy": 0.98828125,
     "self_world_continuity_accuracy": 1.0,
-    "core_mean": 0.9954589828848839
+    "core_mean": 0.996142578125
   },
   "old_task_core_delta": 0.0,
   "old_task_submetric_floor_checks": {
@@ -229,271 +230,273 @@ Material metric differences over tolerance `0.02`: `0`.
 ## Required Source Snippets
 
 ### model_step_update
-`src/model.py:60`
+`src/model.py:63`
 
 ```python
-60:     def initial_state(self, batch_size: int, device: torch.device | str = "cpu") -> torch.Tensor:
-61:         return torch.zeros(batch_size, self.config.hidden_dim, device=device)
-62:
-63:     def step(
-64:         self, observation: Dict[str, torch.Tensor], z_prev: torch.Tensor
-65:     ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
-66:         sensory = observation["sensory"]
-67:         lang_in = observation["lang_in"]
-68:         private_in = observation.get("private_in")
-69:         if private_in is None:
-70:             private_in = torch.zeros_like(lang_in)
-71:         sensor_features = self.sensor_encoder(sensory)
+63:         target_device = next(self.parameters()).device if device is None else resolve_device(device)
+64:         return torch.zeros(batch_size, self.config.hidden_dim, device=target_device)
+65:
+66:     def step(
+67:         self, observation: Dict[str, torch.Tensor], z_prev: torch.Tensor
+68:     ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
+69:         sensory = observation["sensory"]
+70:         lang_in = observation["lang_in"]
+71:         private_in = observation.get("private_in")
+72:         if private_in is None:
+73:             private_in = torch.zeros_like(lang_in)
+74:         sensor_features = self.sensor_encoder(sensory)
 ```
 
 ### runtime_z_loop
-`src/run_unbroken.py:38`
+`src/run_unbroken.py:40`
 
 ```python
-38:
-39:     with torch.no_grad():
-40:         for tick in range(max_ticks):
-41:             observation = world.observation(device=device, private_in=int(private_token.item()))
-42:             output, z = model.step(observation, z)
-43:             action = int(output["action_logits"].argmax(dim=-1).item())
-44:             language = int(output["language_logits"].argmax(dim=-1).item())
-45:             private_token = output["private_logits"].argmax(dim=-1)
-46:             latents.append(z.squeeze(0).detach().cpu())
-47:             language_tokens.append(language)
-48:             private_tokens.append(int(private_token.item()))
-49:             if memory is not None:
-50:                 memory.update(z, private_token, tick + 1)
-51:             world.step(action)
-52:             if log_every > 0 and (tick + 1) % log_every == 0:
-53:                 print(
-54:                     json.dumps(
-55:                         {
-56:                             "tick": tick + 1,
-57:                             "z_norm": round(float(z.norm().item()), 6),
-58:                             "action": action,
+40:
+41:     with torch.no_grad():
+42:         for tick in range(max_ticks):
+43:             observation = world.observation(device=target_device, private_in=int(private_token.item()))
+44:             output, z = model.step(observation, z)
+45:             action = int(output["action_logits"].argmax(dim=-1).item())
+46:             language_token = output["language_logits"].argmax(dim=-1)
+47:             language = int(language_token.item())
+48:             private_token = output["private_logits"].argmax(dim=-1)
+49:             latents.append(z.squeeze(0).detach())
+50:             language_tokens.append(language_token.squeeze(0).detach())
+51:             private_tokens.append(private_token.squeeze(0).detach())
+52:             if memory is not None:
+53:                 memory.update(z, private_token, tick + 1)
+54:             world.step(action)
+55:             if log_every > 0 and (tick + 1) % log_every == 0:
+56:                 print(
+57:                     json.dumps(
+58:                         {
+59:                             "tick": tick + 1,
+60:                             "z_norm": round(float(z.norm().item()), 6),
 ```
 
 ### memory_load_save
-`src/persistent_memory.py:28`
+`src/persistent_memory.py:30`
 
 ```python
-28:         )
-29:
-30:     @classmethod
-31:     def load(
-32:         cls,
-33:         path: str | Path,
-34:         hidden_dim: int,
-35:         batch_size: int = 1,
-36:         device: torch.device | str = "cpu",
-37:     ) -> "PersistentMemoryState":
-38:         path = Path(path)
-39:         if not path.exists():
-40:             return cls.fresh(hidden_dim, batch_size=batch_size, device=device)
-41:         payload = torch.load(path, map_location=device)
-42:         latent = payload["latent"].to(device).float()
-43:         private_token = payload["private_token"].to(device).long()
-44:         if latent.ndim == 1:
-45:             latent = latent.view(1, -1)
-46:         if private_token.ndim == 0:
-47:             private_token = private_token.view(1)
-48:         if latent.shape[-1] != hidden_dim:
-49:             raise ValueError(f"memory latent width {latent.shape[-1]} does not match model hidden_dim {hidden_dim}")
-50:         if latent.shape[0] != batch_size:
-51:             latent = latent[:1].repeat(batch_size, 1)
-52:         if private_token.shape[0] != batch_size:
-53:             private_token = private_token[:1].repeat(batch_size)
-54:         return cls(latent=latent, private_token=private_token, tick=int(payload.get("tick", 0)))
-55:
-56:     def update(self, latent: torch.Tensor, private_token: torch.Tensor, tick: int) -> None:
-57:         self.latent = latent.detach().clone()
-58:         self.private_token = private_token.detach().clone().long()
-59:         self.tick = int(tick)
-60:
-61:     def save(self, path: str | Path) -> None:
-62:         path = Path(path)
-63:         path.parent.mkdir(parents=True, exist_ok=True)
-64:         torch.save(
-65:             {
-66:                 "latent": self.latent.detach().cpu(),
-67:                 "private_token": self.private_token.detach().cpu(),
-68:                 "tick": self.tick,
-69:                 "format": "persistent_differentiable_tensor_memory_v1",
-70:             },
-71:             path,
-72:         )
+30:         )
+31:
+32:     @classmethod
+33:     def load(
+34:         cls,
+35:         path: str | Path,
+36:         hidden_dim: int,
+37:         batch_size: int = 1,
+38:         device: DeviceLike = AUTO_DEVICE,
+39:     ) -> "PersistentMemoryState":
+40:         target_device = resolve_device(device)
+41:         path = Path(path)
+42:         if not path.exists():
+43:             return cls.fresh(hidden_dim, batch_size=batch_size, device=target_device)
+44:         payload = torch.load(path, map_location=target_device)
+45:         latent = payload["latent"].to(target_device).float()
+46:         private_token = payload["private_token"].to(target_device).long()
+47:         if latent.ndim == 1:
+48:             latent = latent.view(1, -1)
+49:         if private_token.ndim == 0:
+50:             private_token = private_token.view(1)
+51:         if latent.shape[-1] != hidden_dim:
+52:             raise ValueError(f"memory latent width {latent.shape[-1]} does not match model hidden_dim {hidden_dim}")
+53:         if latent.shape[0] != batch_size:
+54:             latent = latent[:1].repeat(batch_size, 1)
+55:         if private_token.shape[0] != batch_size:
+56:             private_token = private_token[:1].repeat(batch_size)
+57:         return cls(latent=latent, private_token=private_token, tick=int(payload.get("tick", 0)))
+58:
+59:     def update(self, latent: torch.Tensor, private_token: torch.Tensor, tick: int) -> None:
+60:         target_device = self.latent.device
+61:         self.latent = latent.detach().to(target_device).clone()
+62:         self.private_token = private_token.detach().to(target_device).clone().long()
+63:         self.tick = int(tick)
+64:
+65:     def save(self, path: str | Path) -> None:
+66:         path = Path(path)
+67:         path.parent.mkdir(parents=True, exist_ok=True)
+68:         torch.save(
+69:             {
+70:                 "latent": self.latent.detach().cpu(),
+71:                 "private_token": self.private_token.detach().cpu(),
+72:                 "tick": self.tick,
+73:                 "format": "persistent_differentiable_tensor_memory_v1",
+74:             },
+75:             path,
+76:         )
 ```
 
 ### model_input_construction
-`src/env.py:408`
+`src/env.py:410`
 
 ```python
-408:         self.damage = float(0.10 * torch.rand(1, generator=self.generator).item())
-409:         self.resource = float(0.20 + 0.55 * torch.rand(1, generator=self.generator).item())
-410:
-411:     def observation(
-412:         self,
-413:         device: torch.device | str = "cpu",
-414:         private_in: int = PRIVATE_NONE,
-415:     ) -> Dict[str, torch.Tensor]:
-416:         token = token_for_tick(self.local_tick)
-417:         visible = self.target_color if self.local_tick < 4 else NUM_COLORS
-418:         visible_pos = self.target_pos if self.local_tick < 4 else GRID_SIZE
-419:         current_pos = torch.tensor([self.current_pos], dtype=torch.long)
-420:         orientation = torch.tensor([self.orientation], dtype=torch.long)
-421:         energy = torch.tensor([self.energy], dtype=torch.float32)
-422:         fatigue = 1.0 - energy
-423:         damage = torch.tensor([self.damage], dtype=torch.float32)
-424:         resource = torch.tensor([self.resource], dtype=torch.float32)
-425:         visible_color = torch.tensor([visible], dtype=torch.long)
-426:         visible_object_pos = torch.tensor([visible_pos], dtype=torch.long)
-427:         sensory = build_sensory(
-428:             current_pos,
-429:             orientation,
-430:             energy,
-431:             fatigue,
-432:             damage,
-433:             resource,
-434:             visible_color,
-435:             visible_object_pos,
-436:         )
-437:         return {
-438:             "sensory": sensory.to(device),
-439:             "lang_in": torch.tensor([token], dtype=torch.long, device=device),
-440:             "private_in": torch.tensor([private_in], dtype=torch.long, device=device),
-441:         }
-442:
-443:     def expected_action(self) -> int:
+410:         self.damage = float(0.10 * torch.rand(1, generator=self.generator, device=self.rng_device).item())
+411:         self.resource = float(0.20 + 0.55 * torch.rand(1, generator=self.generator, device=self.rng_device).item())
+412:
+413:     def observation(
+414:         self,
+415:         device: DeviceLike = AUTO_DEVICE,
+416:         private_in: int = PRIVATE_NONE,
+417:     ) -> Dict[str, torch.Tensor]:
+418:         target_device = resolve_device(device)
+419:         token = token_for_tick(self.local_tick)
+420:         visible = self.target_color if self.local_tick < 4 else NUM_COLORS
+421:         visible_pos = self.target_pos if self.local_tick < 4 else GRID_SIZE
+422:         current_pos = torch.tensor([self.current_pos], dtype=torch.long, device=target_device)
+423:         orientation = torch.tensor([self.orientation], dtype=torch.long, device=target_device)
+424:         energy = torch.tensor([self.energy], dtype=torch.float32, device=target_device)
+425:         fatigue = 1.0 - energy
+426:         damage = torch.tensor([self.damage], dtype=torch.float32, device=target_device)
+427:         resource = torch.tensor([self.resource], dtype=torch.float32, device=target_device)
+428:         visible_color = torch.tensor([visible], dtype=torch.long, device=target_device)
+429:         visible_object_pos = torch.tensor([visible_pos], dtype=torch.long, device=target_device)
+430:         sensory = build_sensory(
+431:             current_pos,
+432:             orientation,
+433:             energy,
+434:             fatigue,
+435:             damage,
+436:             resource,
+437:             visible_color,
+438:             visible_object_pos,
+439:         )
+440:         return {
+441:             "sensory": sensory,
+442:             "lang_in": torch.tensor([token], dtype=torch.long, device=target_device),
+443:             "private_in": torch.tensor([private_in], dtype=torch.long, device=target_device),
+444:         }
+445:
 ```
 
 ### target_input_separation
-`src/env.py:350`
+`src/env.py:352`
 
 ```python
-350:         resource = torch.clamp(resource + forage.float() * 0.090 - rest.float() * 0.006 - 0.004, 0.0, 1.0)
-351:
-352:     private_in[:, 1:] = private[:, :-1]
+352:         resource = torch.clamp(resource + forage.float() * 0.090 - rest.float() * 0.006 - 0.004, 0.0, 1.0)
 353:
-354:     batch = {
-355:         "sensory": sensory,
-356:         "lang_in": lang_in,
-357:         "private_in": private_in,
-358:         "action_target": action_target,
-359:         "language_target": language,
-360:         "private_target": private,
-361:         "provenance_target": provenance,
-362:         "world_color_target": world_color,
-363:         "world_pos_target": world_pos,
-364:         "memory_color_target": memory_color,
-365:         "self_start_target": self_start,
-366:         "action_mask": action_mask,
-367:         "delayed_memory_mask": delayed_memory_mask,
-368:         "object_mask": object_mask,
-369:         "grounded_language_mask": grounded_language_mask,
-370:         "self_mask": self_mask,
-371:     }
-372:     return {key: value.to(device) for key, value in batch.items()}
-373:
-374:
-375: class TinyWorldRuntime:
-376:     def __init__(self, seed: int = 0, episode_len: int = 80) -> None:
+354:     private_in[:, 1:] = private[:, :-1]
+355:
+356:     batch = {
+357:         "sensory": sensory,
+358:         "lang_in": lang_in,
+359:         "private_in": private_in,
+360:         "action_target": action_target,
+361:         "language_target": language,
+362:         "private_target": private,
+363:         "provenance_target": provenance,
+364:         "world_color_target": world_color,
+365:         "world_pos_target": world_pos,
+366:         "memory_color_target": memory_color,
+367:         "self_start_target": self_start,
+368:         "action_mask": action_mask,
+369:         "delayed_memory_mask": delayed_memory_mask,
+370:         "object_mask": object_mask,
+371:         "grounded_language_mask": grounded_language_mask,
+372:         "self_mask": self_mask,
+373:     }
+374:     return batch
+375:
+376:
+377: class TinyWorldRuntime:
+378:     def __init__(self, seed: int = 0, episode_len: int = 80) -> None:
 ```
 
 ### private_token_generation_use
-`src/living_eval.py:58`
+`src/living_eval.py:59`
 
 ```python
-58:     outputs: List[Dict[str, torch.Tensor]] = []
-59:     latents: List[torch.Tensor] = []
-60:     private_tokens: List[torch.Tensor] = []
-61:     for tick in range(start_tick, end_tick):
-62:         output, z = model.step(
-63:             {
-64:                 "sensory": batch["sensory"][:, tick],
-65:                 "lang_in": batch["lang_in"][:, tick],
-66:                 "private_in": private_token,
-67:             },
-68:             z,
-69:         )
-70:         private_token = output["private_logits"].argmax(dim=-1)
-71:         outputs.append(output)
-72:         latents.append(z)
-73:         private_tokens.append(private_token)
-74:     stacked = {key: torch.stack([item[key] for item in outputs], dim=1) for key in outputs[0]}
-75:     stacked["latents"] = torch.stack(latents, dim=1)
-76:     stacked["generated_private"] = torch.stack(private_tokens, dim=1)
-77:     return stacked
-78:
+59:     outputs: List[Dict[str, torch.Tensor]] = []
+60:     latents: List[torch.Tensor] = []
+61:     private_tokens: List[torch.Tensor] = []
+62:     for tick in range(start_tick, end_tick):
+63:         output, z = model.step(
+64:             {
+65:                 "sensory": batch["sensory"][:, tick],
+66:                 "lang_in": batch["lang_in"][:, tick],
+67:                 "private_in": private_token,
+68:             },
+69:             z,
+70:         )
+71:         private_token = output["private_logits"].argmax(dim=-1)
+72:         outputs.append(output)
+73:         latents.append(z)
+74:         private_tokens.append(private_token)
+75:     stacked = {key: torch.stack([item[key] for item in outputs], dim=1) for key in outputs[0]}
+76:     stacked["latents"] = torch.stack(latents, dim=1)
+77:     stacked["generated_private"] = torch.stack(private_tokens, dim=1)
+78:     return stacked
 79:
-80: def durable_restart_eval(
+80:
+81: def durable_restart_eval(
 ```
 
 ### curriculum_update
-`src/continual_learning.py:39`
+`src/continual_learning.py:43`
 
 ```python
-39:             concept_values=payload["concept_values"].to(device).long(),
-40:         )
-41:
-42:     def clone(self) -> "PersistentConceptMemory":
-43:         return PersistentConceptMemory(self.concept_ids.clone(), self.concept_values.clone())
-44:
-45:     def learn(self, concept_id: int, value: int | None = None) -> None:
-46:         cid = torch.tensor([int(concept_id)], dtype=torch.long, device=self.concept_ids.device)
-47:         val = torch.tensor([concept_value(concept_id) if value is None else int(value)], dtype=torch.long, device=self.concept_values.device)
-48:         if self.concept_ids.numel() == 0:
-49:             self.concept_ids = cid
-50:             self.concept_values = val
-51:             return
-52:         exists = self.concept_ids == int(concept_id)
-53:         if bool(exists.any().item()):
-54:             self.concept_values[exists] = val[0]
-55:         else:
-56:             self.concept_ids = torch.cat([self.concept_ids, cid], dim=0)
-57:             self.concept_values = torch.cat([self.concept_values, val], dim=0)
-58:
-59:     def predict(self, concept_ids: torch.Tensor) -> torch.Tensor:
-60:         ids = concept_ids.to(self.concept_ids.device).long()
-61:         pred = torch.full_like(ids, UNKNOWN_CONCEPT_VALUE)
-62:         for concept_id, value in zip(self.concept_ids.tolist(), self.concept_values.tolist()):
-63:             pred = torch.where(ids == int(concept_id), torch.full_like(pred, int(value)), pred)
+43:             concept_values=payload["concept_values"].to(target_device).long(),
+44:         )
+45:
+46:     def clone(self) -> "PersistentConceptMemory":
+47:         return PersistentConceptMemory(self.concept_ids.clone(), self.concept_values.clone())
+48:
+49:     def learn(self, concept_id: int, value: int | None = None) -> None:
+50:         cid = torch.tensor([int(concept_id)], dtype=torch.long, device=self.concept_ids.device)
+51:         val = torch.tensor([concept_value(concept_id) if value is None else int(value)], dtype=torch.long, device=self.concept_values.device)
+52:         if self.concept_ids.numel() == 0:
+53:             self.concept_ids = cid
+54:             self.concept_values = val
+55:             return
+56:         exists = self.concept_ids == int(concept_id)
+57:         if bool(exists.any().item()):
+58:             self.concept_values[exists] = val[0]
+59:         else:
+60:             self.concept_ids = torch.cat([self.concept_ids, cid], dim=0)
+61:             self.concept_values = torch.cat([self.concept_values, val], dim=0)
+62:
+63:     def predict(self, concept_ids: torch.Tensor) -> torch.Tensor:
+64:         ids = concept_ids.to(self.concept_ids.device).long()
+65:         pred = torch.full_like(ids, UNKNOWN_CONCEPT_VALUE)
+66:         if self.concept_ids.numel() == 0:
+67:             return pred
 ```
 
 ### metric_computation
-`src/living_eval.py:280`
+`src/living_eval.py:285`
 
 ```python
-280:
-281:
-282: def living_verdict(report: Dict[str, object]) -> Dict[str, object]:
-283:     restart = report["durable_restart"]  # type: ignore[assignment]
-284:     idle = report["idle_mode"]  # type: ignore[assignment]
-285:     dynamics = report["richer_dynamics"]  # type: ignore[assignment]
-286:     private = report["private_internal_language"]  # type: ignore[assignment]
-287:     curriculum = report["curriculum_growth"]  # type: ignore[assignment]
-288:     checks = {
-289:         "memory_file_restart_memory_ge_0_85": restart["memory_file_restart_final_memory_accuracy"] >= 0.85,
-290:         "memory_file_beats_zero_reset_by_0_40": (
-291:             restart["memory_file_restart_final_memory_accuracy"] - restart["zero_reset_final_memory_accuracy"] >= 0.40
-292:         ),
-293:         "idle_public_repetition_lt_0_40": idle["public_language_repetition_ratio"] < 0.40,
-294:         "idle_private_repetition_lt_0_40": idle["private_token_repetition_ratio"] < 0.40,
-295:         "idle_preserves_goal_memory": idle["final_memory_accuracy"] >= 0.85 and idle["final_object_pos_accuracy"] >= 0.85,
-296:         "idle_endogenous_goal_action_ge_0_70": idle["endogenous_goal_action_accuracy"] >= 0.70,
-297:         "richer_dynamics_all_present": all(value > 0.0 for value in dynamics.values()),
-298:         "private_tokens_generated_and_used": (
-299:             private["generated_private_unique_count"] >= 3.0
-300:             and (
-301:                 private["private_channel_action_shift_rate"] > 0.0
-302:                 or private["private_channel_language_shift_rate"] > 0.0
-303:             )
-304:         ),
-305:         "curriculum_accuracy_after_ge_0_80": curriculum["accuracy_after"] >= 0.80,
-306:         "curriculum_improves_by_0_30": curriculum["accuracy_delta"] >= 0.30,
-307:     }
-308:     return {"passes": all(checks.values()), "checks": checks}
-309:
-310:
+285:
+286:
+287: def living_verdict(report: Dict[str, object]) -> Dict[str, object]:
+288:     restart = report["durable_restart"]  # type: ignore[assignment]
+289:     idle = report["idle_mode"]  # type: ignore[assignment]
+290:     dynamics = report["richer_dynamics"]  # type: ignore[assignment]
+291:     private = report["private_internal_language"]  # type: ignore[assignment]
+292:     curriculum = report["curriculum_growth"]  # type: ignore[assignment]
+293:     checks = {
+294:         "memory_file_restart_memory_ge_0_85": restart["memory_file_restart_final_memory_accuracy"] >= 0.85,
+295:         "memory_file_beats_zero_reset_by_0_40": (
+296:             restart["memory_file_restart_final_memory_accuracy"] - restart["zero_reset_final_memory_accuracy"] >= 0.40
+297:         ),
+298:         "idle_public_repetition_lt_0_40": idle["public_language_repetition_ratio"] < 0.40,
+299:         "idle_private_repetition_lt_0_40": idle["private_token_repetition_ratio"] < 0.40,
+300:         "idle_preserves_goal_memory": idle["final_memory_accuracy"] >= 0.85 and idle["final_object_pos_accuracy"] >= 0.85,
+301:         "idle_endogenous_goal_action_ge_0_70": idle["endogenous_goal_action_accuracy"] >= 0.70,
+302:         "richer_dynamics_all_present": all(value > 0.0 for value in dynamics.values()),
+303:         "private_tokens_generated_and_used": (
+304:             private["generated_private_unique_count"] >= 3.0
+305:             and (
+306:                 private["private_channel_action_shift_rate"] > 0.0
+307:                 or private["private_channel_language_shift_rate"] > 0.0
+308:             )
+309:         ),
+310:         "curriculum_accuracy_after_ge_0_80": curriculum["accuracy_after"] >= 0.80,
+311:         "curriculum_improves_by_0_30": curriculum["accuracy_delta"] >= 0.30,
+312:     }
+313:     return {"passes": all(checks.values()), "checks": checks}
+314:
+315:
 ```
 
 ### leakage_scan_logic

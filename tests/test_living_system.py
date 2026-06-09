@@ -17,8 +17,8 @@ def test_persistent_memory_file_round_trips_latent_and_private_token(tmp_path: P
     path = tmp_path / "memory.pt"
     memory.save(path)
     loaded = PersistentMemoryState.load(path, hidden_dim=8, batch_size=2)
-    assert torch.allclose(loaded.latent, latent)
-    assert torch.equal(loaded.private_token, private)
+    assert torch.allclose(loaded.latent, latent.to(loaded.latent.device))
+    assert torch.equal(loaded.private_token, private.to(loaded.private_token.device))
     assert loaded.tick == 17
 
 

@@ -7,6 +7,7 @@ from typing import Dict
 
 import torch
 
+from .device import AUTO_DEVICE, DeviceLike, resolve_device
 from .env import TOK_ASK_ACTION, TinyWorldRuntime, generate_batch, token_for_tick
 from .metrics import masked_accuracy, pass_fail
 from .model import load_checkpoint
@@ -25,8 +26,9 @@ def closed_loop_action_success(
     episodes: int,
     seq_len: int,
     seed: int,
-    device: str = "cpu",
+    device: DeviceLike = AUTO_DEVICE,
 ) -> float:
+    device = resolve_device(device)
     correct = 0
     total = 0
     with torch.no_grad():
@@ -50,8 +52,9 @@ def evaluate_checkpoint(
     checkpoint: str | Path,
     config_name: str = "fast",
     runtime_ticks: int | None = None,
-    device: str = "cpu",
+    device: DeviceLike = AUTO_DEVICE,
 ) -> Dict[str, float]:
+    device = str(resolve_device(device))
     cfg = dict(EVAL_CONFIGS[config_name])
     if runtime_ticks is not None:
         cfg["runtime_ticks"] = runtime_ticks
@@ -147,7 +150,7 @@ def main() -> None:
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--config", choices=sorted(EVAL_CONFIGS), default="fast")
     parser.add_argument("--runtime-ticks", type=int, default=None)
-    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--device", default=AUTO_DEVICE)
     args = parser.parse_args()
     evaluate_checkpoint(args.checkpoint, args.config, args.runtime_ticks, args.device)
 

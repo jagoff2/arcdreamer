@@ -15,6 +15,7 @@ from audit.independent_verify import (
 )
 from audit.leakage_scan import run_scan
 from .continual_learning import PersistentConceptMemory, learn_concept_sequence, recall_accuracy
+from .device import AUTO_DEVICE, DeviceLike, resolve_device
 from .env import generate_batch
 from .living_eval import (
     LIVING_CONFIGS,
@@ -36,6 +37,7 @@ RETENTION_CONFIGS = {
 HASH_PATHS = [
     "frozen/recurrent_latent_fast.pt",
     "frozen/manifest.json",
+    "src/device.py",
     "src/model.py",
     "src/continual_learning.py",
     "src/retention_eval.py",
@@ -80,7 +82,8 @@ def submetric_floor_checks(before: dict[str, float], after: dict[str, float]) ->
     return checks
 
 
-def concept_restart_probe(memory_path: str | Path, concept_ids: Iterable[int], old_core: float, device: str) -> dict[str, Any]:
+def concept_restart_probe(memory_path: str | Path, concept_ids: Iterable[int], old_core: float, device: DeviceLike) -> dict[str, Any]:
+    device = str(resolve_device(device))
     ids = [int(item) for item in concept_ids]
     loaded = PersistentConceptMemory.load(memory_path, device=device)
     zero = loaded.zeroed()
@@ -103,7 +106,8 @@ def concept_restart_probe(memory_path: str | Path, concept_ids: Iterable[int], o
     }
 
 
-def prior_living_preservation(model, config_name: str, device: str) -> dict[str, Any]:
+def prior_living_preservation(model, config_name: str, device: DeviceLike) -> dict[str, Any]:
+    device = str(resolve_device(device))
     cfg = LIVING_CONFIGS[config_name]
     batch_size = int(cfg["batch_size"])
     seq_len = int(cfg["seq_len"])
@@ -139,7 +143,8 @@ def prior_living_preservation(model, config_name: str, device: str) -> dict[str,
     }
 
 
-def audit_preservation(model, batch_size: int, seq_len: int, seed: int, device: str) -> dict[str, Any]:
+def audit_preservation(model, batch_size: int, seq_len: int, seed: int, device: DeviceLike) -> dict[str, Any]:
+    device = str(resolve_device(device))
     leakage = run_scan()
     anti = anti_leakage_probes(model, batch_size, seq_len, seed + 31, device)
     corrupt = durable_memory_corrupt_probe(model, batch_size, seq_len, seed + 41, device)
@@ -219,8 +224,9 @@ def evaluate_retention_fix(
     checkpoint: str | Path,
     config_name: str = "fast",
     json_output: str | Path | None = None,
-    device: str = "cpu",
+    device: DeviceLike = AUTO_DEVICE,
 ) -> dict[str, Any]:
+    device = str(resolve_device(device))
     cfg = RETENTION_CONFIGS[config_name]
     concept_ids = [int(item) for item in cfg["concept_ids"]]
     model = load_checkpoint(checkpoint, device=device)
@@ -305,7 +311,7 @@ def main() -> None:
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--config", choices=sorted(RETENTION_CONFIGS), default="fast")
     parser.add_argument("--json-output", default="docs/retention_fix_report.json")
-    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--device", default=AUTO_DEVICE)
     args = parser.parse_args()
     evaluate_retention_fix(args.checkpoint, args.config, args.json_output, args.device)
 

@@ -24,6 +24,8 @@ Generated checkpoints and logs belong under `runs/` and are ignored by Git.
 
 ## Commands
 
+All training, evaluation, audit, and runtime CLIs default to `--device auto`, which uses CUDA when `torch.cuda.is_available()` is true and falls back to CPU otherwise. Force CPU with `--device cpu`; select a GPU explicitly with `--device cuda:0` or another CUDA device string.
+
 ```bash
 pytest -q
 python -m src.train --config fast

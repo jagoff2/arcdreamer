@@ -6,6 +6,8 @@ from typing import Dict, List
 import torch
 import torch.nn.functional as F
 
+from .device import AUTO_DEVICE, DeviceLike, make_generator, resolve_device
+
 
 GRID_SIZE = 5
 NUM_COLORS = 4
@@ -242,40 +244,40 @@ def generate_batch(
     batch_size: int,
     seq_len: int = 80,
     base_seed: int = 0,
-    device: torch.device | str = "cpu",
+    device: DeviceLike = AUTO_DEVICE,
 ) -> Dict[str, torch.Tensor]:
-    generator = torch.Generator(device="cpu")
-    generator.manual_seed(base_seed)
+    target_device = resolve_device(device)
+    generator = make_generator(base_seed, target_device)
 
-    start_pos = torch.randint(0, GRID_SIZE, (batch_size,), generator=generator)
-    target_pos = torch.randint(0, GRID_SIZE, (batch_size,), generator=generator)
-    target_color = torch.randint(0, NUM_COLORS, (batch_size,), generator=generator)
-    hazard_pos = torch.randint(0, GRID_SIZE, (batch_size,), generator=generator)
-    start_energy = 0.58 + 0.38 * torch.rand(batch_size, generator=generator)
-    start_damage = 0.10 * torch.rand(batch_size, generator=generator)
-    start_resource = 0.20 + 0.55 * torch.rand(batch_size, generator=generator)
-    walk = torch.randint(0, NUM_ACTIONS, (batch_size, seq_len), generator=generator)
+    start_pos = torch.randint(0, GRID_SIZE, (batch_size,), generator=generator, device=target_device)
+    target_pos = torch.randint(0, GRID_SIZE, (batch_size,), generator=generator, device=target_device)
+    target_color = torch.randint(0, NUM_COLORS, (batch_size,), generator=generator, device=target_device)
+    hazard_pos = torch.randint(0, GRID_SIZE, (batch_size,), generator=generator, device=target_device)
+    start_energy = 0.58 + 0.38 * torch.rand(batch_size, generator=generator, device=target_device)
+    start_damage = 0.10 * torch.rand(batch_size, generator=generator, device=target_device)
+    start_resource = 0.20 + 0.55 * torch.rand(batch_size, generator=generator, device=target_device)
+    walk = torch.randint(0, NUM_ACTIONS, (batch_size, seq_len), generator=generator, device=target_device)
 
-    sensory = torch.zeros(batch_size, seq_len, SENSOR_DIM)
-    lang_in = torch.zeros(batch_size, seq_len, dtype=torch.long)
-    private_in = torch.zeros(batch_size, seq_len, dtype=torch.long)
-    action_target = torch.zeros(batch_size, seq_len, dtype=torch.long)
-    language = torch.zeros(batch_size, seq_len, dtype=torch.long)
-    private = torch.zeros(batch_size, seq_len, dtype=torch.long)
-    provenance = torch.zeros(batch_size, seq_len, dtype=torch.long)
-    world_color = torch.zeros(batch_size, seq_len, dtype=torch.long)
-    world_pos = torch.zeros(batch_size, seq_len, dtype=torch.long)
-    memory_color = torch.zeros(batch_size, seq_len, dtype=torch.long)
-    self_start = torch.zeros(batch_size, seq_len, dtype=torch.long)
+    sensory = torch.zeros(batch_size, seq_len, SENSOR_DIM, device=target_device)
+    lang_in = torch.zeros(batch_size, seq_len, dtype=torch.long, device=target_device)
+    private_in = torch.zeros(batch_size, seq_len, dtype=torch.long, device=target_device)
+    action_target = torch.zeros(batch_size, seq_len, dtype=torch.long, device=target_device)
+    language = torch.zeros(batch_size, seq_len, dtype=torch.long, device=target_device)
+    private = torch.zeros(batch_size, seq_len, dtype=torch.long, device=target_device)
+    provenance = torch.zeros(batch_size, seq_len, dtype=torch.long, device=target_device)
+    world_color = torch.zeros(batch_size, seq_len, dtype=torch.long, device=target_device)
+    world_pos = torch.zeros(batch_size, seq_len, dtype=torch.long, device=target_device)
+    memory_color = torch.zeros(batch_size, seq_len, dtype=torch.long, device=target_device)
+    self_start = torch.zeros(batch_size, seq_len, dtype=torch.long, device=target_device)
 
-    action_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool)
-    delayed_memory_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool)
-    object_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool)
-    grounded_language_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool)
-    self_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool)
+    action_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool, device=target_device)
+    delayed_memory_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool, device=target_device)
+    object_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool, device=target_device)
+    grounded_language_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool, device=target_device)
+    self_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool, device=target_device)
 
     current_pos = start_pos.clone()
-    orientation = torch.randint(0, 2, (batch_size,), generator=generator)
+    orientation = torch.randint(0, 2, (batch_size,), generator=generator, device=target_device)
     energy = start_energy.clone()
     damage = start_damage.clone()
     resource = start_resource.clone()
@@ -369,15 +371,15 @@ def generate_batch(
         "grounded_language_mask": grounded_language_mask,
         "self_mask": self_mask,
     }
-    return {key: value.to(device) for key, value in batch.items()}
+    return batch
 
 
 class TinyWorldRuntime:
     def __init__(self, seed: int = 0, episode_len: int = 80) -> None:
         self.seed = seed
         self.episode_len = episode_len
-        self.generator = torch.Generator(device="cpu")
-        self.generator.manual_seed(seed)
+        self.rng_device = resolve_device()
+        self.generator = make_generator(seed, self.rng_device)
         self.global_tick = 0
         self.local_tick = 0
         self.start_pos = 0
@@ -394,7 +396,7 @@ class TinyWorldRuntime:
         self._new_episode()
 
     def _rand_int(self, high: int) -> int:
-        return int(torch.randint(0, high, (1,), generator=self.generator).item())
+        return int(torch.randint(0, high, (1,), generator=self.generator, device=self.rng_device).item())
 
     def _new_episode(self) -> None:
         self.local_tick = 0
@@ -404,26 +406,27 @@ class TinyWorldRuntime:
         self.current_pos = self.start_pos
         self.orientation = self._rand_int(2)
         self.hazard_pos = self._rand_int(GRID_SIZE)
-        self.energy = float(0.58 + 0.38 * torch.rand(1, generator=self.generator).item())
-        self.damage = float(0.10 * torch.rand(1, generator=self.generator).item())
-        self.resource = float(0.20 + 0.55 * torch.rand(1, generator=self.generator).item())
+        self.energy = float(0.58 + 0.38 * torch.rand(1, generator=self.generator, device=self.rng_device).item())
+        self.damage = float(0.10 * torch.rand(1, generator=self.generator, device=self.rng_device).item())
+        self.resource = float(0.20 + 0.55 * torch.rand(1, generator=self.generator, device=self.rng_device).item())
 
     def observation(
         self,
-        device: torch.device | str = "cpu",
+        device: DeviceLike = AUTO_DEVICE,
         private_in: int = PRIVATE_NONE,
     ) -> Dict[str, torch.Tensor]:
+        target_device = resolve_device(device)
         token = token_for_tick(self.local_tick)
         visible = self.target_color if self.local_tick < 4 else NUM_COLORS
         visible_pos = self.target_pos if self.local_tick < 4 else GRID_SIZE
-        current_pos = torch.tensor([self.current_pos], dtype=torch.long)
-        orientation = torch.tensor([self.orientation], dtype=torch.long)
-        energy = torch.tensor([self.energy], dtype=torch.float32)
+        current_pos = torch.tensor([self.current_pos], dtype=torch.long, device=target_device)
+        orientation = torch.tensor([self.orientation], dtype=torch.long, device=target_device)
+        energy = torch.tensor([self.energy], dtype=torch.float32, device=target_device)
         fatigue = 1.0 - energy
-        damage = torch.tensor([self.damage], dtype=torch.float32)
-        resource = torch.tensor([self.resource], dtype=torch.float32)
-        visible_color = torch.tensor([visible], dtype=torch.long)
-        visible_object_pos = torch.tensor([visible_pos], dtype=torch.long)
+        damage = torch.tensor([self.damage], dtype=torch.float32, device=target_device)
+        resource = torch.tensor([self.resource], dtype=torch.float32, device=target_device)
+        visible_color = torch.tensor([visible], dtype=torch.long, device=target_device)
+        visible_object_pos = torch.tensor([visible_pos], dtype=torch.long, device=target_device)
         sensory = build_sensory(
             current_pos,
             orientation,
@@ -435,9 +438,9 @@ class TinyWorldRuntime:
             visible_object_pos,
         )
         return {
-            "sensory": sensory.to(device),
-            "lang_in": torch.tensor([token], dtype=torch.long, device=device),
-            "private_in": torch.tensor([private_in], dtype=torch.long, device=device),
+            "sensory": sensory,
+            "lang_in": torch.tensor([token], dtype=torch.long, device=target_device),
+            "private_in": torch.tensor([private_in], dtype=torch.long, device=target_device),
         }
 
     def expected_action(self) -> int:

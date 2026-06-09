@@ -6,6 +6,7 @@ from typing import Any
 
 import torch
 
+from src.device import AUTO_DEVICE, DeviceLike, resolve_device
 from src.env import GRID_SIZE, NUM_BODY_SCALARS, NUM_COLORS, generate_batch
 from src.living_eval import run_autoregressive_private
 from src.model import load_checkpoint
@@ -17,7 +18,8 @@ from audit.independent_verify import ACTION_NAMES, TOKEN_NAMES
 VISIBLE_FLAG_INDEX = GRID_SIZE + 2 + NUM_BODY_SCALARS + (NUM_COLORS + 1)
 
 
-def build_examples(checkpoint: str | Path, device: str = "cpu") -> list[dict[str, Any]]:
+def build_examples(checkpoint: str | Path, device: DeviceLike = AUTO_DEVICE) -> list[dict[str, Any]]:
+    device = str(resolve_device(device))
     model = load_checkpoint(checkpoint, device=device)
     model.eval()
     base = generate_batch(3, 112, 87200, device=device)
@@ -72,7 +74,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--output", required=True)
-    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--device", default=AUTO_DEVICE)
     args = parser.parse_args()
     examples = build_examples(args.checkpoint, args.device)
     output = Path(args.output)
@@ -83,4 +85,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

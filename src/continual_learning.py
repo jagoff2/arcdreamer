@@ -6,6 +6,8 @@ from typing import Iterable, List
 
 import torch
 
+from .device import AUTO_DEVICE, DeviceLike, resolve_device
+
 
 UNKNOWN_CONCEPT_VALUE = -1
 
@@ -20,23 +22,25 @@ class PersistentConceptMemory:
     concept_values: torch.Tensor
 
     @classmethod
-    def fresh(cls, device: torch.device | str = "cpu") -> "PersistentConceptMemory":
+    def fresh(cls, device: DeviceLike = AUTO_DEVICE) -> "PersistentConceptMemory":
+        target_device = resolve_device(device)
         return cls(
-            concept_ids=torch.empty(0, dtype=torch.long, device=device),
-            concept_values=torch.empty(0, dtype=torch.long, device=device),
+            concept_ids=torch.empty(0, dtype=torch.long, device=target_device),
+            concept_values=torch.empty(0, dtype=torch.long, device=target_device),
         )
 
     @classmethod
-    def load(cls, path: str | Path, device: torch.device | str = "cpu") -> "PersistentConceptMemory":
+    def load(cls, path: str | Path, device: DeviceLike = AUTO_DEVICE) -> "PersistentConceptMemory":
+        target_device = resolve_device(device)
         path = Path(path)
         if not path.exists():
-            return cls.fresh(device=device)
-        payload = torch.load(path, map_location=device)
+            return cls.fresh(device=target_device)
+        payload = torch.load(path, map_location=target_device)
         if payload.get("format") != "persistent_concept_memory_v1":
             raise ValueError(f"{path} is not a persistent concept memory file")
         return cls(
-            concept_ids=payload["concept_ids"].to(device).long(),
-            concept_values=payload["concept_values"].to(device).long(),
+            concept_ids=payload["concept_ids"].to(target_device).long(),
+            concept_values=payload["concept_values"].to(target_device).long(),
         )
 
     def clone(self) -> "PersistentConceptMemory":
@@ -59,8 +63,13 @@ class PersistentConceptMemory:
     def predict(self, concept_ids: torch.Tensor) -> torch.Tensor:
         ids = concept_ids.to(self.concept_ids.device).long()
         pred = torch.full_like(ids, UNKNOWN_CONCEPT_VALUE)
-        for concept_id, value in zip(self.concept_ids.tolist(), self.concept_values.tolist()):
-            pred = torch.where(ids == int(concept_id), torch.full_like(pred, int(value)), pred)
+        if self.concept_ids.numel() == 0:
+            return pred
+        matches = ids.reshape(-1, 1) == self.concept_ids.reshape(1, -1)
+        matched = matches.any(dim=1)
+        match_index = matches.float().argmax(dim=1)
+        looked_up = self.concept_values[match_index].reshape_as(ids)
+        pred = torch.where(matched.reshape_as(ids), looked_up, pred)
         return pred
 
     def save(self, path: str | Path) -> None:
@@ -87,13 +96,14 @@ class PersistentConceptMemory:
         return PersistentConceptMemory(self.concept_ids.clone(), values)
 
 
-def concept_targets(concept_ids: Iterable[int], device: torch.device | str = "cpu") -> torch.Tensor:
+def concept_targets(concept_ids: Iterable[int], device: DeviceLike = AUTO_DEVICE) -> torch.Tensor:
     values = [concept_value(int(concept_id)) for concept_id in concept_ids]
-    return torch.tensor(values, dtype=torch.long, device=device)
+    return torch.tensor(values, dtype=torch.long, device=resolve_device(device))
 
 
-def recall_accuracy(memory: PersistentConceptMemory, concept_ids: Iterable[int], device: torch.device | str = "cpu") -> float:
-    ids = torch.tensor([int(concept_id) for concept_id in concept_ids], dtype=torch.long, device=device)
+def recall_accuracy(memory: PersistentConceptMemory, concept_ids: Iterable[int], device: DeviceLike = AUTO_DEVICE) -> float:
+    target_device = resolve_device(device)
+    ids = torch.tensor([int(concept_id) for concept_id in concept_ids], dtype=torch.long, device=target_device)
     if ids.numel() == 0:
         return 0.0
     target = concept_targets(ids.tolist(), device=device)
@@ -104,7 +114,7 @@ def recall_accuracy(memory: PersistentConceptMemory, concept_ids: Iterable[int],
 def learn_concept_sequence(
     concept_ids: Iterable[int],
     output: str | Path,
-    device: torch.device | str = "cpu",
+    device: DeviceLike = AUTO_DEVICE,
 ) -> dict[str, object]:
     memory = PersistentConceptMemory.fresh(device=device)
     rows: List[dict[str, float]] = []

@@ -8,24 +8,28 @@
         "size_bytes": 169185
       },
       "frozen/manifest.json": {
-        "sha256": "5A29A083287FDA14194392CE08CE24EDB56E21061285FFF2CCCB5E637807CA89",
+        "sha256": "DC1B411C5B33A70DE352DC5D3789DB3CED4283A17D8E7926AB2B9BB7D8FEB1C2",
         "size_bytes": 614
       },
+      "src/device.py": {
+        "sha256": "39DE3FFE33C752376B510FE7511071457D443995A7AB0D3778C3F970972999EE",
+        "size_bytes": 1323
+      },
       "src/model.py": {
-        "sha256": "6C7D4FA2E8811DB76F12AF36DA20E56195F25F50DA349EA5335B26A8C90FDE1B",
-        "size_bytes": 5392
+        "sha256": "CE2838225E6852E64CA22D5A934B8ABAC6922D7377058F01F91CF5188CAC8DAF",
+        "size_bytes": 5684
       },
       "src/human_memory.py": {
-        "sha256": "A0AE42F8A9B12902AA6C6ADCFEA05BE8D10C0767FAB037147948148638C94713",
-        "size_bytes": 14407
+        "sha256": "F25FC79DBEC8FA7445DACFA03A16916990C865961609B6704ABBD2F70630BC30",
+        "size_bytes": 14861
       },
       "src/memory_replay.py": {
         "sha256": "5CF8DD8D8AD98CF2DE9031849C0EBCAF5F6835AEFA10EAB4432C30B9AE325F9D",
         "size_bytes": 1845
       },
       "src/memory_eval.py": {
-        "sha256": "D9C895D602F4CB7E09B1DC451342785EE35A636EF64592B05AC7B108DF28DD2A",
-        "size_bytes": 20860
+        "sha256": "1DD45666FAD55E4431AE2CE97B8DE850959574F7CEED07A20DFD6F7EAF2D53BE",
+        "size_bytes": 21206
       }
     },
     "manifest": {
@@ -34,7 +38,7 @@
       "checkpoint_size_bytes": 169185,
       "source_checkpoint": "runs/living_latest.pt",
       "model_file": "src/model.py",
-      "model_sha256": "6C7D4FA2E8811DB76F12AF36DA20E56195F25F50DA349EA5335B26A8C90FDE1B",
+      "model_sha256": "CE2838225E6852E64CA22D5A934B8ABAC6922D7377058F01F91CF5188CAC8DAF",
       "status": "frozen_for_living_system_evaluation",
       "notes": "Checkpoint was produced locally by the repository training path after adding persistent tensor memory, private internal tokens, richer body dynamics, idle anti-repetition, and curriculum-growth support."
     },
@@ -45,7 +49,7 @@
   "content_recall": {
     "partial_cue_accuracy": 0.9375,
     "noisy_cue_accuracy": 1.0,
-    "wrong_cue_rejection": 0.890625
+    "wrong_cue_rejection": 0.9375
   },
   "separation_completion": {
     "similar_episode_discrimination": 1.0,
@@ -55,16 +59,16 @@
   "causal_memory": {
     "targeted_trace_corruption_recall_action_degrade": 1.0,
     "unrelated_memory_corruption_degrade": 0.0,
-    "relevant_trace_action_shift": 0.20918650925159454,
-    "relevant_trace_private_shift": 0.13137057423591614,
-    "relevant_trace_language_shift": 0.0758117139339447
+    "relevant_trace_action_shift": 0.22360216081142426,
+    "relevant_trace_private_shift": 0.1156536117196083,
+    "relevant_trace_language_shift": 0.0645160973072052
   },
   "replay_consolidation": {
     "semantic_accuracy_before_replay": 0.015625,
     "semantic_accuracy_after_replay": 1.0,
     "semantic_accuracy_improvement": 0.984375,
-    "old_task_core_before": 0.9972290039062499,
-    "old_task_core_after": 0.9972290039062499,
+    "old_task_core_before": 0.996435546875,
+    "old_task_core_after": 0.996435546875,
     "old_task_core_delta": 0.0,
     "samples_replayed": 64.0,
     "adapter_rank": 49.0
@@ -99,20 +103,20 @@
   "gate_metrics_flat": {
     "partial_cue_accuracy": 0.9375,
     "noisy_cue_accuracy": 1.0,
-    "wrong_cue_rejection": 0.890625,
+    "wrong_cue_rejection": 0.9375,
     "similar_episode_discrimination": 1.0,
     "partial_to_full_reconstruction": 1.0,
     "accuracy_loss_after_20_similar": 0.0,
     "targeted_trace_corruption_recall_action_degrade": 1.0,
     "unrelated_memory_corruption_degrade": 0.0,
-    "relevant_trace_action_shift": 0.20918650925159454,
-    "relevant_trace_private_shift": 0.13137057423591614,
-    "relevant_trace_language_shift": 0.0758117139339447,
+    "relevant_trace_action_shift": 0.22360216081142426,
+    "relevant_trace_private_shift": 0.1156536117196083,
+    "relevant_trace_language_shift": 0.0645160973072052,
     "semantic_accuracy_before_replay": 0.015625,
     "semantic_accuracy_after_replay": 1.0,
     "semantic_accuracy_improvement": 0.984375,
-    "old_task_core_before": 0.9972290039062499,
-    "old_task_core_after": 0.9972290039062499,
+    "old_task_core_before": 0.996435546875,
+    "old_task_core_after": 0.996435546875,
     "old_task_core_delta": 0.0,
     "samples_replayed": 64.0,
     "adapter_rank": 49.0,

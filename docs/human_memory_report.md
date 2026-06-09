@@ -12,20 +12,20 @@ Sparse cue-addressed engram memory stores compressed recurrent latents, content 
 | --- | ---: | --- |
 | `partial_cue_accuracy` | 0.937500 |  |
 | `noisy_cue_accuracy` | 1.000000 |  |
-| `wrong_cue_rejection` | 0.890625 |  |
+| `wrong_cue_rejection` | 0.937500 |  |
 | `similar_episode_discrimination` | 1.000000 |  |
 | `partial_to_full_reconstruction` | 1.000000 |  |
 | `accuracy_loss_after_20_similar` | 0.000000 |  |
 | `targeted_trace_corruption_recall_action_degrade` | 1.000000 |  |
 | `unrelated_memory_corruption_degrade` | 0.000000 |  |
-| `relevant_trace_action_shift` | 0.209187 |  |
-| `relevant_trace_private_shift` | 0.131371 |  |
-| `relevant_trace_language_shift` | 0.075812 |  |
+| `relevant_trace_action_shift` | 0.223602 |  |
+| `relevant_trace_private_shift` | 0.115654 |  |
+| `relevant_trace_language_shift` | 0.064516 |  |
 | `semantic_accuracy_before_replay` | 0.015625 |  |
 | `semantic_accuracy_after_replay` | 1.000000 |  |
 | `semantic_accuracy_improvement` | 0.984375 |  |
-| `old_task_core_before` | 0.997229 |  |
-| `old_task_core_after` | 0.997229 |  |
+| `old_task_core_before` | 0.996436 |  |
+| `old_task_core_after` | 0.996436 |  |
 | `old_task_core_delta` | 0.000000 |  |
 | `samples_replayed` | 64.000000 |  |
 | `adapter_rank` | 49.000000 |  |
@@ -50,9 +50,9 @@ Sparse cue-addressed engram memory stores compressed recurrent latents, content 
 {
   "targeted_trace_corruption_recall_action_degrade": 1.0,
   "unrelated_memory_corruption_degrade": 0.0,
-  "relevant_trace_action_shift": 0.20918650925159454,
-  "relevant_trace_private_shift": 0.13137057423591614,
-  "relevant_trace_language_shift": 0.0758117139339447
+  "relevant_trace_action_shift": 0.22360216081142426,
+  "relevant_trace_private_shift": 0.1156536117196083,
+  "relevant_trace_language_shift": 0.0645160973072052
 }
 ```
 

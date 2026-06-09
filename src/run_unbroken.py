@@ -7,6 +7,7 @@ from typing import Dict
 
 import torch
 
+from .device import AUTO_DEVICE, DeviceLike, resolve_device
 from .env import TinyWorldRuntime
 from .metrics import latent_noncollapse_stats
 from .model import load_checkpoint
@@ -18,34 +19,36 @@ def run_unbroken(
     max_ticks: int = 100000,
     log_every: int = 10000,
     seed: int = 900000,
-    device: str = "cpu",
+    device: DeviceLike = AUTO_DEVICE,
     memory_file: str | Path | None = None,
 ) -> Dict[str, float]:
-    model = load_checkpoint(checkpoint, device=device)
+    target_device = resolve_device(device)
+    model = load_checkpoint(checkpoint, device=target_device)
     model.eval()
     world = TinyWorldRuntime(seed=seed)
     if memory_file is not None:
-        memory = PersistentMemoryState.load(memory_file, model.config.hidden_dim, device=device)
+        memory = PersistentMemoryState.load(memory_file, model.config.hidden_dim, device=target_device)
         z = memory.latent.clone()
         private_token = memory.private_token.clone()
     else:
         memory = None
-        z = model.initial_state(1, device=device)
-        private_token = torch.zeros(1, dtype=torch.long, device=device)
+        z = model.initial_state(1, device=target_device)
+        private_token = torch.zeros(1, dtype=torch.long, device=target_device)
     latents = []
     language_tokens = []
     private_tokens = []
 
     with torch.no_grad():
         for tick in range(max_ticks):
-            observation = world.observation(device=device, private_in=int(private_token.item()))
+            observation = world.observation(device=target_device, private_in=int(private_token.item()))
             output, z = model.step(observation, z)
             action = int(output["action_logits"].argmax(dim=-1).item())
-            language = int(output["language_logits"].argmax(dim=-1).item())
+            language_token = output["language_logits"].argmax(dim=-1)
+            language = int(language_token.item())
             private_token = output["private_logits"].argmax(dim=-1)
-            latents.append(z.squeeze(0).detach().cpu())
-            language_tokens.append(language)
-            private_tokens.append(int(private_token.item()))
+            latents.append(z.squeeze(0).detach())
+            language_tokens.append(language_token.squeeze(0).detach())
+            private_tokens.append(private_token.squeeze(0).detach())
             if memory is not None:
                 memory.update(z, private_token, tick + 1)
             world.step(action)
@@ -65,8 +68,8 @@ def run_unbroken(
         memory.save(memory_file)
 
     latent_tensor = torch.stack(latents, dim=0)
-    language_tensor = torch.tensor(language_tokens, dtype=torch.long)
-    private_tensor = torch.tensor(private_tokens, dtype=torch.long)
+    language_tensor = torch.stack(language_tokens, dim=0).long()
+    private_tensor = torch.stack(private_tokens, dim=0).long()
     stats = latent_noncollapse_stats(latent_tensor, language_tensor)
     stats["private_repetition_ratio"] = (
         float((private_tensor[1:] == private_tensor[:-1]).float().mean().item())
@@ -86,7 +89,7 @@ def main() -> None:
     parser.add_argument("--max-ticks", type=int, default=100000)
     parser.add_argument("--log-every", type=int, default=10000)
     parser.add_argument("--seed", type=int, default=900000)
-    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--device", default=AUTO_DEVICE)
     parser.add_argument("--memory-file", default=None)
     args = parser.parse_args()
     run_unbroken(args.checkpoint, args.max_ticks, args.log_every, args.seed, args.device, args.memory_file)

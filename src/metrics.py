@@ -27,8 +27,8 @@ def masked_ce(logits: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) ->
 
 
 def latent_noncollapse_stats(latents: torch.Tensor, language_tokens: torch.Tensor) -> Dict[str, float]:
-    flat = latents.reshape(-1, latents.shape[-1]).detach().cpu().float()
-    tokens = language_tokens.reshape(-1).detach().cpu()
+    flat = latents.reshape(-1, latents.shape[-1]).detach().float()
+    tokens = language_tokens.reshape(-1).detach()
     if flat.shape[0] < 2:
         return {
             "latent_active_fraction": 0.0,
