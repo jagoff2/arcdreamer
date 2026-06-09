@@ -618,6 +618,106 @@
 - Exact next action:
   - Amend `Add adversarial evaluation suite` commit and verify `git status`.
 
+## Step 0035 - New freeze and held-out causal objective intake
+
+- Files touched:
+  - `.gitignore`
+  - `frozen/manifest.json`
+  - `frozen/recurrent_latent_fast.pt`
+  - `tests/test_frozen_artifacts.py`
+  - `tests/test_no_pretrained.py`
+  - `src/heldout_causal.py`
+  - `tests/test_heldout_causal.py`
+  - `README.md`
+  - `CONTEXT.md`
+- Commands run:
+  - `Get-Content -Raw -LiteralPath GOAL.md`
+  - `Get-Content -Raw -LiteralPath CONTEXT.md`
+  - `git status --short --branch; git log --oneline -6`
+  - `Get-Item runs/latest.pt; Get-FileHash runs/latest.pt -Algorithm SHA256`
+  - `Get-FileHash src/model.py -Algorithm SHA256`
+  - `Get-Content -Raw .gitignore`
+  - `Get-Content -Raw tests/test_no_pretrained.py`
+  - `Get-Content -Raw src/adversarial.py`
+  - `New-Item -ItemType Directory -Force -Path frozen; Copy-Item -LiteralPath runs/latest.pt -Destination frozen/recurrent_latent_fast.pt -Force; Get-FileHash frozen/recurrent_latent_fast.pt -Algorithm SHA256`
+- Observed results/errors:
+  - New active objective: freeze `src/model.py` and trained checkpoint; create evaluator for task structures not used in training; include larger worlds, distractors, variable delays, contradictory source chains, multi-step goals, required baselines, internal-language ablation; completion suspended until all pass.
+  - Current `src/model.py` SHA256: `8B3C0C83247A8882CA30B09C3A58E84CE24292378E09511464E6C33F9B10DEA2`.
+  - Current checkpoint SHA256: `4543B79CFDC8C9118E25DB344782765C278BDC32F7C5ECCC18818F0DD0CB10B9`, size `154929` bytes.
+  - Copied checkpoint to `frozen/recurrent_latent_fast.pt` and added a manifest.
+  - Added tests that lock model/checkpoint hashes and permit only this local frozen checkpoint.
+  - Added `src/heldout_causal.py`, an evaluation-only held-out causal evaluator.
+  - Added smoke tests for held-out evaluator report shape and required baselines.
+- GOAL.md requirement advanced:
+  - Freezes model/checkpoint and adds the new evaluator surface without modifying `src/model.py`.
+- Current blockers:
+  - Held-out evaluator has not been executed; current frozen model may fail large-margin held-out criteria.
+- Exact next action:
+  - Run held-out causal smoke evaluator, then full tests and fast held-out evaluation; patch evaluator criteria/bugs but do not modify `src/model.py` or retrain checkpoint.
+
+## Step 0036 - Held-out causal smoke evaluator passes
+
+- Files touched: `CONTEXT.md`
+- Commands run:
+  - `python -m src.heldout_causal --checkpoint frozen/recurrent_latent_fast.pt --config smoke`
+- Observed results/errors:
+  - Smoke held-out evaluator completed using the frozen checkpoint.
+  - Task structures present: larger projected world, distractors at untrained ticks, variable delays, contradictory source chain, multi-step goal schedule, blank continuation after tick 16, and late energy pressure.
+  - Recurrent mean score `0.846932858421732`.
+  - Baseline means: feedforward `0.3215843180701631`, zero_z `0.3532967740656622`, shuffled_z `0.38551998939965826`, no_language `0.35627450097860675`, no_provenance `0.39950095034430166`, no_blank_continuation `0.32456746230691264`, internal_language_mask `0.40480456025141703`.
+  - All smoke suite-level passes were true; overall `passes: true` with required margin `0.2`.
+- GOAL.md requirement advanced:
+  - First evidence that frozen model beats all required baselines on held-out causal structures.
+- Current blockers:
+  - Need full fast held-out evaluation and full test suite.
+- Exact next action:
+  - Run `python -m src.heldout_causal --checkpoint frozen/recurrent_latent_fast.pt --config fast`, then `pytest -q`.
+
+## Step 0037 - Fast held-out causal evaluation passes
+
+- Files touched:
+  - `README.md`
+  - `tests/test_heldout_causal.py`
+  - `CONTEXT.md`
+- Commands run:
+  - `python -m src.heldout_causal --checkpoint frozen/recurrent_latent_fast.pt --config fast`
+- Observed results/errors:
+  - Full fast held-out causal evaluator completed using frozen checkpoint.
+  - Task structures: larger projected world, untrained-tick distractors, variable delays at 23/49/77/103, contradictory source chain, multi-step goal schedule, blank continuation after tick 16, and late energy pressure.
+  - Recurrent held-out mean `0.8453022213587912`.
+  - Baseline means: feedforward `0.3327481937623141`, zero_z `0.3617209001765082`, shuffled_z `0.3625209797335067`, no_language `0.3545704154518215`, no_provenance `0.4155019261687605`, no_blank_continuation `0.32580130904343013`, internal_language_mask `0.40794278810698587`.
+  - Margins: feedforward `0.5125540275964771`, zero_z `0.483581321182283`, shuffled_z `0.48278124162528446`, no_language `0.4907318059069697`, no_provenance `0.42980029519003066`, no_blank_continuation `0.5195009123153611`, internal_language_mask `0.4373594332518053`.
+  - Required margin was `0.25`; all suite-level passes were true; overall `passes: true`.
+  - Strengthened smoke tests to assert held-out evaluator passes and margins exceed the requirement.
+  - README updated with held-out causal results.
+- GOAL.md requirement advanced:
+  - Satisfies the new requirement that the frozen recurrent model beat all required baselines by a large margin on held-out causal structures.
+- Current blockers:
+  - Need run full test suite and commit freeze/evaluator changes.
+- Exact next action:
+  - Run `pytest -q`, inspect status, commit atomically.
+
+## Step 0038 - Final tests pass for frozen held-out causal evaluator
+
+- Files touched: `CONTEXT.md`
+- Commands run:
+  - `pytest -q`
+  - `git status --short --branch`
+  - `git diff --stat`
+  - `git diff -- src/model.py`
+  - `git ls-files --others --exclude-standard`
+- Observed results/errors:
+  - Full test suite passed: `18 passed in 11.65s`.
+  - `src/model.py` has no diff.
+  - New untracked files before commit: `frozen/manifest.json`, `frozen/recurrent_latent_fast.pt`, `src/heldout_causal.py`, `tests/test_frozen_artifacts.py`, `tests/test_heldout_causal.py`.
+  - Modified files before commit: `.gitignore`, `CONTEXT.md`, `README.md`, `tests/test_no_pretrained.py`.
+- GOAL.md requirement advanced:
+  - Final verification passed for frozen model/checkpoint and held-out causal evaluator.
+- Current blockers:
+  - Commit pending.
+- Exact next action:
+  - Stage and commit freeze/evaluator changes, then verify clean status.
+
 ## Step 0029 - Added false-told conflict criterion and training view
 
 - Files touched:

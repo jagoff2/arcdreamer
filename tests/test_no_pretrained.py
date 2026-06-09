@@ -60,10 +60,13 @@ def test_source_imports_do_not_reference_pretrained_ecosystems() -> None:
 
 def test_no_downloaded_checkpoints_are_committed() -> None:
     blocked_parts = {".git", "runs", "__pycache__", ".pytest_cache"}
+    allowed_local_checkpoints = {Path("frozen/recurrent_latent_fast.pt")}
     for path in Path(".").rglob("*"):
         if not path.is_file():
             continue
         if any(part in blocked_parts for part in path.parts):
+            continue
+        if path in allowed_local_checkpoints:
             continue
         assert path.suffix.lower() not in {".pt", ".pth", ".ckpt", ".safetensors", ".bin"}
 

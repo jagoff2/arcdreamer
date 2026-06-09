@@ -24,6 +24,7 @@ python -m src.train --config fast
 python -m src.evaluate --checkpoint runs/latest.pt --config fast
 python -m src.run_unbroken --checkpoint runs/latest.pt --max-ticks 100000
 python -m src.adversarial --checkpoint runs/latest.pt --config fast
+python -m src.heldout_causal --checkpoint frozen/recurrent_latent_fast.pt --config fast
 ```
 
 Smoke profile:
@@ -68,6 +69,30 @@ python -m src.adversarial --checkpoint runs/latest.pt --config fast
 ```
 
 This command is evaluation-only. It does not add model architecture or train new recurrent components. It reports whether Terminal Outcome A remains supported under the stronger adversarial criteria.
+
+The stricter held-out causal evaluator freezes `src/model.py` and the committed checkpoint, then evaluates task structures not used in training:
+
+```bash
+python -m src.heldout_causal --checkpoint frozen/recurrent_latent_fast.pt --config fast
+```
+
+This evaluator includes larger projected worlds, distractors, variable delays, contradictory source chains, multi-step goals, blank continuation, energy pressure, recurrence baselines, no-language/no-provenance/no-blank baselines, and an internal language-embedding mask.
+
+Current fast held-out causal results against frozen checkpoint `frozen/recurrent_latent_fast.pt`:
+
+| Held-Out Metric | Result |
+| --- | ---: |
+| Recurrent held-out mean | 0.845302 |
+| Feedforward baseline mean | 0.332748 |
+| Zero-z baseline mean | 0.361721 |
+| Shuffled-z baseline mean | 0.362521 |
+| No-language baseline mean | 0.354570 |
+| No-provenance baseline mean | 0.415502 |
+| No-blank-continuation baseline mean | 0.325801 |
+| Internal language-embedding mask mean | 0.407943 |
+| Worst recurrent margin over baselines | 0.429800 |
+| Required margin | 0.250000 |
+| Suite-level held-out causal verdict | pass |
 
 Current fast adversarial results:
 

@@ -1,0 +1,10 @@
+{
+  "checkpoint": "frozen/recurrent_latent_fast.pt",
+  "checkpoint_sha256": "4543B79CFDC8C9118E25DB344782765C278BDC32F7C5ECCC18818F0DD0CB10B9",
+  "checkpoint_size_bytes": 154929,
+  "source_checkpoint": "runs/latest.pt",
+  "model_file": "src/model.py",
+  "model_sha256": "8B3C0C83247A8882CA30B09C3A58E84CE24292378E09511464E6C33F9B10DEA2",
+  "status": "frozen_for_heldout_causal_evaluation",
+  "notes": "Checkpoint was produced locally by the repository training path. Do not modify src/model.py or this checkpoint for held-out causal evaluation."
+}

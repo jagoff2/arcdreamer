@@ -7,6 +7,8 @@ runs/
 *.pt
 *.pth
 *.ckpt
+!frozen/
+!frozen/*.pt
 .venv/
 venv/
 env/
