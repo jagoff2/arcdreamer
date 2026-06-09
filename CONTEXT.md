@@ -898,3 +898,61 @@
   - Standard and adversarial metrics have not been rerun after retraining.
 - Exact next action:
   - Run `python -m src.evaluate --checkpoint runs/latest.pt --config fast`, then `python -m src.adversarial --checkpoint runs/latest.pt --config fast`.
+
+## Step 0041 - Independent living-system audit started
+
+- Files touched: `CONTEXT.md`
+- Commands run:
+  - `Get-Content -Raw GOAL.MD`
+  - `Get-Content -Raw CONTEXT.MD`
+  - `Get-Content -Raw README.md`
+  - `Get-Content -Raw docs\living_system_report.json`
+  - `Get-Content -Raw docs\evidence_dossier.json`
+  - `git status --short; git log --oneline -5; Get-Content -Raw frozen\manifest.json`
+  - `Get-FileHash` over frozen artifacts and audited source/report files
+  - `rg -n` over source files for recurrent step, private token, target separation, memory, runtime, and curriculum paths
+- Observed results/errors:
+  - Active audit objective is proof-only: do not add features, tune metrics, rewrite existing source, or mutate frozen artifacts.
+  - Pre-audit frozen checkpoint SHA256: `D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD`.
+  - Pre-audit frozen manifest SHA256: `5A29A083287FDA14194392CE08CE24EDB56E21061285FFF2CCCB5E637807CA89`.
+  - Pre-audit `src/model.py` SHA256: `6C7D4FA2E8811DB76F12AF36DA20E56195F25F50DA349EA5335B26A8C90FDE1B`.
+  - Manifest expects the same model/checkpoint hashes and checkpoint size `169185`.
+  - Existing living-system report says `passes: true`; existing evidence dossier is a descriptive legacy stress report with `passes: false`.
+- GOAL.md requirement advanced:
+  - Audit start marker appended as required before adding independent verification artifacts.
+- Current blockers:
+  - Independent audit scripts, reruns, probes, anti-leakage checks, proof documents, tests, and post-audit hashes are still pending.
+- Exact next action:
+  - Add `audit/independent_verify.py`, `audit/leakage_scan.py`, `audit/probe_examples.py`, `docs/audit_proof.md`, `docs/audit_proof.json`, and `tests/test_audit_proof.py`; then run the required audit commands.
+
+## Step 0042 - Independent living-system audit completed
+
+- Files touched:
+  - `audit/__init__.py`
+  - `audit/leakage_scan.py`
+  - `audit/independent_verify.py`
+  - `audit/probe_examples.py`
+  - `docs/audit_proof.md`
+  - `docs/audit_proof.json`
+  - `docs/audit_probe_examples.md`
+  - `tests/test_audit_proof.py`
+  - `CONTEXT.md`
+- Commands run:
+  - `pytest -q`
+  - `python -m audit.leakage_scan`
+  - `python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_proof.json`
+  - `python -m audit.probe_examples --checkpoint frozen/recurrent_latent_fast.pt --output docs/audit_probe_examples.md`
+  - final `pytest -q`, `python -m audit.leakage_scan`, `Get-FileHash`, and `git status --short`
+- Observed results/errors:
+  - Final tests: `26 passed in 23.33s`.
+  - Leakage scan: `passes: true`, no findings.
+  - Independent verifier terminal outcome: `AUDIT NOT PROVEN`.
+  - Living-system report metrics reproduced with zero material differences over tolerance `0.02`.
+  - Frozen checkpoint, manifest, model source, audited source files, README, and existing report JSON hashes were unchanged during the verifier run.
+  - Curriculum acquisition changed weights and reached generated-private new concept accuracy `1.0`, but old-task retention failed: core score dropped from `0.9954589828848839` to `0.6680497018914474`, delta `-0.32740928099343647`.
+- GOAL.md requirement advanced:
+  - Completed the proof-only audit and produced required audit scripts, proof JSON/Markdown, and three probe trajectories.
+- Current blockers:
+  - Audit Terminal Outcome A is not supported because the curriculum retention proof fails.
+- Exact next action:
+  - Commit the audit artifacts atomically.
