@@ -23,6 +23,7 @@ pytest -q
 python -m src.train --config fast
 python -m src.evaluate --checkpoint runs/latest.pt --config fast
 python -m src.run_unbroken --checkpoint runs/latest.pt --max-ticks 100000
+python -m src.adversarial --checkpoint runs/latest.pt --config fast
 ```
 
 Smoke profile:
@@ -43,20 +44,51 @@ python -m src.evaluate --checkpoint runs/latest.pt --config extended
 
 | Metric | Result | Gate |
 | --- | ---: | ---: |
-| Closed-loop goal/action success | 0.984375 | >= 0.80 |
+| Closed-loop goal/action success | 1.000000 | >= 0.80 |
 | Delayed memory accuracy | 1.000000 | >= 0.85 |
-| Object permanence accuracy | 0.999576 | >= 0.85 |
-| Provenance accuracy | 0.988672 | >= 0.85 |
-| Grounded language accuracy | 0.988672 | >= 0.85 |
+| Object permanence accuracy | 0.999974 | >= 0.85 |
+| Provenance accuracy | 0.997485 | >= 0.85 |
+| Grounded language accuracy | 0.999805 | >= 0.85 |
 | Self-world continuity accuracy | 1.000000 | >= 0.90 |
 | Latent active fraction, 10k eval | 1.000000 | >= 0.25 |
-| Latent effective rank, 10k eval | 13.951695 | >= 8 or 10% dim |
+| Latent effective rank, 10k eval | 15.485283 | >= 8 or 10% dim |
 | Max quantized latent fraction, 10k eval | 0.000100 | <= 0.05 |
-| Language repetition ratio, 10k eval | 0.018502 | < 0.40 |
+| Language repetition ratio, 10k eval | 0.019602 | < 0.40 |
 | Runtime ticks, acceptance run | 100000 | 100000 |
-| Latent effective rank, 100k runtime | 14.318624 | >= 8 or 10% dim |
+| Latent effective rank, 100k runtime | 15.631958 | >= 8 or 10% dim |
 | Max quantized latent fraction, 100k runtime | 0.000010 | <= 0.05 |
-| Language repetition ratio, 100k runtime | 0.030750 | < 0.40 |
+| Language repetition ratio, 100k runtime | 0.032880 | < 0.40 |
+
+## Adversarial Evaluation
+
+The adversarial evaluator adds counterbalanced provenance, destructive latent interventions, no-memory/feedforward baselines, language/provenance/occlusion baselines, false-belief probes, blank-input continuation, multi-event latent probes, and OOD environment variants:
+
+```bash
+python -m src.adversarial --checkpoint runs/latest.pt --config fast
+```
+
+This command is evaluation-only. It does not add model architecture or train new recurrent components. It reports whether Terminal Outcome A remains supported under the stronger adversarial criteria.
+
+Current fast adversarial results:
+
+| Adversarial Metric | Result |
+| --- | ---: |
+| Recurrent adversarial core score | 0.998494 |
+| Best destructive latent ablation core score | 0.386717 |
+| Margin vs destructive ablations | 0.611778 |
+| Best adversarial baseline core score | 0.452062 |
+| Margin vs adversarial baselines | 0.546432 |
+| Counterbalanced provenance mean | 0.999219 |
+| Told-only delayed action accuracy | 0.996094 |
+| No-told delayed action accuracy | 0.355469 |
+| Accuracy delta vs no-told | 0.640625 |
+| Question-removal action-logit L1 | 0.705947 |
+| False-belief conflict mean | 1.000000 |
+| Blank-input final memory accuracy | 1.000000 |
+| Blank-input final object-position accuracy | 1.000000 |
+| Blank-input latent effective rank | 9.006064 |
+| Multi-event episodic probe mean | 1.000000 |
+| Terminal A adversarial verdict | pass |
 
 ## Notes
 

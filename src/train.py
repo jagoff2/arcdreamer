@@ -9,7 +9,7 @@ from typing import Dict
 import torch
 import torch.nn.functional as F
 
-from .env import generate_batch
+from .env import GRID_SIZE, NUM_COLORS, TOK_TOLD_GOAL, generate_batch
 from .metrics import masked_ce
 from .model import ModelConfig, RecurrentLatentModel, save_checkpoint
 
@@ -31,6 +31,48 @@ CONFIGS = {
     "fast": TrainConfig("fast", steps=700, batch_size=64, seq_len=80, lr=2e-3, log_every=100),
     "extended": TrainConfig("extended", steps=1800, batch_size=96, seq_len=88, lr=1.5e-3, log_every=100),
 }
+
+SENSOR_COLOR = slice(GRID_SIZE + 4, GRID_SIZE + 4 + NUM_COLORS + 1)
+SENSOR_VISIBLE = GRID_SIZE + 4 + NUM_COLORS + 1
+SENSOR_OBJECT_POS = slice(SENSOR_VISIBLE + 1, SENSOR_VISIBLE + 1 + GRID_SIZE + 1)
+
+
+def blank_training_batch(batch: Dict[str, torch.Tensor], blank_after: int = 4) -> Dict[str, torch.Tensor]:
+    altered = {key: value.clone() for key, value in batch.items()}
+    altered["sensory"][:, blank_after:, :] = 0.0
+    altered["lang_in"][:, blank_after:] = 0
+    return altered
+
+
+def told_only_training_batch(batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    altered = {key: value.clone() for key, value in batch.items()}
+    altered["sensory"][:, :4, SENSOR_COLOR] = torch.nn.functional.one_hot(
+        torch.full_like(batch["world_color_target"][:, :4], NUM_COLORS), NUM_COLORS + 1
+    ).float()
+    altered["sensory"][:, :4, SENSOR_VISIBLE] = 0.0
+    altered["sensory"][:, :4, SENSOR_OBJECT_POS] = torch.nn.functional.one_hot(
+        torch.full_like(batch["world_pos_target"][:, :4], GRID_SIZE), GRID_SIZE + 1
+    ).float()
+    altered["sensory"][:, 8, SENSOR_COLOR] = torch.nn.functional.one_hot(
+        batch["world_color_target"][:, 8], NUM_COLORS + 1
+    ).float()
+    altered["sensory"][:, 8, SENSOR_VISIBLE] = 1.0
+    altered["sensory"][:, 8, SENSOR_OBJECT_POS] = torch.nn.functional.one_hot(
+        batch["world_pos_target"][:, 8], GRID_SIZE + 1
+    ).float()
+    altered["lang_in"][:, 8] = TOK_TOLD_GOAL
+    return altered
+
+
+def false_told_conflict_training_batch(batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    altered = {key: value.clone() for key, value in batch.items()}
+    false_color = (batch["world_color_target"][:, 8] + 1) % NUM_COLORS
+    false_pos = (batch["world_pos_target"][:, 8] + 1) % GRID_SIZE
+    altered["sensory"][:, 8, SENSOR_COLOR] = torch.nn.functional.one_hot(false_color, NUM_COLORS + 1).float()
+    altered["sensory"][:, 8, SENSOR_VISIBLE] = 1.0
+    altered["sensory"][:, 8, SENSOR_OBJECT_POS] = torch.nn.functional.one_hot(false_pos, GRID_SIZE + 1).float()
+    altered["lang_in"][:, 8] = TOK_TOLD_GOAL
+    return altered
 
 
 def compute_losses(outputs: Dict[str, torch.Tensor], batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
@@ -108,10 +150,29 @@ def train_model(
         )
         outputs = model(batch["sensory"], batch["lang_in"])
         losses = compute_losses(outputs, batch)
+        blank_batch = blank_training_batch(batch)
+        blank_outputs = model(blank_batch["sensory"], blank_batch["lang_in"])
+        blank_losses = compute_losses(blank_outputs, blank_batch)
+        told_batch = told_only_training_batch(batch)
+        told_outputs = model(told_batch["sensory"], told_batch["lang_in"])
+        told_losses = compute_losses(told_outputs, told_batch)
+        conflict_batch = false_told_conflict_training_batch(batch)
+        conflict_outputs = model(conflict_batch["sensory"], conflict_batch["lang_in"])
+        conflict_losses = compute_losses(conflict_outputs, conflict_batch)
+        total_loss = (
+            losses["total"]
+            + 0.20 * blank_losses["total"]
+            + 0.35 * told_losses["total"]
+            + 0.45 * conflict_losses["total"]
+        )
         optimizer.zero_grad(set_to_none=True)
-        losses["total"].backward()
+        total_loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
+        losses["total"] = total_loss.detach()
+        losses["blank"] = blank_losses["total"].detach()
+        losses["told"] = told_losses["total"].detach()
+        losses["conflict"] = conflict_losses["total"].detach()
         last_losses = losses
         if step == 1 or step % cfg.log_every == 0 or step == cfg.steps:
             printable = {key: round(float(value.item()), 4) for key, value in losses.items()}
