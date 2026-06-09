@@ -1,0 +1,160 @@
+{
+  "checkpoint": "frozen/recurrent_latent_fast.pt",
+  "config": "fast",
+  "hash_manifest_summary": {
+    "hashes": {
+      "frozen/recurrent_latent_fast.pt": {
+        "sha256": "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD",
+        "size_bytes": 169185
+      },
+      "frozen/manifest.json": {
+        "sha256": "5A29A083287FDA14194392CE08CE24EDB56E21061285FFF2CCCB5E637807CA89",
+        "size_bytes": 614
+      },
+      "src/model.py": {
+        "sha256": "6C7D4FA2E8811DB76F12AF36DA20E56195F25F50DA349EA5335B26A8C90FDE1B",
+        "size_bytes": 5392
+      },
+      "src/human_memory.py": {
+        "sha256": "A0AE42F8A9B12902AA6C6ADCFEA05BE8D10C0767FAB037147948148638C94713",
+        "size_bytes": 14407
+      },
+      "src/memory_replay.py": {
+        "sha256": "5CF8DD8D8AD98CF2DE9031849C0EBCAF5F6835AEFA10EAB4432C30B9AE325F9D",
+        "size_bytes": 1845
+      },
+      "src/memory_eval.py": {
+        "sha256": "D9C895D602F4CB7E09B1DC451342785EE35A636EF64592B05AC7B108DF28DD2A",
+        "size_bytes": 20860
+      }
+    },
+    "manifest": {
+      "checkpoint": "frozen/recurrent_latent_fast.pt",
+      "checkpoint_sha256": "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD",
+      "checkpoint_size_bytes": 169185,
+      "source_checkpoint": "runs/living_latest.pt",
+      "model_file": "src/model.py",
+      "model_sha256": "6C7D4FA2E8811DB76F12AF36DA20E56195F25F50DA349EA5335B26A8C90FDE1B",
+      "status": "frozen_for_living_system_evaluation",
+      "notes": "Checkpoint was produced locally by the repository training path after adding persistent tensor memory, private internal tokens, richer body dynamics, idle anti-repetition, and curriculum-growth support."
+    },
+    "checkpoint_matches_manifest": true,
+    "model_matches_manifest": true
+  },
+  "architecture_summary": "Sparse cue-addressed engram memory stores compressed recurrent latents, content fragments, body/affect/action/private-token tags, source distributions, time order, and source histories. Recall performs pattern completion by attention over sparse random-projection traces; replay fits a bounded semantic adapter from stored traces only.",
+  "content_recall": {
+    "partial_cue_accuracy": 0.9375,
+    "noisy_cue_accuracy": 1.0,
+    "wrong_cue_rejection": 0.890625
+  },
+  "separation_completion": {
+    "similar_episode_discrimination": 1.0,
+    "partial_to_full_reconstruction": 1.0,
+    "accuracy_loss_after_20_similar": 0.0
+  },
+  "causal_memory": {
+    "targeted_trace_corruption_recall_action_degrade": 1.0,
+    "unrelated_memory_corruption_degrade": 0.0,
+    "relevant_trace_action_shift": 0.20918650925159454,
+    "relevant_trace_private_shift": 0.13137057423591614,
+    "relevant_trace_language_shift": 0.0758117139339447
+  },
+  "replay_consolidation": {
+    "semantic_accuracy_before_replay": 0.015625,
+    "semantic_accuracy_after_replay": 1.0,
+    "semantic_accuracy_improvement": 0.984375,
+    "old_task_core_before": 0.9972290039062499,
+    "old_task_core_after": 0.9972290039062499,
+    "old_task_core_delta": 0.0,
+    "samples_replayed": 64.0,
+    "adapter_rank": 49.0
+  },
+  "reconsolidation": {
+    "source_history_accuracy": 1.0,
+    "current_belief_accuracy": 1.0
+  },
+  "source_monitoring": {
+    "source_monitoring_accuracy": 1.0,
+    "observed_accuracy": 1.0,
+    "told_accuracy": 1.0,
+    "imagined_accuracy": 1.0,
+    "inferred_accuracy": 1.0,
+    "replayed_accuracy": 1.0,
+    "reconstructed_accuracy": 1.0
+  },
+  "restart_durability": {
+    "restart_recall_accuracy": 1.0,
+    "zero_memory_recall_accuracy": 0.015625,
+    "corrupt_memory_recall_accuracy": 0.015625,
+    "zero_memory_degradation": 0.984375,
+    "corrupt_memory_degradation": 0.984375
+  },
+  "prior_properties": {
+    "retention_eval_passes": true,
+    "living_eval_passes": true,
+    "leakage_scan_passes": true,
+    "hidden_target_canary_diff": 0.0,
+    "hidden_target_canary_zero": true
+  },
+  "gate_metrics_flat": {
+    "partial_cue_accuracy": 0.9375,
+    "noisy_cue_accuracy": 1.0,
+    "wrong_cue_rejection": 0.890625,
+    "similar_episode_discrimination": 1.0,
+    "partial_to_full_reconstruction": 1.0,
+    "accuracy_loss_after_20_similar": 0.0,
+    "targeted_trace_corruption_recall_action_degrade": 1.0,
+    "unrelated_memory_corruption_degrade": 0.0,
+    "relevant_trace_action_shift": 0.20918650925159454,
+    "relevant_trace_private_shift": 0.13137057423591614,
+    "relevant_trace_language_shift": 0.0758117139339447,
+    "semantic_accuracy_before_replay": 0.015625,
+    "semantic_accuracy_after_replay": 1.0,
+    "semantic_accuracy_improvement": 0.984375,
+    "old_task_core_before": 0.9972290039062499,
+    "old_task_core_after": 0.9972290039062499,
+    "old_task_core_delta": 0.0,
+    "samples_replayed": 64.0,
+    "adapter_rank": 49.0,
+    "source_history_accuracy": 1.0,
+    "current_belief_accuracy": 1.0,
+    "source_monitoring_accuracy": 1.0,
+    "observed_accuracy": 1.0,
+    "told_accuracy": 1.0,
+    "imagined_accuracy": 1.0,
+    "inferred_accuracy": 1.0,
+    "replayed_accuracy": 1.0,
+    "reconstructed_accuracy": 1.0,
+    "restart_recall_accuracy": 1.0,
+    "zero_memory_recall_accuracy": 0.015625,
+    "corrupt_memory_recall_accuracy": 0.015625,
+    "zero_memory_degradation": 0.984375,
+    "corrupt_memory_degradation": 0.984375
+  },
+  "gate_checks": {
+    "partial_cue_ge_0_85": true,
+    "noisy_cue_ge_0_75": true,
+    "wrong_cue_rejection_ge_0_85": true,
+    "similar_discrimination_ge_0_85": true,
+    "completion_ge_0_85": true,
+    "similar_loss_le_0_10": true,
+    "targeted_corruption_degrades_ge_0_40": true,
+    "unrelated_degrades_lt_0_10": true,
+    "relevant_trace_perturbs_outputs": true,
+    "replay_improves_ge_0_20": true,
+    "replay_old_core_ge_0_90": true,
+    "replay_old_delta_ge_minus_0_05": true,
+    "history_accuracy_ge_0_85": true,
+    "current_belief_ge_0_85": true,
+    "source_monitoring_ge_0_85": true,
+    "restart_recall_ge_0_85": true,
+    "zero_memory_degrades_ge_0_40": true,
+    "corrupt_memory_degrades_ge_0_40": true,
+    "retention_eval_passes": true,
+    "living_eval_passes": true,
+    "leakage_scan_passes": true,
+    "hidden_target_canary_zero": true
+  },
+  "limitations": [],
+  "terminal_outcome": "HUMAN MEMORY PROVEN"
+}
