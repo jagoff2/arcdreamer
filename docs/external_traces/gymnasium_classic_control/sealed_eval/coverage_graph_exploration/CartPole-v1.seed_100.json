@@ -1,0 +1,4119 @@
+{
+  "metadata": {
+    "suite_id": "gymnasium_classic_control",
+    "task_id": "CartPole-v1",
+    "controller": "coverage_graph_exploration",
+    "seed": 100
+  },
+  "summary": {
+    "suite_id": "gymnasium_classic_control",
+    "task_id": "CartPole-v1",
+    "controller": "coverage_graph_exploration",
+    "seed": 100,
+    "score": 66.0,
+    "normalized_score": 0.825,
+    "solved": false,
+    "steps": 66,
+    "invalid_action_rate": 0.0,
+    "unique_states": 67,
+    "useful_events": 66,
+    "action_entropy": 1.0,
+    "repeat_collapse": 0.5,
+    "actions": [
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2",
+      "1",
+      "2"
+    ],
+    "failure_class": "partial_or_complete_reward"
+  },
+  "steps": [
+    {
+      "step": 0,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 0,
+        "obs_hash": "2b8a8edc4e95ffe7",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "53cf26e1852c5899",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            0.033498,
+            0.009655,
+            -0.021114,
+            -0.045705
+          ],
+          "score": 0.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "3c95dc6358ceda12",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 1,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 1,
+        "obs_hash": "3c95dc6358ceda12",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "f227777fc2369a8e",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            0.033691,
+            -0.185158,
+            -0.022028,
+            0.240242
+          ],
+          "score": 1.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "612bacb4615c758b",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 2,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 2,
+        "obs_hash": "612bacb4615c758b",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "53cf26e1852c5899",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            0.029988,
+            0.010272,
+            -0.017223,
+            -0.059306
+          ],
+          "score": 2.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "1618f166088284d2",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 3,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 3,
+        "obs_hash": "1618f166088284d2",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "f227777fc2369a8e",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            0.030194,
+            -0.184599,
+            -0.018409,
+            0.227893
+          ],
+          "score": 3.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "3ca7276767044322",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 4,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 4,
+        "obs_hash": "3ca7276767044322",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "53cf26e1852c5899",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            0.026502,
+            0.010781,
+            -0.013851,
+            -0.070539
+          ],
+          "score": 4.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "5703e49e1af89845",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 5,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 5,
+        "obs_hash": "5703e49e1af89845",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "f227777fc2369a8e",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            0.026717,
+            -0.184139,
+            -0.015262,
+            0.217742
+          ],
+          "score": 5.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "2e56cdc444aa30bc",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 6,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 6,
+        "obs_hash": "2e56cdc444aa30bc",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "53cf26e1852c5899",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            0.023034,
+            0.011197,
+            -0.010907,
+            -0.079716
+          ],
+          "score": 6.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "6a05f3359461b5b3",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 7,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 7,
+        "obs_hash": "6a05f3359461b5b3",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "f227777fc2369a8e",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            0.023258,
+            -0.183766,
+            -0.012501,
+            0.209505
+          ],
+          "score": 7.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "f1a8e03046da7763",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 8,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 8,
+        "obs_hash": "f1a8e03046da7763",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "53cf26e1852c5899",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            0.019583,
+            0.011532,
+            -0.008311,
+            -0.087095
+          ],
+          "score": 8.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "9dfcaaa7ffa15e77",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 9,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 9,
+        "obs_hash": "9dfcaaa7ffa15e77",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "f227777fc2369a8e",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            0.019814,
+            -0.18347,
+            -0.010053,
+            0.202954
+          ],
+          "score": 9.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "5bc6041be5f501db",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 10,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 10,
+        "obs_hash": "5bc6041be5f501db",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "53cf26e1852c5899",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            0.016144,
+            0.011794,
+            -0.005994,
+            -0.092883
+          ],
+          "score": 10.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "b2416d7e0aba41ce",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 11,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 11,
+        "obs_hash": "b2416d7e0aba41ce",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "f227777fc2369a8e",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            0.01638,
+            -0.183241,
+            -0.007852,
+            0.197903
+          ],
+          "score": 11.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "54df2ba76a785d76",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 12,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 12,
+        "obs_hash": "54df2ba76a785d76",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "53cf26e1852c5899",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            0.012715,
+            0.011992,
+            -0.003894,
+            -0.097246
+          ],
+          "score": 12.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "95248a3edc0cf032",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 13,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 13,
+        "obs_hash": "95248a3edc0cf032",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "f227777fc2369a8e",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            0.012955,
+            -0.183074,
+            -0.005839,
+            0.194205
+          ],
+          "score": 13.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "eeea0a569c7f1268",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 14,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 14,
+        "obs_hash": "eeea0a569c7f1268",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "53cf26e1852c5899",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            0.009294,
+            0.012131,
+            -0.001955,
+            -0.100314
+          ],
+          "score": 14.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "bed458043e3d1a27",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 15,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 15,
+        "obs_hash": "bed458043e3d1a27",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "f227777fc2369a8e",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            0.009536,
+            -0.182963,
+            -0.003961,
+            0.191752
+          ],
+          "score": 15.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "f95be3a82dff1e43",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 16,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 16,
+        "obs_hash": "f95be3a82dff1e43",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "53cf26e1852c5899",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            0.005877,
+            0.012216,
+            -0.000126,
+            -0.102178
+          ],
+          "score": 16.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "947c2edbc081c179",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 17,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 17,
+        "obs_hash": "947c2edbc081c179",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "f227777fc2369a8e",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            0.006121,
+            -0.182904,
+            -0.002169,
+            0.190466
+          ],
+          "score": 17.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "061b1e24d37f9235",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 18,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 18,
+        "obs_hash": "061b1e24d37f9235",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "b5e92a3418ce1be9",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            0.002463,
+            0.012249,
+            0.00164,
+            -0.102901
+          ],
+          "score": 18.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "d9f20c8d869927b4",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 19,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 19,
+        "obs_hash": "d9f20c8d869927b4",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "f227777fc2369a8e",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            0.002708,
+            -0.182897,
+            -0.000418,
+            0.190299
+          ],
+          "score": 19.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "b58c8ae4cf39897e",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 20,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 20,
+        "obs_hash": "b58c8ae4cf39897e",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "dd7553bbcbbe5305",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.00095,
+            0.012231,
+            0.003388,
+            -0.102516
+          ],
+          "score": 20.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "3c8d433a55cd60e9",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 21,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 21,
+        "obs_hash": "3c8d433a55cd60e9",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "8349c8e4509d9621",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.000705,
+            -0.182939,
+            0.001338,
+            0.191234
+          ],
+          "score": 21.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "459055ebeb433f6a",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 22,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 22,
+        "obs_hash": "459055ebeb433f6a",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "dd7553bbcbbe5305",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.004364,
+            0.012164,
+            0.005162,
+            -0.101027
+          ],
+          "score": 22.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "4adf6bfc6d42b48d",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 23,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 23,
+        "obs_hash": "4adf6bfc6d42b48d",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "8349c8e4509d9621",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.004121,
+            -0.183032,
+            0.003142,
+            0.19328
+          ],
+          "score": 23.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "93f5d797f594583f",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 24,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 24,
+        "obs_hash": "93f5d797f594583f",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "dd7553bbcbbe5305",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.007781,
+            0.012045,
+            0.007007,
+            -0.09841
+          ],
+          "score": 24.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "27d96bd3e916d0ec",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 25,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 25,
+        "obs_hash": "27d96bd3e916d0ec",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "8349c8e4509d9621",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.00754,
+            -0.183177,
+            0.005039,
+            0.196476
+          ],
+          "score": 25.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "60f64a66d0dd91b5",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 26,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 26,
+        "obs_hash": "60f64a66d0dd91b5",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "dd7553bbcbbe5305",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.011204,
+            0.011873,
+            0.008969,
+            -0.094613
+          ],
+          "score": 26.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "c94c71678edec292",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 27,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 27,
+        "obs_hash": "c94c71678edec292",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "8349c8e4509d9621",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.010966,
+            -0.183377,
+            0.007076,
+            0.200886
+          ],
+          "score": 27.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "ef7e126bbceef861",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 28,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 28,
+        "obs_hash": "ef7e126bbceef861",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "dd7553bbcbbe5305",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.014634,
+            0.011643,
+            0.011094,
+            -0.089557
+          ],
+          "score": 28.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "b68614877a96c945",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 29,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 29,
+        "obs_hash": "b68614877a96c945",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "8349c8e4509d9621",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.014401,
+            -0.183636,
+            0.009303,
+            0.206606
+          ],
+          "score": 29.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "84416b08a7d16628",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 30,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 30,
+        "obs_hash": "84416b08a7d16628",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "dd7553bbcbbe5305",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.018074,
+            0.011352,
+            0.013435,
+            -0.083128
+          ],
+          "score": 30.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "347f93bf57d2229b",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 31,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 31,
+        "obs_hash": "347f93bf57d2229b",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "8349c8e4509d9621",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.017847,
+            -0.18396,
+            0.011773,
+            0.213763
+          ],
+          "score": 31.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "1d35679dafc0de56",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 32,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 32,
+        "obs_hash": "1d35679dafc0de56",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "dd7553bbcbbe5305",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.021526,
+            0.010992,
+            0.016048,
+            -0.075183
+          ],
+          "score": 32.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "99bf087938f13fb0",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 33,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 33,
+        "obs_hash": "99bf087938f13fb0",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "8349c8e4509d9621",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.021306,
+            -0.184357,
+            0.014544,
+            0.22252
+          ],
+          "score": 33.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "f7212dfa46b06d7f",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 34,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 34,
+        "obs_hash": "f7212dfa46b06d7f",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "dd7553bbcbbe5305",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.024993,
+            0.010554,
+            0.018995,
+            -0.06554
+          ],
+          "score": 34.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "4a586590f7b7ce25",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 35,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 35,
+        "obs_hash": "4a586590f7b7ce25",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "8349c8e4509d9621",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.024782,
+            -0.184835,
+            0.017684,
+            0.233074
+          ],
+          "score": 35.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "5f0727478157976f",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 36,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 36,
+        "obs_hash": "5f0727478157976f",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "dd7553bbcbbe5305",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.028479,
+            0.01003,
+            0.022345,
+            -0.053978
+          ],
+          "score": 36.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "62b27389b8a34d75",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 37,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 37,
+        "obs_hash": "62b27389b8a34d75",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "8349c8e4509d9621",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.028278,
+            -0.185405,
+            0.021266,
+            0.24567
+          ],
+          "score": 37.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "227d9364a56477d8",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 38,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 38,
+        "obs_hash": "227d9364a56477d8",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "dd7553bbcbbe5305",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.031986,
+            0.009407,
+            0.026179,
+            -0.04023
+          ],
+          "score": 38.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "86cd79026c435bd0",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 39,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 39,
+        "obs_hash": "86cd79026c435bd0",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "8349c8e4509d9621",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.031798,
+            -0.18608,
+            0.025374,
+            0.260596
+          ],
+          "score": 39.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "7cfd626bb2e5849d",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 40,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 40,
+        "obs_hash": "7cfd626bb2e5849d",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "dd7553bbcbbe5305",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.03552,
+            0.00867,
+            0.030586,
+            -0.023976
+          ],
+          "score": 40.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "8b9b6391ec7fd763",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 41,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 41,
+        "obs_hash": "8b9b6391ec7fd763",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "8349c8e4509d9621",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.035346,
+            -0.186877,
+            0.030107,
+            0.278198
+          ],
+          "score": 41.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "76969f5ad68b7c32",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 42,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 42,
+        "obs_hash": "76969f5ad68b7c32",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "dd7553bbcbbe5305",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.039084,
+            0.007803,
+            0.035671,
+            -0.00484
+          ],
+          "score": 42.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "e378bb6d59d4e37d",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 43,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 43,
+        "obs_hash": "e378bb6d59d4e37d",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "8349c8e4509d9621",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.038928,
+            -0.187812,
+            0.035574,
+            0.298881
+          ],
+          "score": 43.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "e63cbf24fdc7f9b0",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 44,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 44,
+        "obs_hash": "e63cbf24fdc7f9b0",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "dd7553bbcbbe5305",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.042684,
+            0.006786,
+            0.041552,
+            0.017626
+          ],
+          "score": 44.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "ceb420a1bc644005",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 45,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 45,
+        "obs_hash": "ceb420a1bc644005",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "8349c8e4509d9621",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.042548,
+            -0.188907,
+            0.041904,
+            0.323124
+          ],
+          "score": 45.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "b0d930d934305959",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 46,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 46,
+        "obs_hash": "b0d930d934305959",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "dd7553bbcbbe5305",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.046326,
+            0.005594,
+            0.048367,
+            0.043945
+          ],
+          "score": 46.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "cedc175b55c81f99",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 47,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 47,
+        "obs_hash": "cedc175b55c81f99",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "8349c8e4509d9621",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.046215,
+            -0.190187,
+            0.049246,
+            0.351487
+          ],
+          "score": 47.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "54d827b43a7e26b0",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 48,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 48,
+        "obs_hash": "54d827b43a7e26b0",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "dd7553bbcbbe5305",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.050018,
+            0.004202,
+            0.056275,
+            0.074731
+          ],
+          "score": 48.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "53e987102b225608",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 49,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 49,
+        "obs_hash": "53e987102b225608",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "8349c8e4509d9621",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.049934,
+            -0.19168,
+            0.05777,
+            0.384624
+          ],
+          "score": 49.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "244a8c4c7fddd72d",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 50,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 50,
+        "obs_hash": "244a8c4c7fddd72d",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "dd7553bbcbbe5305",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.053768,
+            0.002576,
+            0.065462,
+            0.110701
+          ],
+          "score": 50.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "773f827a94129930",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 51,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 51,
+        "obs_hash": "773f827a94129930",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "8349c8e4509d9621",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.053716,
+            -0.19342,
+            0.067676,
+            0.423297
+          ],
+          "score": 51.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "cb51d335b77c3938",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 52,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 52,
+        "obs_hash": "cb51d335b77c3938",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "dd7553bbcbbe5305",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.057585,
+            0.000681,
+            0.076142,
+            0.152694
+          ],
+          "score": 52.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "6a2ef53642cb7e46",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 53,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 53,
+        "obs_hash": "6a2ef53642cb7e46",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "8349c8e4509d9621",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.057571,
+            -0.195444,
+            0.079196,
+            0.468393
+          ],
+          "score": 53.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "582dc2663e82ff7a",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 54,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 54,
+        "obs_hash": "582dc2663e82ff7a",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "184c888d47affd7c",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.06148,
+            -0.001525,
+            0.088564,
+            0.201686
+          ],
+          "score": 54.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "197735210a9727c1",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 55,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 55,
+        "obs_hash": "197735210a9727c1",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "39e4280e7d613e4b",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.06151,
+            -0.197794,
+            0.092598,
+            0.52094
+          ],
+          "score": 55.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "01bf4df0c99ca850",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 56,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 56,
+        "obs_hash": "01bf4df0c99ca850",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "184c888d47affd7c",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.065466,
+            -0.004089,
+            0.103017,
+            0.258812
+          ],
+          "score": 56.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "19c1d3b6a089eb31",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 57,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 57,
+        "obs_hash": "19c1d3b6a089eb31",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "39e4280e7d613e4b",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.065548,
+            -0.20052,
+            0.108193,
+            0.582129
+          ],
+          "score": 57.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "e93d24c7a1e8b5a6",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 58,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 58,
+        "obs_hash": "e93d24c7a1e8b5a6",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "184c888d47affd7c",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.069559,
+            -0.007067,
+            0.119835,
+            0.325393
+          ],
+          "score": 58.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "5b1592d898385113",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 59,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 59,
+        "obs_hash": "5b1592d898385113",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "39e4280e7d613e4b",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.0697,
+            -0.203673,
+            0.126343,
+            0.653334
+          ],
+          "score": 59.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "d509fcabdde8b086",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 60,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 60,
+        "obs_hash": "d509fcabdde8b086",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "184c888d47affd7c",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.073773,
+            -0.010515,
+            0.13941,
+            0.402954
+          ],
+          "score": 60.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "a6f3b6b35f0a320c",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 61,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 61,
+        "obs_hash": "a6f3b6b35f0a320c",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "39e4280e7d613e4b",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.073984,
+            -0.207311,
+            0.147469,
+            0.736137
+          ],
+          "score": 61.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "4a6ca6be32ba2595",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 62,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 62,
+        "obs_hash": "4a6ca6be32ba2595",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "184c888d47affd7c",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.07813,
+            -0.0145,
+            0.162192,
+            0.493259
+          ],
+          "score": 62.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "9343da62f7f46361",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 63,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 63,
+        "obs_hash": "9343da62f7f46361",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "d4e6eba3096ab58c",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.07842,
+            -0.211493,
+            0.172057,
+            0.832347
+          ],
+          "score": 63.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "ea503a7b3674f903",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 64,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 64,
+        "obs_hash": "ea503a7b3674f903",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "8471fabdae5b2851",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.08265,
+            -0.019088,
+            0.188704,
+            0.598335
+          ],
+          "score": 64.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "89f85baae9ebaaf8",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 65,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_100",
+        "step_index": 65,
+        "obs_hash": "89f85baae9ebaaf8",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "d4e6eba3096ab58c",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.083031,
+            -0.216279,
+            0.200671,
+            0.944021
+          ],
+          "score": 65.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "7ea44b1a253ea717",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward",
+        "terminated"
+      ],
+      "terminal": true,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "none"
+    }
+  ]
+}

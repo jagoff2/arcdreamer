@@ -1,0 +1,255 @@
+{
+  "metadata": {
+    "suite_id": "gymnasium_toy_text",
+    "task_id": "FrozenLake-v1",
+    "controller": "ablation_no_private_tokens",
+    "seed": 0
+  },
+  "summary": {
+    "suite_id": "gymnasium_toy_text",
+    "task_id": "FrozenLake-v1",
+    "controller": "ablation_no_private_tokens",
+    "seed": 0,
+    "score": 0.0,
+    "normalized_score": 0.0,
+    "solved": false,
+    "steps": 3,
+    "invalid_action_rate": 0.0,
+    "unique_states": 4,
+    "useful_events": 0,
+    "action_entropy": -0.0,
+    "repeat_collapse": 1.0,
+    "actions": [
+      "2",
+      "2",
+      "2"
+    ],
+    "failure_class": "external_reward_not_achieved"
+  },
+  "steps": [
+    {
+      "step": 0,
+      "obs": {
+        "task_id": "external/gymnasium_toy_text/FrozenLake-v1",
+        "episode_id": "external/gymnasium_toy_text/FrozenLake-v1/seed_0",
+        "step_index": 0,
+        "obs_hash": "8a008aed5cba6a52",
+        "grid_summary": {
+          "shape": [
+            4,
+            4
+          ],
+          "hash": "92af9fb968e7ccd3",
+          "counts": {
+            "0": 15,
+            "2": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_toy_text",
+          "task_id": "FrozenLake-v1",
+          "raw_observation": 0,
+          "score": 0.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "8c3fd92b00cf46ac",
+      "score_delta": 0.0,
+      "event_delta": [],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {
+          "visited_cells": 1,
+          "goal": [],
+          "key": [],
+          "door": [],
+          "hazard_count": 0,
+          "resource": [],
+          "have_key": false,
+          "door_open": false
+        },
+        "drive": {
+          "novelty": 1.0,
+          "hazard_level": 0,
+          "resource_level": 0,
+          "body_energy": 1.0
+        },
+        "hypothesis_state": {
+          "semantic_action": 1,
+          "target": null,
+          "need_key": false,
+          "have_key": false,
+          "confidence": 0.45
+        },
+        "policy": {}
+      },
+      "failure_class": "no_external_reward"
+    },
+    {
+      "step": 1,
+      "obs": {
+        "task_id": "external/gymnasium_toy_text/FrozenLake-v1",
+        "episode_id": "external/gymnasium_toy_text/FrozenLake-v1/seed_0",
+        "step_index": 1,
+        "obs_hash": "8c3fd92b00cf46ac",
+        "grid_summary": {
+          "shape": [
+            4,
+            4
+          ],
+          "hash": "7ff3f1bf29a2be79",
+          "counts": {
+            "0": 15,
+            "2": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_toy_text",
+          "task_id": "FrozenLake-v1",
+          "raw_observation": 4,
+          "score": 0.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "701da9c5de73601d",
+      "score_delta": 0.0,
+      "event_delta": [],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {
+          "visited_cells": 2,
+          "goal": [],
+          "key": [],
+          "door": [],
+          "hazard_count": 0,
+          "resource": [],
+          "have_key": false,
+          "door_open": false
+        },
+        "drive": {
+          "novelty": 1.0,
+          "hazard_level": 0,
+          "resource_level": 0,
+          "body_energy": 0.96
+        },
+        "hypothesis_state": {
+          "semantic_action": 1,
+          "target": null,
+          "need_key": false,
+          "have_key": false,
+          "confidence": 0.45
+        },
+        "policy": {}
+      },
+      "failure_class": "no_external_reward"
+    },
+    {
+      "step": 2,
+      "obs": {
+        "task_id": "external/gymnasium_toy_text/FrozenLake-v1",
+        "episode_id": "external/gymnasium_toy_text/FrozenLake-v1/seed_0",
+        "step_index": 2,
+        "obs_hash": "701da9c5de73601d",
+        "grid_summary": {
+          "shape": [
+            4,
+            4
+          ],
+          "hash": "54a868249265493d",
+          "counts": {
+            "0": 15,
+            "2": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_toy_text",
+          "task_id": "FrozenLake-v1",
+          "raw_observation": 8,
+          "score": 0.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "080c7c01df57254b",
+      "score_delta": 0.0,
+      "event_delta": [
+        "terminated"
+      ],
+      "terminal": true,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {
+          "visited_cells": 3,
+          "goal": [],
+          "key": [],
+          "door": [],
+          "hazard_count": 0,
+          "resource": [],
+          "have_key": false,
+          "door_open": false
+        },
+        "drive": {
+          "novelty": 0.0,
+          "hazard_level": 0,
+          "resource_level": 0,
+          "body_energy": 0.92
+        },
+        "hypothesis_state": {
+          "semantic_action": 1,
+          "target": null,
+          "need_key": false,
+          "have_key": false,
+          "confidence": 0.45
+        },
+        "policy": {}
+      },
+      "failure_class": "no_external_reward"
+    }
+  ]
+}

@@ -2624,3 +2624,470 @@
   - Need amend this context entry into the same commit and verify clean status.
 - Exact next action:
   - Stage `CONTEXT.md`, amend commit without changing message, then run final `git status --short --branch` and `git rev-parse HEAD`.
+
+## Step 0100 - External-generalization objective intake
+
+- Files touched: `CONTEXT.MD`
+- Commands run:
+  - `Get-Content -Raw GOAL.MD`
+  - `Get-Content -Raw CONTEXT.MD`
+  - `Get-Content -Raw docs\arcagi3_failure_report.json`
+  - `Get-Content -Raw docs\audit_after_arcagi3_diagnosis.json`
+  - `git status --short --branch; git rev-parse HEAD`
+  - `Get-FileHash -Algorithm SHA256 GOAL.MD,CONTEXT.MD,docs\arcagi3_failure_report.json,docs\audit_after_arcagi3_diagnosis.json,frozen\recurrent_latent_fast.pt,runs\explorer_tiny.pt`
+- Observed results/errors:
+  - Active objective changed to external-generalization discipline: internal synthetic metrics are diagnostics only and no mindlike/memory/explorer claim may be supported unless it predicts external-task performance.
+  - Current HEAD before new work: `978aa7b7901ff228278bd5a523671b2c7bb2b99a`.
+  - Git status was clean on branch `main`.
+  - `docs\arcagi3_failure_report.json` reports `ARC FAILURE DIAGNOSIS PROVEN` for 25 official ARC games, but its result is negative: explorer solve rate `0.0`, best baseline mean normalized score `0.004`, and primary failures are C/F.
+  - `docs\audit_after_arcagi3_diagnosis.json` reports `AUDIT PROVEN`, limitations `[]`, and frozen hashes unchanged.
+  - Current claim set to audit externally: memory, exploration, dialogue, head-collapse, planner, curiosity, and social state.
+  - Current external suite known available from prior evidence: official ARC-AGI-3 public games via `.venv\Scripts\python.exe` with `arc-agi` and `arcengine`.
+  - Hashes:
+    - `GOAL.MD`: `7889C5DED870918F1FB4831236725FFE2325A43664837EE37A31FB07799DF246`
+    - `CONTEXT.MD`: `78C4650E1AB003162490AB20F2410B13484E04892F775FB3F4B8EC65907FACF2`
+    - `docs\arcagi3_failure_report.json`: `3B9AC146B3BF882757C5A9F24151586EDB019D0F85E652BA4BFEF2ACE81FC8F4`
+    - `docs\audit_after_arcagi3_diagnosis.json`: `A7439E4F2DEDE7D31D525EC0C6B7730BC01C246AA7E8F6898DCDA871640CCC30`
+    - `frozen\recurrent_latent_fast.pt`: `D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD`
+    - `runs\explorer_tiny.pt`: `F0A2F8BE9F64B7928083E6EF59A5535998AF5E8465F4FDD3E3C1B7EDDB6727E9`
+- Plan:
+  - Discover installed external interactive suites, prioritizing official ARC and adding at least two additional non-repo-generated wrappers if present.
+  - Implement an external suite registry and evaluator that treats internal synthetic reports as diagnostics only.
+  - Preserve negative ARC results and generate claim registry statuses: supported only with external metric improvement `>=0.05` over best baseline or external ablation drop `>=0.10`; otherwise unsupported or not tested.
+  - Generate external traces with observation hashes/summaries, legal actions, chosen action, baseline actions, score/event deltas, memory/drive/hypothesis summaries, and failure class.
+  - Add generalization audit for leakage, no-hack, no text-as-state, hidden-target canary diff, frozen hashes, and no dev-only support.
+  - Run required commands and commit atomically.
+- Current blockers:
+  - Need discover which non-repo-generated external interactive environments are installed locally.
+- Exact next action:
+  - Probe import availability for common external suites and inspect any APIs needed for wrappers.
+
+## Step 0101 - External environment availability probed
+
+- Files touched: `CONTEXT.MD`
+- Commands run:
+  - `python -c "import importlib.util; names=['gymnasium','gym','minigrid','metadrive','pettingzoo','ale_py','procgen','bsuite','dm_env','textworld','pycolab','mazelab','pygame','arc_agi','arcengine']; ..."`
+  - `.\.venv\Scripts\python.exe -c "import importlib.util; names=[...]; ..."`
+  - `python -c "import importlib.metadata as m; pkgs=[...]; ..."`
+  - `.\.venv\Scripts\python.exe -c "import importlib.metadata as m; pkgs=[...]; ..."`
+  - `rg -n "external|gym|metadrive|minigrid|arcagi3|claim|mindlike|curiosity|social|planner|dialogue|memory" src tests docs README.md`
+- Observed results/errors:
+  - Default Python 3.10 has `gymnasium=True`, `gym=True`, `metadrive=True`, `ale_py=True`, `pygame=True`.
+  - Default Python 3.10 does not have `arc_agi` or `arcengine`.
+  - `.venv` Python 3.13 has `arc_agi=True` and `arcengine=True`, but not `gymnasium`, `gym`, `metadrive`, `ale_py`, or `pygame`.
+  - Package versions in default Python: `gymnasium 0.29.1`, `gym 0.26.2`, `metadrive 1.4.35`, `ale-py 0.11.2`, `pygame 2.6.1`.
+  - Package versions in `.venv`: `arc-agi 0.9.8`, `arcengine 0.9.3`.
+  - `rg` confirmed many active internal claims in README/docs/tests around memory, dialogue, explorer/mindlike, head-collapse, planner, curiosity/intrinsic drive, and social state.
+- External suite decision:
+  - Use official ARC-AGI-3 as the priority external suite, using existing official reports/traces and the installed `.venv` runtime status.
+  - Add Gymnasium Classic Control (`CartPole-v1`) as a second non-repo-generated external interactive suite.
+  - Add Gymnasium ToyText (`FrozenLake-v1`, deterministic map) as a third non-repo-generated external interactive suite.
+  - Do not use MetaDrive or ALE in this pass because two additional Gymnasium suites are available and are lighter, deterministic enough for audit, and do not require external assets.
+- Current blockers:
+  - Need inspect current adapter/baseline APIs enough to implement Gymnasium wrappers without adding solver logic.
+- Exact next action:
+  - Implement external registry/eval/audit modules against official ARC plus Gymnasium Classic Control and ToyText.
+
+## Step 0102 - External discipline implementation plan activated
+
+- Files touched: `CONTEXT.MD`
+- Commands/actions run:
+  - Updated the active plan: source-file intake and suite discovery are complete; implementation of registry/eval/audit/tests is in progress.
+- Implementation constraints:
+  - Treat internal synthetic reports as diagnostics only.
+  - Preserve existing negative official ARC evidence.
+  - Support claims only when an external metric beats best baseline by `>=0.05` or an external ablation drops by `>=0.10`, and never from dev-only data.
+  - Use Gymnasium tasks only as external interactive suites; do not tune policy on them.
+- Current blockers:
+  - Need add source files and tests.
+- Exact next action:
+  - Add `src\external_registry.py`, `src\external_eval.py`, `src\generalization_audit.py`, and `tests\test_external_generalization.py`.
+
+## Step 0103 - External registry and evaluator added
+
+- Files touched:
+  - `src/external_registry.py`
+  - `src/external_eval.py`
+  - `CONTEXT.MD`
+- Commands/actions run:
+  - Added external suite registry for official ARC-AGI-3, Gymnasium Classic Control, and Gymnasium ToyText.
+  - Added active claim registry for memory, exploration, dialogue, head-collapse, planner, curiosity, and social state.
+  - Added external evaluator that:
+    - compacts official ARC diagnosis traces into `docs/external_traces`;
+    - evaluates frozen adapter, six baselines, and ablations on Gymnasium CartPole and deterministic FrozenLake;
+    - records compact traces with observation hashes/summaries, legal actions, chosen action, baseline action snapshots, score/event deltas, memory/drive/hypothesis summaries, and failure class;
+    - marks claims supported only by external margin or ablation thresholds, otherwise unsupported.
+- Current blockers:
+  - Need add `src/generalization_audit.py` and tests, then compile.
+- Exact next action:
+  - Add generalization audit module.
+
+## Step 0104 - Generalization audit module added
+
+- Files touched:
+  - `src/generalization_audit.py`
+  - `CONTEXT.MD`
+- Commands/actions run:
+  - Added audit checks for external report outcome, leakage scan, external no-hack scan, no text-as-state, hidden-target canary diff, frozen hash, trace schema, complete claim registry, supported-claim thresholds, no dev-only support, and preserved unsupported claims.
+- Current blockers:
+  - Need focused tests and compile.
+- Exact next action:
+  - Add `tests\test_external_generalization.py`.
+
+## Step 0105 - External generalization focused tests added
+
+- Files touched:
+  - `tests/test_external_generalization.py`
+  - `CONTEXT.MD`
+- Commands/actions run:
+  - Added focused tests for required claim registry entries, external suite discovery, support-threshold logic, unsupported negative-result preservation, and external trace schema checks.
+- Current blockers:
+  - New code has not been compiled or tested.
+- Exact next action:
+  - Run `python -m py_compile src\external_registry.py src\external_eval.py src\generalization_audit.py tests\test_external_generalization.py` and `pytest -q tests\test_external_generalization.py`.
+
+## Step 0106 - External generalization compile and focused tests pass
+
+- Files touched: `CONTEXT.MD`
+- Commands run:
+  - `python -m py_compile src\external_registry.py src\external_eval.py src\generalization_audit.py tests\test_external_generalization.py`
+  - `pytest -q tests\test_external_generalization.py`
+- Observed results/errors:
+  - Compile passed.
+  - Focused tests passed: `4 passed in 1.15s`.
+- Current blockers:
+  - Need run external evaluator to generate `docs\external_generalization_report.json`, Markdown, and traces.
+- Exact next action:
+  - Run `python -m src.external_eval --config external --json-output docs/external_generalization_report.json --trace-dir docs/external_traces`.
+
+## Step 0107 - External evaluator generated report and traces
+
+- Files touched:
+  - `docs/external_generalization_report.json`
+  - `docs/external_generalization_report.md`
+  - `docs/external_traces\...` (generated external trace files)
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m src.external_eval --config external --json-output docs/external_generalization_report.json --trace-dir docs/external_traces`
+- Observed results/errors:
+  - Command completed successfully.
+  - Terminal outcome: `EXTERNAL GENERALIZATION DISCIPLINE PROVEN`.
+  - Requirements all true: external suites present, official ARC included, two additional suites included, claim registry complete, supported claims have thresholds, negative results preserved, no-hack audit passes, trace paths present.
+  - Unsupported claims: memory, exploration, dialogue, head-collapse, planner, curiosity, social_state.
+  - Limitations:
+    - No active claim is externally supported; all internal synthetic metrics are diagnostic only.
+    - Gymnasium wrappers are external smoke suites, not evidence that the ARC failure is solved.
+- Current blockers:
+  - Need inspect report/trace counts and run `src.generalization_audit`.
+- Exact next action:
+  - Inspect generated report summary and trace count, then run `python -m src.generalization_audit --json-output docs/generalization_audit.json`.
+
+## Step 0108 - External report and trace count inspected
+
+- Files touched: `CONTEXT.MD`
+- Commands run:
+  - `python -c "import json; r=json.load(open('docs/external_generalization_report.json')); ..."`
+  - `Get-ChildItem -Recurse -File docs\external_traces | Measure-Object -Property Length -Sum | Select-Object Count,Sum`
+  - `Get-Content -TotalCount 120 docs\external_generalization_report.md`
+  - `git status --short`
+- Observed results/errors:
+  - Report terminal outcome: `EXTERNAL GENERALIZATION DISCIPLINE PROVEN`.
+  - Evaluated suites: `official_arcagi3`, `gymnasium_classic_control`, `gymnasium_toy_text`.
+  - Claim registry statuses: all seven active claims unsupported.
+  - Trace count: `175` files totaling `17888397` bytes under `docs\external_traces`.
+  - Markdown aggregate table shows official ARC explorer score `0.000`, best official ARC baseline `0.004`, CartPole explorer `0.117` versus best baseline `0.483`, and FrozenLake explorer `0.000`.
+  - Git status shows new external source/test/report/trace files plus modified `CONTEXT.md`.
+- Current blockers:
+  - Need run `src.generalization_audit`.
+- Exact next action:
+  - Run `python -m src.generalization_audit --json-output docs/generalization_audit.json`.
+
+## Step 0109 - Generalization audit failed on self-match no-hack patterns
+
+- Files touched: `CONTEXT.MD`
+- Commands run:
+  - `python -m src.generalization_audit --json-output docs/generalization_audit.json`
+  - `python -c "import json; r=json.load(open('docs/generalization_audit.json')); print(json.dumps(r['external_no_hack_scan'], indent=2));"`
+  - `rg -n "CartPole|FrozenLake|if task_id|task_id ==|hidden_goal|ground_truth|answer_key|solution_path|manual_hint" src\external_eval.py src\external_registry.py src\generalization_audit.py`
+- Observed results/errors:
+  - Generalization audit returned `NOT PROVEN`.
+  - Passing checks: external report proven, leakage scan, no text-as-state, hidden-target canary diff zero, frozen hash unchanged, traceability, claim registry, supported thresholds, no dev-only supported claims, unsupported claims preserved.
+  - Failing check: `external_no_hack_passes=false`.
+  - Findings were self-matches in `src\generalization_audit.py` because the audit scanned its own blocked literal list: `hidden_goal`, `ground_truth`, `answer_key`, `solution_path`, `manual_hint`.
+  - `rg` also showed explicit task wrapper branches for `CartPole-v1` and `FrozenLake-v1`, which are allowed external wrapper construction branches, not per-instance solver branches.
+- Current blockers:
+  - Need patch audit literal construction to avoid self-matching and rerun audit.
+- Exact next action:
+  - Patch `src\generalization_audit.py` blocked literal construction.
+
+## Step 0110 - Generalization no-hack self-match patched
+
+- Files touched:
+  - `src/generalization_audit.py`
+  - `CONTEXT.MD`
+- Commands/actions run:
+  - Patched blocked literal construction in `external_no_hack_scan()` by concatenating substrings so the audit does not match its own denylist text.
+- Current blockers:
+  - Need rerun compile and generalization audit.
+- Exact next action:
+  - Run `python -m py_compile src\generalization_audit.py` and `python -m src.generalization_audit --json-output docs/generalization_audit.json`.
+
+## Step 0111 - Generalization audit passes after patch
+
+- Files touched:
+  - `docs/generalization_audit.json`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m py_compile src\generalization_audit.py`
+  - `python -m src.generalization_audit --json-output docs/generalization_audit.json`
+- Observed results/errors:
+  - Compile passed.
+  - Generalization audit returned `EXTERNAL GENERALIZATION AUDIT PROVEN`.
+  - Checks all true: external report proven, leakage scan, external no-hack, no text-as-state, hidden-target canary diff zero, frozen hash unchanged, traceability, claim registry complete, supported thresholds, no dev-only supported claims, unsupported claims preserved.
+  - Supported claims list is empty, as intended from negative external evidence.
+  - Limitation preserved: no active capability claim is externally supported.
+- Current blockers:
+  - Need rerun external evaluator after audit-source patch so report hashes reflect current files, then rerun audit.
+- Exact next action:
+  - Rerun `python -m src.external_eval --config external --json-output docs/external_generalization_report.json --trace-dir docs/external_traces`.
+
+## Step 0112 - External evaluator rerun after audit patch
+
+- Files touched:
+  - `docs/external_generalization_report.json`
+  - `docs/external_generalization_report.md`
+  - `docs/external_traces\...`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m src.external_eval --config external --json-output docs/external_generalization_report.json --trace-dir docs/external_traces`
+- Observed results/errors:
+  - External evaluator completed successfully after the generalization audit source patch.
+  - Terminal outcome remains `EXTERNAL GENERALIZATION DISCIPLINE PROVEN`.
+  - All report requirements remain true.
+  - Unsupported claims remain: memory, exploration, dialogue, head-collapse, planner, curiosity, social_state.
+  - Limitations remain: no active claim externally supported; Gymnasium wrappers are smoke suites and do not solve ARC.
+- Current blockers:
+  - Need rerun `src.generalization_audit` on the refreshed report.
+- Exact next action:
+  - Run `python -m src.generalization_audit --json-output docs/generalization_audit.json`.
+
+## Step 0113 - Generalization audit passes on refreshed report
+
+- Files touched:
+  - `docs/generalization_audit.json`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m src.generalization_audit --json-output docs/generalization_audit.json`
+- Observed results/errors:
+  - Generalization audit returned `EXTERNAL GENERALIZATION AUDIT PROVEN`.
+  - All checks true: external report proven, leakage scan, external no-hack, no text-as-state, hidden-target canary diff zero, frozen hash unchanged, traceability, claim registry complete, supported thresholds, no dev-only support, unsupported claims preserved.
+  - Supported claims list remains empty.
+  - Limitation preserved: no active capability claim is externally supported.
+- Current blockers:
+  - Need run full required validation commands: `pytest -q`, external eval, generalization audit, leakage scan, and independent verify.
+- Exact next action:
+  - Run `pytest -q` and `python -m audit.leakage_scan`.
+
+## Step 0114 - Full pytest and leakage scan pass for external discipline
+
+- Files touched: `CONTEXT.MD`
+- Commands run:
+  - `pytest -q`
+  - `python -m audit.leakage_scan`
+- Observed results/errors:
+  - Leakage scan passed with zero findings.
+  - Full test suite passed: `57 passed in 68.68s`.
+- Current blockers:
+  - Need run required external evaluator and generalization audit commands after full tests.
+- Exact next action:
+  - Run `python -m src.external_eval --config external --json-output docs/external_generalization_report.json --trace-dir docs/external_traces`.
+
+## Step 0115 - Required external evaluator command passes
+
+- Files touched:
+  - `docs/external_generalization_report.json`
+  - `docs/external_generalization_report.md`
+  - `docs/external_traces\...`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m src.external_eval --config external --json-output docs/external_generalization_report.json --trace-dir docs/external_traces`
+- Observed results/errors:
+  - Terminal outcome: `EXTERNAL GENERALIZATION DISCIPLINE PROVEN`.
+  - All report requirements true.
+  - Unsupported claims remain all seven active claims.
+  - Limitations preserved: no active external support; Gymnasium wrappers are smoke suites and not ARC success evidence.
+- Current blockers:
+  - Need run required generalization audit command.
+- Exact next action:
+  - Run `python -m src.generalization_audit --json-output docs/generalization_audit.json`.
+
+## Step 0116 - Required generalization audit command passes
+
+- Files touched:
+  - `docs/generalization_audit.json`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m src.generalization_audit --json-output docs/generalization_audit.json`
+- Observed results/errors:
+  - Terminal outcome: `EXTERNAL GENERALIZATION AUDIT PROVEN`.
+  - Checks all true: external report proven, leakage scan, external no-hack, no text-as-state, hidden-target canary diff zero, frozen hash unchanged, traceability, claim registry complete, supported thresholds, no dev-only support, unsupported claims preserved.
+  - Supported claims list is empty.
+  - Limitation preserved: no active capability claim is externally supported.
+- Current blockers:
+  - `audit\independent_verify.py` does not yet include the external generalization files/reports in its audited path list or command manifest.
+- Exact next action:
+  - Patch `audit\independent_verify.py` to include external generalization artifacts before running required independent verification.
+
+## Step 0117 - CUDA device requirement made explicit for external workflow
+
+- Files touched:
+  - `src\external_eval.py`
+  - `audit\independent_verify.py`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -c "import torch; print({'torch': torch.__version__, 'cuda_available': torch.cuda.is_available(), 'cuda': torch.version.cuda, 'device_count': torch.cuda.device_count(), 'device0': torch.cuda.get_device_name(0) if torch.cuda.is_available() else None})"`
+  - `.\.venv\Scripts\python.exe -c "import torch; print({'torch': torch.__version__, 'cuda_available': torch.cuda.is_available(), 'cuda': torch.version.cuda, 'device_count': torch.cuda.device_count(), 'device0': torch.cuda.get_device_name(0) if torch.cuda.is_available() else None})"`
+- Observed results/errors:
+  - Default Python reports CUDA-enabled torch `2.11.0.dev20260120+cu128`, CUDA available true, two devices, device 0 `NVIDIA GeForce RTX 5060 Ti`.
+  - `.venv` Python reports CUDA-enabled torch `2.11.0+cu128`, CUDA available true, two devices, device 0 `NVIDIA GeForce RTX 5060 Ti`.
+  - `src.external_eval` now resolves the device once, passes the resolved CUDA device into Gymnasium-backed adapter evaluation, and records `requested_device` plus `resolved_device` in the external report.
+  - `audit.independent_verify` command manifest now records CUDA-explicit external evaluator and independent verifier commands.
+- Current blockers:
+  - Need compile/test the CUDA-specific patch and regenerate reports with `--device cuda`.
+- Exact next action:
+  - Run py_compile, focused tests, and `python -m src.external_eval --config external --json-output docs/external_generalization_report.json --trace-dir docs/external_traces --device cuda`.
+
+## Step 0118 - CUDA patch compiles and focused tests pass
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m py_compile src\external_eval.py audit\independent_verify.py tests\test_external_generalization.py`
+  - `pytest -q tests\test_external_generalization.py tests\test_device_placement.py`
+- Observed results/errors:
+  - Python compilation passed for external evaluator, independent verifier, and focused test module.
+  - Focused tests passed: `6 passed in 1.31s`.
+- Current blockers:
+  - Need regenerate external report with explicit CUDA device.
+- Exact next action:
+  - Run `python -m src.external_eval --config external --json-output docs/external_generalization_report.json --trace-dir docs/external_traces --device cuda`.
+
+## Step 0119 - External report regenerated with explicit CUDA
+
+- Files touched:
+  - `docs\external_generalization_report.json`
+  - `docs\external_generalization_report.md`
+  - `docs\external_traces\...`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m src.external_eval --config external --json-output docs/external_generalization_report.json --trace-dir docs/external_traces --device cuda`
+  - `python -c "import json; r=json.load(open('docs/external_generalization_report.json')); print({'requested_device': r.get('requested_device'), 'resolved_device': r.get('resolved_device'), 'diagnosis_device': r.get('official_runtime_status',{}).get('diagnosis_device'), 'cuda_available': r.get('official_runtime_status',{}).get('torch_cuda_available'), 'device_count': r.get('official_runtime_status',{}).get('torch_device_count'), 'outcome': r.get('terminal_outcome')})"`
+- Observed results/errors:
+  - External evaluator completed with terminal outcome `EXTERNAL GENERALIZATION DISCIPLINE PROVEN`.
+  - All report requirements remain true.
+  - Unsupported claims remain all seven active claims.
+  - Report now records `requested_device: cuda`, `resolved_device: cuda`, `diagnosis_device: cuda`, CUDA available true, and two CUDA devices.
+- Current blockers:
+  - Need rerun generalization audit against the CUDA-regenerated report.
+- Exact next action:
+  - Run `python -m src.generalization_audit --json-output docs/generalization_audit.json`.
+
+## Step 0120 - Generalization audit passes on CUDA-regenerated report
+
+- Files touched:
+  - `docs\generalization_audit.json`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m src.generalization_audit --json-output docs/generalization_audit.json`
+- Observed results/errors:
+  - Terminal outcome: `EXTERNAL GENERALIZATION AUDIT PROVEN`.
+  - All checks true: external report proven, leakage scan, external no-hack, no text-as-state, hidden-target canary diff zero, frozen hash unchanged, traceability, claim registry complete, supported thresholds, no dev-only support, unsupported claims preserved.
+  - Supported claims list remains empty.
+- Current blockers:
+  - Need run independent verifier with explicit CUDA.
+- Exact next action:
+  - Run `python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_external_generalization.json --device cuda`.
+
+## Step 0121 - Independent verifier passes on CUDA
+
+- Files touched:
+  - `docs\audit_after_external_generalization.json`
+  - `docs\audit_after_external_generalization.md`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_external_generalization.json --device cuda`
+- Observed results/errors:
+  - Terminal outcome: `AUDIT PROVEN`.
+  - Verdict passes true.
+  - Durable restart memory remains above gate: memory-file restart final memory accuracy `0.9375`; zero-reset final memory accuracy `0.1796875`.
+  - Idle-mode non-collapse and repetition gates pass: public language repetition `0.28159844875335693`; private token repetition `0.0`; latent active fraction `1.0`; latent effective rank `15.644668579101562`.
+  - Curriculum growth probe passes: accuracy before `0.0`, after `1.0`, persistent-memory change true, weight change false.
+- Current blockers:
+  - Need explicit post-patch full pytest and leakage scan before committing.
+- Exact next action:
+  - Run `pytest -q` and `python -m audit.leakage_scan`.
+
+## Step 0122 - Post-patch full pytest and leakage scan pass
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `pytest -q`
+  - `python -m audit.leakage_scan`
+- Observed results/errors:
+  - Full test suite passed: `57 passed in 54.02s`.
+  - Leakage scan passed with zero findings.
+  - Leakage checks all true: no external/pretrained imports, no external/pretrained text patterns, no unexpected weight files, runtime not prompt loop.
+- Current blockers:
+  - None for CUDA device update or external-generalization verification.
+- Exact next action:
+  - Inspect changed files and commit atomically.
+
+## Step 0123 - Independent verifier CUDA metadata added
+
+- Files touched:
+  - `audit\independent_verify.py`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -c "import json; r=json.load(open('docs/external_generalization_report.json')); a=json.load(open('docs/generalization_audit.json')); v=json.load(open('docs/audit_after_external_generalization.json')); print(json.dumps({'external_outcome': r.get('terminal_outcome'), 'requested_device': r.get('requested_device'), 'resolved_device': r.get('resolved_device'), 'cuda_available': r.get('official_runtime_status',{}).get('torch_cuda_available'), 'device_count': r.get('official_runtime_status',{}).get('torch_device_count'), 'audit_outcome': a.get('terminal_outcome'), 'verify_outcome': v.get('terminal_outcome'), 'verify_device': v.get('device'), 'commands_required_tail': v.get('commands_required', [])[-3:]}, indent=2))"`
+- Observed results/errors:
+  - External report and command manifest recorded CUDA, but the existing independent verifier output did not record the resolved device as a top-level field.
+  - `audit.independent_verify` now records `requested_device`, `resolved_device`, CUDA availability, CUDA version, CUDA device count, and CUDA device names in every audit report.
+- Current blockers:
+  - Need compile and rerun independent verifier to refresh `docs\audit_after_external_generalization.json`.
+- Exact next action:
+  - Run `python -m py_compile audit\independent_verify.py` and rerun the CUDA independent verifier.
+
+## Step 0124 - Independent verifier CUDA metadata verified
+
+- Files touched:
+  - `docs\audit_after_external_generalization.json`
+  - `docs\audit_after_external_generalization.md`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m py_compile audit\independent_verify.py`
+  - `python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_external_generalization.json --device cuda`
+  - `python -c "import json; v=json.load(open('docs/audit_after_external_generalization.json')); print(json.dumps({'outcome': v.get('terminal_outcome'), 'requested_device': v.get('requested_device'), 'resolved_device': v.get('resolved_device'), 'cuda_available': v.get('runtime_status',{}).get('torch_cuda_available'), 'cuda': v.get('runtime_status',{}).get('torch_cuda_version'), 'device_count': v.get('runtime_status',{}).get('torch_device_count'), 'devices': v.get('runtime_status',{}).get('torch_cuda_devices')}, indent=2))"`
+  - `python -m audit.leakage_scan`
+- Observed results/errors:
+  - Python compilation passed.
+  - CUDA independent verifier returned `AUDIT PROVEN`.
+  - Audit report now records `requested_device: cuda`, `resolved_device: cuda`, CUDA available true, CUDA version `12.8`, two CUDA devices, both named `NVIDIA GeForce RTX 5060 Ti`.
+  - Leakage scan passed with zero findings.
+- Current blockers:
+  - Need final full pytest after verifier metadata patch.
+- Exact next action:
+  - Run `pytest -q`.
+
+## Step 0125 - Final full pytest passes after CUDA metadata patch
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `pytest -q`
+- Observed results/errors:
+  - Full test suite passed: `57 passed in 54.48s`.
+- Current blockers:
+  - None.
+- Exact next action:
+  - Stage intended files and create an atomic commit.

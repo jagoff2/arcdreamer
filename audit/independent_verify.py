@@ -95,6 +95,9 @@ AUDITED_PATHS = [
     "src/arcagi3_trace_analysis.py",
     "src/arcagi3_failure_taxonomy.py",
     "src/arcagi3_diagnose.py",
+    "src/external_registry.py",
+    "src/external_eval.py",
+    "src/generalization_audit.py",
     "src/train.py",
     "src/evaluate.py",
     "src/metrics.py",
@@ -104,6 +107,7 @@ AUDITED_PATHS = [
     "tests/test_head_collapse.py",
     "tests/test_arcagi3_adapter.py",
     "tests/test_arcagi3_diagnosis.py",
+    "tests/test_external_generalization.py",
     "README.md",
     "docs/living_system_report.json",
     "docs/evidence_dossier.json",
@@ -122,6 +126,11 @@ AUDITED_PATHS = [
     "docs/arcagi3_failure_report.json",
     "docs/arcagi3_failure_report.md",
     "docs/audit_after_arcagi3.json",
+    "docs/audit_after_arcagi3_diagnosis.json",
+    "docs/external_generalization_report.json",
+    "docs/external_generalization_report.md",
+    "docs/generalization_audit.json",
+    "docs/audit_after_external_generalization.json",
 ]
 
 ACTION_NAMES = {
@@ -704,6 +713,7 @@ def render_markdown(report: dict[str, Any]) -> str:
 
 
 def run_audit(checkpoint: str | Path, config: str, json_output: str | Path, device: DeviceLike = AUTO_DEVICE) -> dict[str, Any]:
+    requested_device = str(device)
     device = str(resolve_device(device))
     before_hashes = collect_hashes(AUDITED_PATHS)
     manifest_before = manifest_status(before_hashes)
@@ -784,9 +794,27 @@ def run_audit(checkpoint: str | Path, config: str, json_output: str | Path, devi
                 "python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_arcagi3_diagnosis.json",
             ]
         )
+    if Path("docs/external_generalization_report.json").exists():
+        commands_required.extend(
+            [
+                "python -m src.external_eval --config external --json-output docs/external_generalization_report.json --trace-dir docs/external_traces --device cuda",
+                "python -m src.generalization_audit --json-output docs/generalization_audit.json",
+                "python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_external_generalization.json --device cuda",
+            ]
+        )
 
     report: dict[str, Any] = {
         "terminal_outcome": "PENDING",
+        "requested_device": requested_device,
+        "resolved_device": device,
+        "runtime_status": {
+            "torch_cuda_available": bool(torch.cuda.is_available()),
+            "torch_cuda_version": getattr(torch.version, "cuda", None),
+            "torch_device_count": int(torch.cuda.device_count()) if torch.cuda.is_available() else 0,
+            "torch_cuda_devices": [torch.cuda.get_device_name(index) for index in range(torch.cuda.device_count())]
+            if torch.cuda.is_available()
+            else [],
+        },
         "commands_required": commands_required,
         "hashes": {
             "before": before_hashes,

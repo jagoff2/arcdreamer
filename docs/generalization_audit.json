@@ -1,0 +1,173 @@
+{
+  "terminal_outcome": "EXTERNAL GENERALIZATION AUDIT PROVEN",
+  "external_report": "docs/external_generalization_report.json",
+  "checks": {
+    "external_report_proven": true,
+    "leakage_scan_passes": true,
+    "external_no_hack_passes": true,
+    "no_text_as_state": true,
+    "hidden_target_canary_diff_zero": true,
+    "frozen_hash_recorded_and_unchanged": true,
+    "traceability_passes": true,
+    "claim_registry_complete": true,
+    "supported_claims_have_external_thresholds": true,
+    "no_dev_only_supported_claims": true,
+    "unsupported_claims_preserved": true,
+    "supported_claims": [],
+    "dev_only_supported_claims": []
+  },
+  "leakage_scan": {
+    "passes": true,
+    "python_files_scanned": [
+      "src\\__init__.py",
+      "src\\adversarial.py",
+      "src\\arcagi3_adapter.py",
+      "src\\arcagi3_baselines.py",
+      "src\\arcagi3_diagnose.py",
+      "src\\arcagi3_eval.py",
+      "src\\arcagi3_failure_taxonomy.py",
+      "src\\arcagi3_official.py",
+      "src\\arcagi3_official_eval.py",
+      "src\\arcagi3_trace.py",
+      "src\\arcagi3_trace_analysis.py",
+      "src\\continual_learning.py",
+      "src\\conversation_env.py",
+      "src\\conversation_eval.py",
+      "src\\conversation_train.py",
+      "src\\curriculum.py",
+      "src\\device.py",
+      "src\\dialogue_env.py",
+      "src\\dialogue_eval.py",
+      "src\\dialogue_train.py",
+      "src\\env.py",
+      "src\\evaluate.py",
+      "src\\evidence_dossier.py",
+      "src\\explore_env.py",
+      "src\\explorer_eval.py",
+      "src\\explorer_train.py",
+      "src\\external_eval.py",
+      "src\\external_registry.py",
+      "src\\free_text_decoder.py",
+      "src\\generalization_audit.py",
+      "src\\head_collapse.py",
+      "src\\head_collapse_eval.py",
+      "src\\heldout_causal.py",
+      "src\\human_memory.py",
+      "src\\intrinsic_motivation.py",
+      "src\\language_organ.py",
+      "src\\living_eval.py",
+      "src\\memory_eval.py",
+      "src\\memory_replay.py",
+      "src\\metrics.py",
+      "src\\model.py",
+      "src\\persistent_memory.py",
+      "src\\retention_eval.py",
+      "src\\run_unbroken.py",
+      "src\\train.py",
+      "src\\unified_policy.py",
+      "src\\world_model.py",
+      "tests\\conftest.py",
+      "tests\\test_adversarial.py",
+      "tests\\test_arcagi3_adapter.py",
+      "tests\\test_arcagi3_diagnosis.py",
+      "tests\\test_architecture.py",
+      "tests\\test_audit_proof.py",
+      "tests\\test_device_placement.py",
+      "tests\\test_dialogue_organ.py",
+      "tests\\test_evidence_dossier.py",
+      "tests\\test_explorer_mindlike.py",
+      "tests\\test_external_generalization.py",
+      "tests\\test_frozen_artifacts.py",
+      "tests\\test_grounded_conversation.py",
+      "tests\\test_head_collapse.py",
+      "tests\\test_heldout_causal.py",
+      "tests\\test_human_memory.py",
+      "tests\\test_living_system.py",
+      "tests\\test_no_pretrained.py",
+      "tests\\test_retention_fix.py",
+      "tests\\test_training_smoke.py",
+      "tests\\test_unbroken_runtime.py",
+      "audit\\__init__.py",
+      "audit\\independent_verify.py",
+      "audit\\leakage_scan.py",
+      "audit\\probe_examples.py"
+    ],
+    "findings": [],
+    "checks": {
+      "no_external_or_pretrained_imports": true,
+      "no_external_or_pretrained_text_patterns": true,
+      "no_unexpected_weight_files": true,
+      "runtime_not_prompt_loop": true
+    }
+  },
+  "external_no_hack_scan": {
+    "passes": true,
+    "findings": [],
+    "scanned": [
+      "src\\external_eval.py",
+      "src\\external_registry.py",
+      "src\\generalization_audit.py"
+    ],
+    "allowed_task_wrappers": [
+      "CartPole-v1",
+      "FrozenLake-v1"
+    ]
+  },
+  "no_text_as_state": {
+    "passes": true,
+    "findings": [],
+    "runtime_z_loop_present": true
+  },
+  "trace_checks": {
+    "trace_count": 175,
+    "missing_traces": [],
+    "sample_schema_failures": [],
+    "passes": true
+  },
+  "hidden_target_canary": {
+    "passes": true,
+    "hidden_target_canary_max_abs_diff": 0.0,
+    "source": "docs\\audit_after_arcagi3_diagnosis.json"
+  },
+  "hashes": {
+    "src/external_registry.py": {
+      "sha256": "4A50D4C3BAEA03162D9DB15F702778A84BDE3A4AD1BD59F092084C0F61066532",
+      "size_bytes": 5390
+    },
+    "src/external_eval.py": {
+      "sha256": "B7E788E05B9B043451C33B5810E150070996E01379BF6B3ED7FEA78009C89E2F",
+      "size_bytes": 31400
+    },
+    "src/generalization_audit.py": {
+      "sha256": "AEEA3979A74B65AF2DA7189DED4DF07EF8643CA7C0E2D0EE56B9FAA28103282D",
+      "size_bytes": 7998
+    },
+    "tests/test_external_generalization.py": {
+      "sha256": "DFD49A73856C8D9A165A0EDD0928718A7521BEA8CBC7666AD41C20D42D488771",
+      "size_bytes": 3254
+    },
+    "docs/external_generalization_report.json": {
+      "sha256": "33CF71320D8E4C186481A1DF47F111D2A2D0A75232843B28937BD0CF5F06235B",
+      "size_bytes": 250596
+    },
+    "docs/external_generalization_report.md": {
+      "sha256": "4467F090FAB1313FD9269CAFCF2A29D23F8A5DAB2E79E6423EA9552F3B4654E6",
+      "size_bytes": 9715
+    },
+    "docs/generalization_audit.json": {
+      "sha256": "59C4124FE1DE1C114E3FFCC013BE23C322D378F42B8089071882B94849ECF6E5",
+      "size_bytes": 5807
+    },
+    "frozen/recurrent_latent_fast.pt": {
+      "sha256": "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD",
+      "size_bytes": 169185
+    },
+    "runs/explorer_tiny.pt": {
+      "sha256": "F0A2F8BE9F64B7928083E6EF59A5535998AF5E8465F4FDD3E3C1B7EDDB6727E9",
+      "size_bytes": 607937
+    }
+  },
+  "limitations": [
+    "No active capability claim is externally supported; this is acceptable discipline, not performance success."
+  ]
+}
