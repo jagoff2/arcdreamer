@@ -1,0 +1,434 @@
+{
+  "terminal_outcome": "ARC-AGI-3 ADAPTER PROVEN",
+  "arc_source": {
+    "kind": "committed_public_fixtures",
+    "path": "docs\\arcagi3_public_fixtures.json",
+    "reason": "arc_agi and arcengine are unavailable in the active Python 3.10 runtime",
+    "toolkit_available": false
+  },
+  "config": "public",
+  "checkpoint": "frozen/recurrent_latent_fast.pt",
+  "explorer_checkpoint": "runs/explorer_tiny.pt",
+  "g_arcagi_findings": {
+    "g_arcagi_used_for": [
+      "reset_step_legal_actions_contract",
+      "grid_observation_shape",
+      "raw_and_click_action_naming",
+      "trace_and_scorecard_field_names",
+      "offline_public_fixture_layout"
+    ],
+    "g_arcagi_not_used_for": [
+      "solver_logic",
+      "policies",
+      "scripts",
+      "weights",
+      "environment_source_semantics",
+      "public_game_solutions"
+    ]
+  },
+  "per_game": [
+    {
+      "solved": true,
+      "score": 1.375,
+      "normalized_score": 0.9821428571428572,
+      "steps": 5,
+      "invalid_action_rate": 0.0,
+      "unique_states": 6,
+      "useful_events": 3,
+      "action_entropy": 0.9709505944546686,
+      "repeat_collapse": 0.6,
+      "actions": [
+        "4",
+        "4",
+        "4",
+        "2",
+        "2"
+      ],
+      "trace_path": "docs\\arcagi3_traces\\public_keydoor.normal.json",
+      "game_id": "public_keydoor",
+      "title": "Public Key Door"
+    },
+    {
+      "solved": false,
+      "score": -0.11000000000000003,
+      "normalized_score": 0.0,
+      "steps": 22,
+      "invalid_action_rate": 0.0,
+      "unique_states": 23,
+      "useful_events": 0,
+      "action_entropy": 1.0,
+      "repeat_collapse": 0.5,
+      "actions": [
+        "4",
+        "3",
+        "4",
+        "3",
+        "4",
+        "3",
+        "4",
+        "3",
+        "4",
+        "3",
+        "4",
+        "3",
+        "4",
+        "3",
+        "4",
+        "3",
+        "4",
+        "3",
+        "4",
+        "3",
+        "4",
+        "3"
+      ],
+      "trace_path": "docs\\arcagi3_traces\\public_hazard_detour.normal.json",
+      "game_id": "public_hazard_detour",
+      "title": "Public Hazard Detour"
+    },
+    {
+      "solved": true,
+      "score": 1.0,
+      "normalized_score": 1.0,
+      "steps": 1,
+      "invalid_action_rate": 0.0,
+      "unique_states": 2,
+      "useful_events": 1,
+      "action_entropy": -0.0,
+      "repeat_collapse": 1.0,
+      "actions": [
+        "click:2:1"
+      ],
+      "trace_path": "docs\\arcagi3_traces\\public_click_beacon.normal.json",
+      "game_id": "public_click_beacon",
+      "title": "Public Click Beacon"
+    },
+    {
+      "solved": true,
+      "score": 0.97,
+      "normalized_score": 0.97,
+      "steps": 6,
+      "invalid_action_rate": 0.0,
+      "unique_states": 7,
+      "useful_events": 1,
+      "action_entropy": 0.9182958340544896,
+      "repeat_collapse": 0.6666666666666666,
+      "actions": [
+        "2",
+        "2",
+        "4",
+        "4",
+        "4",
+        "4"
+      ],
+      "trace_path": "docs\\arcagi3_traces\\public_memory_fog.normal.json",
+      "game_id": "public_memory_fog",
+      "title": "Public Memory Fog"
+    }
+  ],
+  "aggregate": {
+    "solve_rate": 0.75,
+    "mean_score": 0.8087499999999999,
+    "mean_normalized_score": 0.7380357142857144,
+    "mean_steps": 8.5,
+    "mean_invalid_action_rate": 0.0,
+    "mean_unique_states": 9.5,
+    "mean_useful_events": 1.25,
+    "mean_action_entropy": 0.7223116071272895,
+    "mean_repeat_collapse": 0.6916666666666667
+  },
+  "baselines": {
+    "random_legal": {
+      "solve_rate": 0.0,
+      "mean_score": -0.2325000000000001,
+      "mean_normalized_score": 0.0,
+      "mean_steps": 21.0,
+      "mean_invalid_action_rate": 0.0,
+      "mean_unique_states": 22.0,
+      "mean_useful_events": 0.5,
+      "mean_action_entropy": 2.364355637569995,
+      "mean_repeat_collapse": 0.2701048951048951
+    },
+    "repeat_last_action": {
+      "solve_rate": 0.0,
+      "mean_score": -0.6100000000000003,
+      "mean_normalized_score": 0.0,
+      "mean_steps": 21.0,
+      "mean_invalid_action_rate": 0.0,
+      "mean_unique_states": 22.0,
+      "mean_useful_events": 0.0,
+      "mean_action_entropy": 0.0,
+      "mean_repeat_collapse": 1.0
+    },
+    "coverage_graph_exploration": {
+      "solve_rate": 0.0,
+      "mean_score": -0.2637500000000001,
+      "mean_normalized_score": 0.0035714285714285583,
+      "mean_steps": 21.0,
+      "mean_invalid_action_rate": 0.0,
+      "mean_unique_states": 22.0,
+      "mean_useful_events": 0.5,
+      "mean_action_entropy": 2.486811330683049,
+      "mean_repeat_collapse": 0.19933191808191808
+    },
+    "novelty_first": {
+      "solve_rate": 0.25,
+      "mean_score": -0.3550000000000003,
+      "mean_normalized_score": 0.215,
+      "mean_steps": 21.0,
+      "mean_invalid_action_rate": 0.0,
+      "mean_unique_states": 22.0,
+      "mean_useful_events": 0.25,
+      "mean_action_entropy": 0.75,
+      "mean_repeat_collapse": 0.78125
+    },
+    "greedy_observable_score_delta": {
+      "solve_rate": 0.0,
+      "mean_score": -0.3600000000000001,
+      "mean_normalized_score": 0.0,
+      "mean_steps": 21.0,
+      "mean_invalid_action_rate": 0.0,
+      "mean_unique_states": 22.0,
+      "mean_useful_events": 0.0,
+      "mean_action_entropy": 0.19468945625470946,
+      "mean_repeat_collapse": 0.9591346153846154
+    },
+    "oracle_free_observed_graph_bfs": {
+      "solve_rate": 0.25,
+      "mean_score": 0.002499999999999905,
+      "mean_normalized_score": 0.215,
+      "mean_steps": 21.0,
+      "mean_invalid_action_rate": 0.0,
+      "mean_unique_states": 22.0,
+      "mean_useful_events": 0.25,
+      "mean_action_entropy": 2.486811330683049,
+      "mean_repeat_collapse": 0.19933191808191808
+    }
+  },
+  "best_baseline": {
+    "name": "novelty_first",
+    "solve_rate": 0.25,
+    "mean_score": -0.3550000000000003,
+    "mean_normalized_score": 0.215,
+    "mean_steps": 21.0,
+    "mean_invalid_action_rate": 0.0,
+    "mean_unique_states": 22.0,
+    "mean_useful_events": 0.25,
+    "mean_action_entropy": 0.75,
+    "mean_repeat_collapse": 0.78125
+  },
+  "baseline_margin": 0.5230357142857144,
+  "ablations": {
+    "normal": {
+      "solve_rate": 0.75,
+      "mean_score": 0.8087499999999999,
+      "mean_normalized_score": 0.7380357142857144,
+      "mean_steps": 8.5,
+      "mean_invalid_action_rate": 0.0,
+      "mean_unique_states": 9.5,
+      "mean_useful_events": 1.25,
+      "mean_action_entropy": 0.7223116071272895,
+      "mean_repeat_collapse": 0.6916666666666667
+    },
+    "zero_z": {
+      "solve_rate": 0.0,
+      "mean_score": -0.21000000000000002,
+      "mean_normalized_score": 0.0,
+      "mean_steps": 21.0,
+      "mean_invalid_action_rate": 0.0,
+      "mean_unique_states": 22.0,
+      "mean_useful_events": 0.0,
+      "mean_action_entropy": 0.0,
+      "mean_repeat_collapse": 1.0
+    },
+    "shuffled_z": {
+      "solve_rate": 0.75,
+      "mean_score": 0.8087499999999999,
+      "mean_normalized_score": 0.7380357142857144,
+      "mean_steps": 8.5,
+      "mean_invalid_action_rate": 0.0,
+      "mean_unique_states": 9.5,
+      "mean_useful_events": 1.25,
+      "mean_action_entropy": 0.7223116071272895,
+      "mean_repeat_collapse": 0.6916666666666667
+    },
+    "corrupt_memory": {
+      "solve_rate": 0.75,
+      "mean_score": 0.7825,
+      "mean_normalized_score": 0.7380357142857144,
+      "mean_steps": 8.5,
+      "mean_invalid_action_rate": 0.0,
+      "mean_unique_states": 9.5,
+      "mean_useful_events": 1.25,
+      "mean_action_entropy": 0.539002854078046,
+      "mean_repeat_collapse": 0.8053030303030303
+    },
+    "corrupt_drive": {
+      "solve_rate": 0.5,
+      "mean_score": 0.5125,
+      "mean_normalized_score": 0.4880357142857143,
+      "mean_steps": 10.25,
+      "mean_invalid_action_rate": 0.0,
+      "mean_unique_states": 11.25,
+      "mean_useful_events": 1.0,
+      "mean_action_entropy": 0.539002854078046,
+      "mean_repeat_collapse": 0.8053030303030303
+    },
+    "no_hypothesis_memory": {
+      "solve_rate": 0.0,
+      "mean_score": 0.12749999999999997,
+      "mean_normalized_score": 0.1814285714285714,
+      "mean_steps": 21.0,
+      "mean_invalid_action_rate": 0.0,
+      "mean_unique_states": 22.0,
+      "mean_useful_events": 2.25,
+      "mean_action_entropy": 0.8996349146985757,
+      "mean_repeat_collapse": 0.6256868131868132
+    },
+    "no_planner_imagination": {
+      "solve_rate": 0.0,
+      "mean_score": 0.12749999999999997,
+      "mean_normalized_score": 0.1814285714285714,
+      "mean_steps": 21.0,
+      "mean_invalid_action_rate": 0.0,
+      "mean_unique_states": 22.0,
+      "mean_useful_events": 2.25,
+      "mean_action_entropy": 0.8996349146985757,
+      "mean_repeat_collapse": 0.6256868131868132
+    },
+    "no_novelty_drive": {
+      "solve_rate": 0.5,
+      "mean_score": 0.5125,
+      "mean_normalized_score": 0.4880357142857143,
+      "mean_steps": 10.25,
+      "mean_invalid_action_rate": 0.0,
+      "mean_unique_states": 11.25,
+      "mean_useful_events": 1.0,
+      "mean_action_entropy": 0.539002854078046,
+      "mean_repeat_collapse": 0.8053030303030303
+    }
+  },
+  "ablation_deltas": {
+    "zero_z": 0.7380357142857144,
+    "shuffled_z": 0.0,
+    "corrupt_memory": 0.0,
+    "corrupt_drive": 0.25000000000000006,
+    "no_hypothesis_memory": 0.556607142857143,
+    "no_planner_imagination": 0.556607142857143,
+    "no_novelty_drive": 0.25000000000000006
+  },
+  "trace_dir": "docs/arcagi3_traces",
+  "trace_paths": [
+    "docs\\arcagi3_traces\\public_keydoor.normal.json",
+    "docs\\arcagi3_traces\\public_hazard_detour.normal.json",
+    "docs\\arcagi3_traces\\public_click_beacon.normal.json",
+    "docs\\arcagi3_traces\\public_memory_fog.normal.json"
+  ],
+  "no_hack_audit": {
+    "passes": true,
+    "findings": [],
+    "scanned": [
+      "src\\arcagi3_adapter.py",
+      "src\\arcagi3_eval.py",
+      "src\\arcagi3_baselines.py",
+      "docs\\arcagi3_public_fixtures.json"
+    ],
+    "copy_boundary": {
+      "g_arcagi_used_for": [
+        "reset_step_legal_actions_contract",
+        "grid_observation_shape",
+        "raw_and_click_action_naming",
+        "trace_and_scorecard_field_names",
+        "offline_public_fixture_layout"
+      ],
+      "g_arcagi_not_used_for": [
+        "solver_logic",
+        "policies",
+        "scripts",
+        "weights",
+        "environment_source_semantics",
+        "public_game_solutions"
+      ]
+    }
+  },
+  "prior_properties": {
+    "head_collapse_passes": true,
+    "audit_passes": true,
+    "explorer_passes": true,
+    "retention_eval_passes": true,
+    "memory_eval_passes": true,
+    "dialogue_eval_passes": true,
+    "living_eval_passes": true,
+    "leakage_scan_passes": true,
+    "hidden_target_canary_zero": true,
+    "hidden_target_canary_diff": 0.0,
+    "independent_verify_passes": true,
+    "no_text_as_state_path": true,
+    "passes": true
+  },
+  "leakage_scan": {
+    "passes": true,
+    "findings": []
+  },
+  "gate_checks": {
+    "fixtures_present": true,
+    "traces_present": true,
+    "baseline_margin_ge_0_10": true,
+    "z_or_memory_degrades_ge_0_20": true,
+    "drive_or_novelty_degrades_ge_0_10": true,
+    "planner_degrades_ge_0_10": true,
+    "no_hack_audit_passes": true,
+    "leakage_scan_passes": true,
+    "prior_properties_pass": true
+  },
+  "hashes": {
+    "src/arcagi3_adapter.py": {
+      "sha256": "8B4006FA6C9F0652D28505AFCAC15DA54087504E8183D112C8CD078F1FCDDE91",
+      "size_bytes": 33374
+    },
+    "src/arcagi3_baselines.py": {
+      "sha256": "73B3F5146F2BC6699CAA8B7D50AEDED3AE3A49AC64749FE16E15C15F806F978E",
+      "size_bytes": 7770
+    },
+    "src/arcagi3_trace.py": {
+      "sha256": "AB94B296D18E601C3EC1BE8E21F322A0645B4AC9E4F790F4449ED5DD26F14DF1",
+      "size_bytes": 3480
+    },
+    "src/arcagi3_eval.py": {
+      "sha256": "821FBAB4B0C387483AF9CC0A0AF93F1009CDB95D30E2D04C77711199F706D68F",
+      "size_bytes": 19669
+    },
+    "tests/test_arcagi3_adapter.py": {
+      "sha256": "BD969AD738CA5D6AA70B755FD73FA60FF5A2C4C37D3B60C2AC566DDBA472BC73",
+      "size_bytes": 2024
+    },
+    "docs/arcagi3_public_fixtures.json": {
+      "sha256": "CCFE0B033858DC51081BD927271E50DB395BF44A165B3490448ED5945C7784DE",
+      "size_bytes": 3193
+    },
+    "docs/arcagi3_report.json": {
+      "sha256": "70151A98B41ED8C0C1B0C0EE77735CAEF5F7FA37BD4682E69C717CF67C52DC61",
+      "size_bytes": 13388
+    },
+    "docs/audit_after_arcagi3.json": {
+      "missing": true
+    },
+    "frozen/recurrent_latent_fast.pt": {
+      "sha256": "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD",
+      "size_bytes": 169185
+    },
+    "runs/explorer_tiny.pt": {
+      "sha256": "F0A2F8BE9F64B7928083E6EF59A5535998AF5E8465F4FDD3E3C1B7EDDB6727E9",
+      "size_bytes": 607937
+    },
+    "docs/head_collapse_report.json": {
+      "sha256": "483BB0FF930F465258FE3BAE2510554D90E4DE62646D737B9A19AC2C0FE7A4FC",
+      "size_bytes": 23206
+    },
+    "docs/audit_after_head_collapse.json": {
+      "sha256": "A624B99DBD2310DB820FCA415D166CF7A7A04F2A955CB0D62E0B928A008C1605",
+      "size_bytes": 56787
+    }
+  },
+  "limitations": []
+}

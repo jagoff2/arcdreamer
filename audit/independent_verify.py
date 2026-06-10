@@ -86,6 +86,10 @@ AUDITED_PATHS = [
     "src/explorer_eval.py",
     "src/head_collapse.py",
     "src/head_collapse_eval.py",
+    "src/arcagi3_adapter.py",
+    "src/arcagi3_baselines.py",
+    "src/arcagi3_trace.py",
+    "src/arcagi3_eval.py",
     "src/train.py",
     "src/evaluate.py",
     "src/metrics.py",
@@ -93,6 +97,7 @@ AUDITED_PATHS = [
     "tests/test_grounded_conversation.py",
     "tests/test_explorer_mindlike.py",
     "tests/test_head_collapse.py",
+    "tests/test_arcagi3_adapter.py",
     "README.md",
     "docs/living_system_report.json",
     "docs/evidence_dossier.json",
@@ -103,6 +108,9 @@ AUDITED_PATHS = [
     "docs/head_collapse_report.json",
     "docs/explorer_report_after_head_collapse.json",
     "docs/audit_after_head_collapse.json",
+    "docs/arcagi3_public_fixtures.json",
+    "docs/arcagi3_report.json",
+    "docs/audit_after_arcagi3.json",
 ]
 
 ACTION_NAMES = {
@@ -749,6 +757,13 @@ def run_audit(checkpoint: str | Path, config: str, json_output: str | Path, devi
                 "python -m src.head_collapse_eval --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --config tiny --json-output docs/head_collapse_report.json",
                 "python -m src.explorer_eval --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --config tiny --json-output docs/explorer_report_after_head_collapse.json",
                 "python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_head_collapse.json",
+            ]
+        )
+    if Path("docs/arcagi3_report.json").exists():
+        commands_required.extend(
+            [
+                "python -m src.arcagi3_eval --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --config public --json-output docs/arcagi3_report.json --trace-dir docs/arcagi3_traces",
+                "python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_arcagi3.json",
             ]
         )
 

@@ -1,0 +1,716 @@
+{
+  "metadata": {
+    "controller": "explorer_normal",
+    "task_id": "arcagi3/public_keydoor",
+    "episode_id": "arcagi3/public_keydoor/episode_0",
+    "fixture_source": "docs/arcagi3_public_fixtures.json"
+  },
+  "summary": {
+    "solved": true,
+    "score": 1.375,
+    "normalized_score": 0.9821428571428572,
+    "steps": 5,
+    "invalid_action_rate": 0.0,
+    "unique_states": 6,
+    "useful_events": 3,
+    "action_entropy": 0.9709505944546686,
+    "repeat_collapse": 0.6,
+    "actions": [
+      "4",
+      "4",
+      "4",
+      "2",
+      "2"
+    ]
+  },
+  "steps": [
+    {
+      "step": 0,
+      "obs": {
+        "task_id": "arcagi3/public_keydoor",
+        "episode_id": "arcagi3/public_keydoor/episode_0",
+        "step_index": 0,
+        "grid": [
+          "#######",
+          "#A.K..#",
+          "#..#D.#",
+          "#..#G.#",
+          "#.....#",
+          "#######"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_keydoor",
+          "score": 0.0,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "4",
+      "next_obs": {
+        "task_id": "arcagi3/public_keydoor",
+        "episode_id": "arcagi3/public_keydoor/episode_0",
+        "step_index": 1,
+        "grid": [
+          "#######",
+          "#.AK..#",
+          "#..#D.#",
+          "#..#G.#",
+          "#.....#",
+          "#######"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_keydoor",
+          "score": -0.005,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move"
+      ],
+      "score_delta": -0.005,
+      "score": -0.005,
+      "normalized_score": 0.0,
+      "memory_recall": {
+        "visited_cells": 1,
+        "goal": [
+          [
+            3,
+            4
+          ]
+        ],
+        "key": [
+          [
+            1,
+            3
+          ]
+        ],
+        "door": [
+          [
+            2,
+            4
+          ]
+        ],
+        "hazard_count": 0,
+        "resource": [],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 0,
+        "resource_level": 1,
+        "body_energy": 1.0
+      },
+      "hypothesis_state": {
+        "semantic_action": 4,
+        "target": [
+          1,
+          3
+        ],
+        "need_key": true,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 4,
+        "behavior": {
+          "action": 4,
+          "inspect": 4,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 16,
+          "memory_project": 0,
+          "memory_partner": 0,
+          "memory_skill": 4
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 1,
+      "obs": {
+        "task_id": "arcagi3/public_keydoor",
+        "episode_id": "arcagi3/public_keydoor/episode_0",
+        "step_index": 1,
+        "grid": [
+          "#######",
+          "#.AK..#",
+          "#..#D.#",
+          "#..#G.#",
+          "#.....#",
+          "#######"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_keydoor",
+          "score": -0.005,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "4",
+      "next_obs": {
+        "task_id": "arcagi3/public_keydoor",
+        "episode_id": "arcagi3/public_keydoor/episode_0",
+        "step_index": 2,
+        "grid": [
+          "??###??",
+          "?..A..?",
+          "??.#D??",
+          "???#???",
+          "???????",
+          "???????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_keydoor",
+          "score": 0.24,
+          "normalized_score": 0.17142857142857143,
+          "have_key": true,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move",
+        "key_collected"
+      ],
+      "score_delta": 0.245,
+      "score": 0.24,
+      "normalized_score": 0.17142857142857143,
+      "memory_recall": {
+        "visited_cells": 2,
+        "goal": [
+          [
+            3,
+            4
+          ]
+        ],
+        "key": [
+          [
+            1,
+            3
+          ]
+        ],
+        "door": [
+          [
+            2,
+            4
+          ]
+        ],
+        "hazard_count": 0,
+        "resource": [],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 0,
+        "resource_level": 1,
+        "body_energy": 0.96
+      },
+      "hypothesis_state": {
+        "semantic_action": 4,
+        "target": [
+          1,
+          3
+        ],
+        "need_key": true,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 4,
+        "behavior": {
+          "action": 4,
+          "inspect": 4,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 17,
+          "memory_project": 0,
+          "memory_partner": 0,
+          "memory_skill": 4
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 2,
+      "obs": {
+        "task_id": "arcagi3/public_keydoor",
+        "episode_id": "arcagi3/public_keydoor/episode_0",
+        "step_index": 2,
+        "grid": [
+          "??###??",
+          "?..A..?",
+          "??.#D??",
+          "???#???",
+          "???????",
+          "???????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_keydoor",
+          "score": 0.24,
+          "normalized_score": 0.17142857142857143,
+          "have_key": true,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "4",
+      "next_obs": {
+        "task_id": "arcagi3/public_keydoor",
+        "episode_id": "arcagi3/public_keydoor/episode_0",
+        "step_index": 3,
+        "grid": [
+          "???###?",
+          "??..A.#",
+          "???#D.?",
+          "????G??",
+          "???????",
+          "???????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_keydoor",
+          "score": 0.235,
+          "normalized_score": 0.16785714285714287,
+          "have_key": true,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move"
+      ],
+      "score_delta": -0.005,
+      "score": 0.235,
+      "normalized_score": 0.16785714285714287,
+      "memory_recall": {
+        "visited_cells": 3,
+        "goal": [
+          [
+            3,
+            4
+          ]
+        ],
+        "key": [
+          [
+            1,
+            3
+          ]
+        ],
+        "door": [
+          [
+            2,
+            4
+          ]
+        ],
+        "hazard_count": 0,
+        "resource": [],
+        "have_key": true,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 0,
+        "resource_level": 0,
+        "body_energy": 0.92
+      },
+      "hypothesis_state": {
+        "semantic_action": 2,
+        "target": [
+          3,
+          4
+        ],
+        "need_key": true,
+        "have_key": true,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 2,
+        "behavior": {
+          "action": 2,
+          "inspect": 2,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 12,
+          "memory_project": 2,
+          "memory_partner": 0,
+          "memory_skill": 2
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 3,
+      "obs": {
+        "task_id": "arcagi3/public_keydoor",
+        "episode_id": "arcagi3/public_keydoor/episode_0",
+        "step_index": 3,
+        "grid": [
+          "???###?",
+          "??..A.#",
+          "???#D.?",
+          "????G??",
+          "???????",
+          "???????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_keydoor",
+          "score": 0.235,
+          "normalized_score": 0.16785714285714287,
+          "have_key": true,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "2",
+      "next_obs": {
+        "task_id": "arcagi3/public_keydoor",
+        "episode_id": "arcagi3/public_keydoor/episode_0",
+        "step_index": 4,
+        "grid": [
+          "????#??",
+          "???...?",
+          "??.#A.#",
+          "???#G.?",
+          "????.??",
+          "???????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_keydoor",
+          "score": 0.38,
+          "normalized_score": 0.27142857142857146,
+          "have_key": true,
+          "door_open": true,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move",
+        "door_opened"
+      ],
+      "score_delta": 0.145,
+      "score": 0.38,
+      "normalized_score": 0.27142857142857146,
+      "memory_recall": {
+        "visited_cells": 4,
+        "goal": [
+          [
+            3,
+            4
+          ]
+        ],
+        "key": [
+          [
+            1,
+            3
+          ]
+        ],
+        "door": [
+          [
+            2,
+            4
+          ]
+        ],
+        "hazard_count": 0,
+        "resource": [],
+        "have_key": true,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 0,
+        "resource_level": 0,
+        "body_energy": 0.88
+      },
+      "hypothesis_state": {
+        "semantic_action": 2,
+        "target": [
+          3,
+          4
+        ],
+        "need_key": true,
+        "have_key": true,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 2,
+        "behavior": {
+          "action": 2,
+          "inspect": 2,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 14,
+          "memory_project": 2,
+          "memory_partner": 0,
+          "memory_skill": 2
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 4,
+      "obs": {
+        "task_id": "arcagi3/public_keydoor",
+        "episode_id": "arcagi3/public_keydoor/episode_0",
+        "step_index": 4,
+        "grid": [
+          "????#??",
+          "???...?",
+          "??.#A.#",
+          "???#G.?",
+          "????.??",
+          "???????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_keydoor",
+          "score": 0.38,
+          "normalized_score": 0.27142857142857146,
+          "have_key": true,
+          "door_open": true,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "2",
+      "next_obs": {
+        "task_id": "arcagi3/public_keydoor",
+        "episode_id": "arcagi3/public_keydoor/episode_0",
+        "step_index": 5,
+        "grid": [
+          "???????",
+          "????.??",
+          "???#..?",
+          "??.#A.#",
+          "???...?",
+          "????#??"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_keydoor",
+          "score": 1.375,
+          "normalized_score": 0.9821428571428572,
+          "have_key": true,
+          "door_open": true,
+          "game_state": "WIN"
+        }
+      },
+      "event_delta": [
+        "move",
+        "goal_reached"
+      ],
+      "score_delta": 0.995,
+      "score": 1.375,
+      "normalized_score": 0.9821428571428572,
+      "memory_recall": {
+        "visited_cells": 5,
+        "goal": [
+          [
+            3,
+            4
+          ]
+        ],
+        "key": [
+          [
+            1,
+            3
+          ]
+        ],
+        "door": [
+          [
+            2,
+            4
+          ]
+        ],
+        "hazard_count": 0,
+        "resource": [],
+        "have_key": true,
+        "door_open": true
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 0,
+        "resource_level": 0,
+        "body_energy": 0.84
+      },
+      "hypothesis_state": {
+        "semantic_action": 5,
+        "target": [
+          3,
+          4
+        ],
+        "need_key": true,
+        "have_key": true,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 5,
+        "behavior": {
+          "action": 5,
+          "inspect": 4,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 5,
+          "memory_project": 1,
+          "memory_partner": 0,
+          "memory_skill": 5
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    }
+  ]
+}

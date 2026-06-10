@@ -1,0 +1,2906 @@
+{
+  "metadata": {
+    "controller": "explorer_normal",
+    "task_id": "arcagi3/public_hazard_detour",
+    "episode_id": "arcagi3/public_hazard_detour/episode_1",
+    "fixture_source": "docs/arcagi3_public_fixtures.json"
+  },
+  "summary": {
+    "solved": false,
+    "score": -0.11000000000000003,
+    "normalized_score": 0.0,
+    "steps": 22,
+    "invalid_action_rate": 0.0,
+    "unique_states": 23,
+    "useful_events": 0,
+    "action_entropy": 1.0,
+    "repeat_collapse": 0.5,
+    "actions": [
+      "4",
+      "3",
+      "4",
+      "3",
+      "4",
+      "3",
+      "4",
+      "3",
+      "4",
+      "3",
+      "4",
+      "3",
+      "4",
+      "3",
+      "4",
+      "3",
+      "4",
+      "3",
+      "4",
+      "3",
+      "4",
+      "3"
+    ]
+  },
+  "steps": [
+    {
+      "step": 0,
+      "obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 0,
+        "grid": [
+          "#######",
+          "#A.HG.#",
+          "#..H..#",
+          "#..R..#",
+          "#######"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": 0.0,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "4",
+      "next_obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 1,
+        "grid": [
+          "#####??",
+          "#.AHG.?",
+          "#..H.??",
+          "?..R???",
+          "??#????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.005,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move"
+      ],
+      "score_delta": -0.005,
+      "score": -0.005,
+      "normalized_score": 0.0,
+      "memory_recall": {
+        "visited_cells": 1,
+        "goal": [
+          [
+            1,
+            4
+          ]
+        ],
+        "key": [],
+        "door": [],
+        "hazard_count": 2,
+        "resource": [
+          [
+            3,
+            3
+          ]
+        ],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 2,
+        "resource_level": 1,
+        "body_energy": 0.8
+      },
+      "hypothesis_state": {
+        "semantic_action": 5,
+        "target": [
+          1,
+          4
+        ],
+        "need_key": false,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 5,
+        "behavior": {
+          "action": 5,
+          "inspect": 4,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 0,
+          "memory_project": 1,
+          "memory_partner": 0,
+          "memory_skill": 5
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 1,
+      "obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 1,
+        "grid": [
+          "#####??",
+          "#.AHG.?",
+          "#..H.??",
+          "?..R???",
+          "??#????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.005,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "3",
+      "next_obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 2,
+        "grid": [
+          "####???",
+          "#A.HG??",
+          "#..H???",
+          "#..????",
+          "?#?????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.01,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move"
+      ],
+      "score_delta": -0.005,
+      "score": -0.01,
+      "normalized_score": 0.0,
+      "memory_recall": {
+        "visited_cells": 2,
+        "goal": [
+          [
+            1,
+            4
+          ]
+        ],
+        "key": [],
+        "door": [],
+        "hazard_count": 2,
+        "resource": [
+          [
+            3,
+            3
+          ]
+        ],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 2,
+        "resource_level": 1,
+        "body_energy": 0.76
+      },
+      "hypothesis_state": {
+        "semantic_action": 3,
+        "target": [
+          1,
+          4
+        ],
+        "need_key": false,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 3,
+        "behavior": {
+          "action": 3,
+          "inspect": 3,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 15,
+          "memory_project": 3,
+          "memory_partner": 0,
+          "memory_skill": 3
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 2,
+      "obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 2,
+        "grid": [
+          "####???",
+          "#A.HG??",
+          "#..H???",
+          "#..????",
+          "?#?????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.01,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "4",
+      "next_obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 3,
+        "grid": [
+          "#####??",
+          "#.AHG.?",
+          "#..H.??",
+          "?..R???",
+          "??#????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.015,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move"
+      ],
+      "score_delta": -0.005,
+      "score": -0.015,
+      "normalized_score": 0.0,
+      "memory_recall": {
+        "visited_cells": 2,
+        "goal": [
+          [
+            1,
+            4
+          ]
+        ],
+        "key": [],
+        "door": [],
+        "hazard_count": 2,
+        "resource": [
+          [
+            3,
+            3
+          ]
+        ],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 2,
+        "resource_level": 1,
+        "body_energy": 0.72
+      },
+      "hypothesis_state": {
+        "semantic_action": 5,
+        "target": [
+          1,
+          4
+        ],
+        "need_key": false,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 5,
+        "behavior": {
+          "action": 5,
+          "inspect": 4,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 2,
+          "memory_project": 1,
+          "memory_partner": 0,
+          "memory_skill": 5
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 3,
+      "obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 3,
+        "grid": [
+          "#####??",
+          "#.AHG.?",
+          "#..H.??",
+          "?..R???",
+          "??#????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.015,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "3",
+      "next_obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 4,
+        "grid": [
+          "####???",
+          "#A.HG??",
+          "#..H???",
+          "#..????",
+          "?#?????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.02,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move"
+      ],
+      "score_delta": -0.005,
+      "score": -0.02,
+      "normalized_score": 0.0,
+      "memory_recall": {
+        "visited_cells": 2,
+        "goal": [
+          [
+            1,
+            4
+          ]
+        ],
+        "key": [],
+        "door": [],
+        "hazard_count": 2,
+        "resource": [
+          [
+            3,
+            3
+          ]
+        ],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 2,
+        "resource_level": 1,
+        "body_energy": 0.6799999999999999
+      },
+      "hypothesis_state": {
+        "semantic_action": 3,
+        "target": [
+          1,
+          4
+        ],
+        "need_key": false,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 3,
+        "behavior": {
+          "action": 3,
+          "inspect": 4,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 17,
+          "memory_project": 3,
+          "memory_partner": 0,
+          "memory_skill": 3
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 4,
+      "obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 4,
+        "grid": [
+          "####???",
+          "#A.HG??",
+          "#..H???",
+          "#..????",
+          "?#?????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.02,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "4",
+      "next_obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 5,
+        "grid": [
+          "#####??",
+          "#.AHG.?",
+          "#..H.??",
+          "?..R???",
+          "??#????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.025,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move"
+      ],
+      "score_delta": -0.005,
+      "score": -0.025,
+      "normalized_score": 0.0,
+      "memory_recall": {
+        "visited_cells": 2,
+        "goal": [
+          [
+            1,
+            4
+          ]
+        ],
+        "key": [],
+        "door": [],
+        "hazard_count": 2,
+        "resource": [
+          [
+            3,
+            3
+          ]
+        ],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 2,
+        "resource_level": 1,
+        "body_energy": 0.6399999999999999
+      },
+      "hypothesis_state": {
+        "semantic_action": 5,
+        "target": [
+          1,
+          4
+        ],
+        "need_key": false,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 5,
+        "behavior": {
+          "action": 5,
+          "inspect": 4,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 4,
+          "memory_project": 1,
+          "memory_partner": 0,
+          "memory_skill": 5
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 5,
+      "obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 5,
+        "grid": [
+          "#####??",
+          "#.AHG.?",
+          "#..H.??",
+          "?..R???",
+          "??#????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.025,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "3",
+      "next_obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 6,
+        "grid": [
+          "####???",
+          "#A.HG??",
+          "#..H???",
+          "#..????",
+          "?#?????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.030000000000000002,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move"
+      ],
+      "score_delta": -0.005,
+      "score": -0.030000000000000002,
+      "normalized_score": 0.0,
+      "memory_recall": {
+        "visited_cells": 2,
+        "goal": [
+          [
+            1,
+            4
+          ]
+        ],
+        "key": [],
+        "door": [],
+        "hazard_count": 2,
+        "resource": [
+          [
+            3,
+            3
+          ]
+        ],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 2,
+        "resource_level": 1,
+        "body_energy": 0.6000000000000001
+      },
+      "hypothesis_state": {
+        "semantic_action": 3,
+        "target": [
+          1,
+          4
+        ],
+        "need_key": false,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 3,
+        "behavior": {
+          "action": 3,
+          "inspect": 3,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 1,
+          "memory_project": 3,
+          "memory_partner": 0,
+          "memory_skill": 3
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 6,
+      "obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 6,
+        "grid": [
+          "####???",
+          "#A.HG??",
+          "#..H???",
+          "#..????",
+          "?#?????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.030000000000000002,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "4",
+      "next_obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 7,
+        "grid": [
+          "#####??",
+          "#.AHG.?",
+          "#..H.??",
+          "?..R???",
+          "??#????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.035,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move"
+      ],
+      "score_delta": -0.005,
+      "score": -0.035,
+      "normalized_score": 0.0,
+      "memory_recall": {
+        "visited_cells": 2,
+        "goal": [
+          [
+            1,
+            4
+          ]
+        ],
+        "key": [],
+        "door": [],
+        "hazard_count": 2,
+        "resource": [
+          [
+            3,
+            3
+          ]
+        ],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 2,
+        "resource_level": 1,
+        "body_energy": 0.56
+      },
+      "hypothesis_state": {
+        "semantic_action": 5,
+        "target": [
+          1,
+          4
+        ],
+        "need_key": false,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 5,
+        "behavior": {
+          "action": 5,
+          "inspect": 4,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 0,
+          "memory_project": 1,
+          "memory_partner": 0,
+          "memory_skill": 5
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 7,
+      "obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 7,
+        "grid": [
+          "#####??",
+          "#.AHG.?",
+          "#..H.??",
+          "?..R???",
+          "??#????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.035,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "3",
+      "next_obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 8,
+        "grid": [
+          "####???",
+          "#A.HG??",
+          "#..H???",
+          "#..????",
+          "?#?????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.04,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move"
+      ],
+      "score_delta": -0.005,
+      "score": -0.04,
+      "normalized_score": 0.0,
+      "memory_recall": {
+        "visited_cells": 2,
+        "goal": [
+          [
+            1,
+            4
+          ]
+        ],
+        "key": [],
+        "door": [],
+        "hazard_count": 2,
+        "resource": [
+          [
+            3,
+            3
+          ]
+        ],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 2,
+        "resource_level": 1,
+        "body_energy": 0.52
+      },
+      "hypothesis_state": {
+        "semantic_action": 3,
+        "target": [
+          1,
+          4
+        ],
+        "need_key": false,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 3,
+        "behavior": {
+          "action": 3,
+          "inspect": 4,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 15,
+          "memory_project": 3,
+          "memory_partner": 0,
+          "memory_skill": 3
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 8,
+      "obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 8,
+        "grid": [
+          "####???",
+          "#A.HG??",
+          "#..H???",
+          "#..????",
+          "?#?????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.04,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "4",
+      "next_obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 9,
+        "grid": [
+          "#####??",
+          "#.AHG.?",
+          "#..H.??",
+          "?..R???",
+          "??#????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.045,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move"
+      ],
+      "score_delta": -0.005,
+      "score": -0.045,
+      "normalized_score": 0.0,
+      "memory_recall": {
+        "visited_cells": 2,
+        "goal": [
+          [
+            1,
+            4
+          ]
+        ],
+        "key": [],
+        "door": [],
+        "hazard_count": 2,
+        "resource": [
+          [
+            3,
+            3
+          ]
+        ],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 2,
+        "resource_level": 1,
+        "body_energy": 0.4799999999999999
+      },
+      "hypothesis_state": {
+        "semantic_action": 5,
+        "target": [
+          1,
+          4
+        ],
+        "need_key": false,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 5,
+        "behavior": {
+          "action": 5,
+          "inspect": 4,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 3,
+          "memory_project": 1,
+          "memory_partner": 0,
+          "memory_skill": 5
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 9,
+      "obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 9,
+        "grid": [
+          "#####??",
+          "#.AHG.?",
+          "#..H.??",
+          "?..R???",
+          "??#????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.045,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "3",
+      "next_obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 10,
+        "grid": [
+          "####???",
+          "#A.HG??",
+          "#..H???",
+          "#..????",
+          "?#?????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.049999999999999996,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move"
+      ],
+      "score_delta": -0.005,
+      "score": -0.049999999999999996,
+      "normalized_score": 0.0,
+      "memory_recall": {
+        "visited_cells": 2,
+        "goal": [
+          [
+            1,
+            4
+          ]
+        ],
+        "key": [],
+        "door": [],
+        "hazard_count": 2,
+        "resource": [
+          [
+            3,
+            3
+          ]
+        ],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 2,
+        "resource_level": 1,
+        "body_energy": 0.44
+      },
+      "hypothesis_state": {
+        "semantic_action": 3,
+        "target": [
+          1,
+          4
+        ],
+        "need_key": false,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 3,
+        "behavior": {
+          "action": 3,
+          "inspect": 4,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 17,
+          "memory_project": 3,
+          "memory_partner": 0,
+          "memory_skill": 3
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 10,
+      "obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 10,
+        "grid": [
+          "####???",
+          "#A.HG??",
+          "#..H???",
+          "#..????",
+          "?#?????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.049999999999999996,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "4",
+      "next_obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 11,
+        "grid": [
+          "#####??",
+          "#.AHG.?",
+          "#..H.??",
+          "?..R???",
+          "??#????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.05499999999999999,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move"
+      ],
+      "score_delta": -0.005,
+      "score": -0.05499999999999999,
+      "normalized_score": 0.0,
+      "memory_recall": {
+        "visited_cells": 2,
+        "goal": [
+          [
+            1,
+            4
+          ]
+        ],
+        "key": [],
+        "door": [],
+        "hazard_count": 2,
+        "resource": [
+          [
+            3,
+            3
+          ]
+        ],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 2,
+        "resource_level": 1,
+        "body_energy": 0.39999999999999997
+      },
+      "hypothesis_state": {
+        "semantic_action": 5,
+        "target": [
+          1,
+          4
+        ],
+        "need_key": false,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 5,
+        "behavior": {
+          "action": 5,
+          "inspect": 4,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 4,
+          "memory_project": 1,
+          "memory_partner": 0,
+          "memory_skill": 5
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 11,
+      "obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 11,
+        "grid": [
+          "#####??",
+          "#.AHG.?",
+          "#..H.??",
+          "?..R???",
+          "??#????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.05499999999999999,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "3",
+      "next_obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 12,
+        "grid": [
+          "####???",
+          "#A.HG??",
+          "#..H???",
+          "#..????",
+          "?#?????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.05999999999999999,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move"
+      ],
+      "score_delta": -0.005,
+      "score": -0.05999999999999999,
+      "normalized_score": 0.0,
+      "memory_recall": {
+        "visited_cells": 2,
+        "goal": [
+          [
+            1,
+            4
+          ]
+        ],
+        "key": [],
+        "door": [],
+        "hazard_count": 2,
+        "resource": [
+          [
+            3,
+            3
+          ]
+        ],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 2,
+        "resource_level": 1,
+        "body_energy": 0.36000000000000004
+      },
+      "hypothesis_state": {
+        "semantic_action": 3,
+        "target": [
+          1,
+          4
+        ],
+        "need_key": false,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 3,
+        "behavior": {
+          "action": 3,
+          "inspect": 3,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 1,
+          "memory_project": 3,
+          "memory_partner": 0,
+          "memory_skill": 3
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 12,
+      "obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 12,
+        "grid": [
+          "####???",
+          "#A.HG??",
+          "#..H???",
+          "#..????",
+          "?#?????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.05999999999999999,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "4",
+      "next_obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 13,
+        "grid": [
+          "#####??",
+          "#.AHG.?",
+          "#..H.??",
+          "?..R???",
+          "??#????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.06499999999999999,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move"
+      ],
+      "score_delta": -0.005,
+      "score": -0.06499999999999999,
+      "normalized_score": 0.0,
+      "memory_recall": {
+        "visited_cells": 2,
+        "goal": [
+          [
+            1,
+            4
+          ]
+        ],
+        "key": [],
+        "door": [],
+        "hazard_count": 2,
+        "resource": [
+          [
+            3,
+            3
+          ]
+        ],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 2,
+        "resource_level": 1,
+        "body_energy": 0.32
+      },
+      "hypothesis_state": {
+        "semantic_action": 5,
+        "target": [
+          1,
+          4
+        ],
+        "need_key": false,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 5,
+        "behavior": {
+          "action": 5,
+          "inspect": 4,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 0,
+          "memory_project": 1,
+          "memory_partner": 0,
+          "memory_skill": 5
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 13,
+      "obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 13,
+        "grid": [
+          "#####??",
+          "#.AHG.?",
+          "#..H.??",
+          "?..R???",
+          "??#????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.06499999999999999,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "3",
+      "next_obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 14,
+        "grid": [
+          "####???",
+          "#A.HG??",
+          "#..H???",
+          "#..????",
+          "?#?????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.06999999999999999,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move"
+      ],
+      "score_delta": -0.005,
+      "score": -0.06999999999999999,
+      "normalized_score": 0.0,
+      "memory_recall": {
+        "visited_cells": 2,
+        "goal": [
+          [
+            1,
+            4
+          ]
+        ],
+        "key": [],
+        "door": [],
+        "hazard_count": 2,
+        "resource": [
+          [
+            3,
+            3
+          ]
+        ],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 2,
+        "resource_level": 1,
+        "body_energy": 0.27999999999999997
+      },
+      "hypothesis_state": {
+        "semantic_action": 3,
+        "target": [
+          1,
+          4
+        ],
+        "need_key": false,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 3,
+        "behavior": {
+          "action": 3,
+          "inspect": 4,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 15,
+          "memory_project": 3,
+          "memory_partner": 0,
+          "memory_skill": 3
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 14,
+      "obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 14,
+        "grid": [
+          "####???",
+          "#A.HG??",
+          "#..H???",
+          "#..????",
+          "?#?????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.06999999999999999,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "4",
+      "next_obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 15,
+        "grid": [
+          "#####??",
+          "#.AHG.?",
+          "#..H.??",
+          "?..R???",
+          "??#????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.075,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move"
+      ],
+      "score_delta": -0.005,
+      "score": -0.075,
+      "normalized_score": 0.0,
+      "memory_recall": {
+        "visited_cells": 2,
+        "goal": [
+          [
+            1,
+            4
+          ]
+        ],
+        "key": [],
+        "door": [],
+        "hazard_count": 2,
+        "resource": [
+          [
+            3,
+            3
+          ]
+        ],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 2,
+        "resource_level": 1,
+        "body_energy": 0.23999999999999994
+      },
+      "hypothesis_state": {
+        "semantic_action": 5,
+        "target": [
+          1,
+          4
+        ],
+        "need_key": false,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 5,
+        "behavior": {
+          "action": 5,
+          "inspect": 4,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 3,
+          "memory_project": 1,
+          "memory_partner": 0,
+          "memory_skill": 5
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 15,
+      "obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 15,
+        "grid": [
+          "#####??",
+          "#.AHG.?",
+          "#..H.??",
+          "?..R???",
+          "??#????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.075,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "3",
+      "next_obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 16,
+        "grid": [
+          "####???",
+          "#A.HG??",
+          "#..H???",
+          "#..????",
+          "?#?????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.08,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move"
+      ],
+      "score_delta": -0.005,
+      "score": -0.08,
+      "normalized_score": 0.0,
+      "memory_recall": {
+        "visited_cells": 2,
+        "goal": [
+          [
+            1,
+            4
+          ]
+        ],
+        "key": [],
+        "door": [],
+        "hazard_count": 2,
+        "resource": [
+          [
+            3,
+            3
+          ]
+        ],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 2,
+        "resource_level": 1,
+        "body_energy": 0.2
+      },
+      "hypothesis_state": {
+        "semantic_action": 3,
+        "target": [
+          1,
+          4
+        ],
+        "need_key": false,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 3,
+        "behavior": {
+          "action": 3,
+          "inspect": 4,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 17,
+          "memory_project": 3,
+          "memory_partner": 0,
+          "memory_skill": 3
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 16,
+      "obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 16,
+        "grid": [
+          "####???",
+          "#A.HG??",
+          "#..H???",
+          "#..????",
+          "?#?????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.08,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "4",
+      "next_obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 17,
+        "grid": [
+          "#####??",
+          "#.AHG.?",
+          "#..H.??",
+          "?..R???",
+          "??#????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.085,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move"
+      ],
+      "score_delta": -0.005,
+      "score": -0.085,
+      "normalized_score": 0.0,
+      "memory_recall": {
+        "visited_cells": 2,
+        "goal": [
+          [
+            1,
+            4
+          ]
+        ],
+        "key": [],
+        "door": [],
+        "hazard_count": 2,
+        "resource": [
+          [
+            3,
+            3
+          ]
+        ],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 2,
+        "resource_level": 1,
+        "body_energy": 0.15999999999999998
+      },
+      "hypothesis_state": {
+        "semantic_action": 5,
+        "target": [
+          1,
+          4
+        ],
+        "need_key": false,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 5,
+        "behavior": {
+          "action": 5,
+          "inspect": 4,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 4,
+          "memory_project": 1,
+          "memory_partner": 0,
+          "memory_skill": 5
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 17,
+      "obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 17,
+        "grid": [
+          "#####??",
+          "#.AHG.?",
+          "#..H.??",
+          "?..R???",
+          "??#????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.085,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "3",
+      "next_obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 18,
+        "grid": [
+          "####???",
+          "#A.HG??",
+          "#..H???",
+          "#..????",
+          "?#?????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.09000000000000001,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move"
+      ],
+      "score_delta": -0.005,
+      "score": -0.09000000000000001,
+      "normalized_score": 0.0,
+      "memory_recall": {
+        "visited_cells": 2,
+        "goal": [
+          [
+            1,
+            4
+          ]
+        ],
+        "key": [],
+        "door": [],
+        "hazard_count": 2,
+        "resource": [
+          [
+            3,
+            3
+          ]
+        ],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 2,
+        "resource_level": 1,
+        "body_energy": 0.11999999999999994
+      },
+      "hypothesis_state": {
+        "semantic_action": 3,
+        "target": [
+          1,
+          4
+        ],
+        "need_key": false,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 3,
+        "behavior": {
+          "action": 3,
+          "inspect": 4,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 1,
+          "memory_project": 3,
+          "memory_partner": 0,
+          "memory_skill": 3
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 18,
+      "obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 18,
+        "grid": [
+          "####???",
+          "#A.HG??",
+          "#..H???",
+          "#..????",
+          "?#?????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.09000000000000001,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "4",
+      "next_obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 19,
+        "grid": [
+          "#####??",
+          "#.AHG.?",
+          "#..H.??",
+          "?..R???",
+          "??#????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.09500000000000001,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move"
+      ],
+      "score_delta": -0.005,
+      "score": -0.09500000000000001,
+      "normalized_score": 0.0,
+      "memory_recall": {
+        "visited_cells": 2,
+        "goal": [
+          [
+            1,
+            4
+          ]
+        ],
+        "key": [],
+        "door": [],
+        "hazard_count": 2,
+        "resource": [
+          [
+            3,
+            3
+          ]
+        ],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 2,
+        "resource_level": 1,
+        "body_energy": 0.1
+      },
+      "hypothesis_state": {
+        "semantic_action": 5,
+        "target": [
+          1,
+          4
+        ],
+        "need_key": false,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 5,
+        "behavior": {
+          "action": 5,
+          "inspect": 4,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 0,
+          "memory_project": 1,
+          "memory_partner": 0,
+          "memory_skill": 5
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 19,
+      "obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 19,
+        "grid": [
+          "#####??",
+          "#.AHG.?",
+          "#..H.??",
+          "?..R???",
+          "??#????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.09500000000000001,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "3",
+      "next_obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 20,
+        "grid": [
+          "####???",
+          "#A.HG??",
+          "#..H???",
+          "#..????",
+          "?#?????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.10000000000000002,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move"
+      ],
+      "score_delta": -0.005,
+      "score": -0.10000000000000002,
+      "normalized_score": 0.0,
+      "memory_recall": {
+        "visited_cells": 2,
+        "goal": [
+          [
+            1,
+            4
+          ]
+        ],
+        "key": [],
+        "door": [],
+        "hazard_count": 2,
+        "resource": [
+          [
+            3,
+            3
+          ]
+        ],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 2,
+        "resource_level": 1,
+        "body_energy": 0.1
+      },
+      "hypothesis_state": {
+        "semantic_action": 3,
+        "target": [
+          1,
+          4
+        ],
+        "need_key": false,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 3,
+        "behavior": {
+          "action": 3,
+          "inspect": 4,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 15,
+          "memory_project": 3,
+          "memory_partner": 0,
+          "memory_skill": 3
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 20,
+      "obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 20,
+        "grid": [
+          "####???",
+          "#A.HG??",
+          "#..H???",
+          "#..????",
+          "?#?????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.10000000000000002,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "4",
+      "next_obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 21,
+        "grid": [
+          "#####??",
+          "#.AHG.?",
+          "#..H.??",
+          "?..R???",
+          "??#????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.10500000000000002,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move"
+      ],
+      "score_delta": -0.005,
+      "score": -0.10500000000000002,
+      "normalized_score": 0.0,
+      "memory_recall": {
+        "visited_cells": 2,
+        "goal": [
+          [
+            1,
+            4
+          ]
+        ],
+        "key": [],
+        "door": [],
+        "hazard_count": 2,
+        "resource": [
+          [
+            3,
+            3
+          ]
+        ],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 2,
+        "resource_level": 1,
+        "body_energy": 0.1
+      },
+      "hypothesis_state": {
+        "semantic_action": 5,
+        "target": [
+          1,
+          4
+        ],
+        "need_key": false,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 5,
+        "behavior": {
+          "action": 5,
+          "inspect": 4,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 3,
+          "memory_project": 1,
+          "memory_partner": 0,
+          "memory_skill": 5
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    },
+    {
+      "step": 21,
+      "obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 21,
+        "grid": [
+          "#####??",
+          "#.AHG.?",
+          "#..H.??",
+          "?..R???",
+          "??#????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.10500000000000002,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "3",
+      "next_obs": {
+        "task_id": "arcagi3/public_hazard_detour",
+        "episode_id": "arcagi3/public_hazard_detour/episode_1",
+        "step_index": 22,
+        "grid": [
+          "####???",
+          "#A.HG??",
+          "#..H???",
+          "#..????",
+          "?#?????"
+        ],
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_hazard_detour",
+          "score": -0.11000000000000003,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "event_delta": [
+        "move",
+        "step_limit"
+      ],
+      "score_delta": -0.005,
+      "score": -0.11000000000000003,
+      "normalized_score": 0.0,
+      "memory_recall": {
+        "visited_cells": 2,
+        "goal": [
+          [
+            1,
+            4
+          ]
+        ],
+        "key": [],
+        "door": [],
+        "hazard_count": 2,
+        "resource": [
+          [
+            3,
+            3
+          ]
+        ],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 2,
+        "resource_level": 1,
+        "body_energy": 0.1
+      },
+      "hypothesis_state": {
+        "semantic_action": 3,
+        "target": [
+          1,
+          4
+        ],
+        "need_key": false,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 3,
+        "behavior": {
+          "action": 3,
+          "inspect": 4,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 17,
+          "memory_project": 3,
+          "memory_partner": 0,
+          "memory_skill": 3
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    }
+  ]
+}

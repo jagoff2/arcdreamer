@@ -1,0 +1,196 @@
+{
+  "metadata": {
+    "controller": "explorer_normal",
+    "task_id": "arcagi3/public_click_beacon",
+    "episode_id": "arcagi3/public_click_beacon/episode_2",
+    "fixture_source": "docs/arcagi3_public_fixtures.json"
+  },
+  "summary": {
+    "solved": true,
+    "score": 1.0,
+    "normalized_score": 1.0,
+    "steps": 1,
+    "invalid_action_rate": 0.0,
+    "unique_states": 2,
+    "useful_events": 1,
+    "action_entropy": -0.0,
+    "repeat_collapse": 1.0,
+    "actions": [
+      "click:2:1"
+    ]
+  },
+  "steps": [
+    {
+      "step": 0,
+      "obs": {
+        "task_id": "arcagi3/public_click_beacon",
+        "episode_id": "arcagi3/public_click_beacon/episode_2",
+        "step_index": 0,
+        "grid": [
+          ".....",
+          "..G..",
+          ".A...",
+          "..R..",
+          "....."
+        ],
+        "available_actions": [
+          "click:0:0",
+          "click:1:0",
+          "click:2:0",
+          "click:3:0",
+          "click:4:0",
+          "click:0:1",
+          "click:1:1",
+          "click:2:1",
+          "click:3:1",
+          "click:4:1",
+          "click:0:2",
+          "click:1:2",
+          "click:2:2",
+          "click:3:2",
+          "click:4:2",
+          "click:0:3",
+          "click:1:3",
+          "click:2:3",
+          "click:3:3",
+          "click:4:3",
+          "click:0:4",
+          "click:1:4",
+          "click:2:4",
+          "click:3:4",
+          "click:4:4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_click_beacon",
+          "score": 0.0,
+          "normalized_score": 0.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "RUNNING"
+        }
+      },
+      "action": "click:2:1",
+      "next_obs": {
+        "task_id": "arcagi3/public_click_beacon",
+        "episode_id": "arcagi3/public_click_beacon/episode_2",
+        "step_index": 1,
+        "grid": [
+          ".....",
+          "..G..",
+          ".A...",
+          "..R..",
+          "....."
+        ],
+        "available_actions": [
+          "click:0:0",
+          "click:1:0",
+          "click:2:0",
+          "click:3:0",
+          "click:4:0",
+          "click:0:1",
+          "click:1:1",
+          "click:2:1",
+          "click:3:1",
+          "click:4:1",
+          "click:0:2",
+          "click:1:2",
+          "click:2:2",
+          "click:3:2",
+          "click:4:2",
+          "click:0:3",
+          "click:1:3",
+          "click:2:3",
+          "click:3:3",
+          "click:4:3",
+          "click:0:4",
+          "click:1:4",
+          "click:2:4",
+          "click:3:4",
+          "click:4:4",
+          "wait"
+        ],
+        "extras": {
+          "fixture_id": "public_click_beacon",
+          "score": 1.0,
+          "normalized_score": 1.0,
+          "have_key": false,
+          "door_open": false,
+          "game_state": "WIN"
+        }
+      },
+      "event_delta": [
+        "goal_clicked"
+      ],
+      "score_delta": 1.0,
+      "score": 1.0,
+      "normalized_score": 1.0,
+      "memory_recall": {
+        "visited_cells": 1,
+        "goal": [
+          [
+            1,
+            2
+          ]
+        ],
+        "key": [],
+        "door": [],
+        "hazard_count": 0,
+        "resource": [
+          [
+            3,
+            2
+          ]
+        ],
+        "have_key": false,
+        "door_open": false
+      },
+      "drive": {
+        "novelty": 1.0,
+        "hazard_level": 0,
+        "resource_level": 1,
+        "body_energy": 1.0
+      },
+      "hypothesis_state": {
+        "semantic_action": 5,
+        "target": [
+          1,
+          2
+        ],
+        "need_key": false,
+        "have_key": false,
+        "confidence": 0.95
+      },
+      "policy": {
+        "semantic_action": 5,
+        "behavior": {
+          "action": 5,
+          "inspect": 4,
+          "private_action": 4,
+          "speech_action": 4,
+          "memory_state": 0,
+          "memory_project": 1,
+          "memory_partner": 0,
+          "memory_skill": 5
+        },
+        "causal_trace": {
+          "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+          "causal_channels": [
+            "action_logits",
+            "inspect_logits",
+            "private_action_logits",
+            "speech_action_logits",
+            "memory_state_logits",
+            "memory_project_logits",
+            "memory_partner_logits",
+            "memory_skill_logits"
+          ],
+          "structured_heads_disabled": true,
+          "probe_modules_present": true,
+          "old_head_logits_used_for_behavior": false,
+          "behavior_source": "unified_affordance_channels_only"
+        }
+      }
+    }
+  ]
+}
