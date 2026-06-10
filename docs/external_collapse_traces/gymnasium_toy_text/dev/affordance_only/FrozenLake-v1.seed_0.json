@@ -1,0 +1,417 @@
+{
+  "metadata": {
+    "suite_id": "gymnasium_toy_text",
+    "task_id": "FrozenLake-v1",
+    "variant": "affordance_only",
+    "split": "dev",
+    "seed": 0
+  },
+  "summary": {
+    "suite_id": "gymnasium_toy_text",
+    "task_id": "FrozenLake-v1",
+    "split": "dev",
+    "variant": "affordance_only",
+    "seed": 0,
+    "score": 0.0,
+    "normalized_score": 0.0,
+    "solved": false,
+    "steps": 3,
+    "invalid_action_rate": 0.0,
+    "unique_states": 4,
+    "useful_events": 0,
+    "action_entropy": -0.0,
+    "repeat_collapse": 1.0,
+    "actions": [
+      "2",
+      "2",
+      "2"
+    ],
+    "controller_summary": {
+      "changed_actions": 0,
+      "reason_counts": {
+        "valence": 0,
+        "affordance": 0,
+        "loop": 0
+      },
+      "affordance_observations": 3,
+      "valence": {
+        "updates": 3,
+        "nonzero_updates": 3,
+        "known_actions": 1,
+        "known_state_actions": 3,
+        "no_effect_state_actions": 0
+      },
+      "forced_cycle": false,
+      "device": {
+        "adapter_device": "cuda",
+        "explorer_parameter_device": "cuda:0",
+        "cuda_model_parameters": true
+      }
+    },
+    "scorecard": {}
+  },
+  "steps": [
+    {
+      "step": 0,
+      "obs": {
+        "task_id": "external/gymnasium_toy_text/FrozenLake-v1",
+        "episode_id": "external/gymnasium_toy_text/FrozenLake-v1/seed_0",
+        "step_index": 0,
+        "obs_hash": "8a008aed5cba6a52",
+        "grid_summary": {
+          "shape": [
+            4,
+            4
+          ],
+          "hash": "92af9fb968e7ccd3",
+          "counts": {
+            "0": 15,
+            "2": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_toy_text",
+          "task_id": "FrozenLake-v1",
+          "raw_observation": 0,
+          "score": 0.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "8c3fd92b00cf46ac",
+      "score_delta": 0.0,
+      "event_delta": [],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {
+          "visited_cells": 1,
+          "goal": [],
+          "key": [],
+          "door": [],
+          "hazard_count": 0,
+          "resource": [],
+          "have_key": false,
+          "door_open": false
+        },
+        "drive": {
+          "novelty": 1.0,
+          "hazard_level": 0,
+          "resource_level": 0,
+          "body_energy": 1.0
+        },
+        "hypothesis_state": {
+          "semantic_action": 1,
+          "target": null,
+          "need_key": false,
+          "have_key": false,
+          "confidence": 0.45
+        },
+        "policy": {
+          "variant": "affordance_only",
+          "base_action": "2",
+          "chosen_action": "2",
+          "changed_action": false,
+          "state_key": "ed79d7d118b22561",
+          "top_base_scores": {
+            "2": 0.55,
+            "4": 0.55,
+            "1": -0.4,
+            "3": -0.4
+          },
+          "top_adjusted_scores": {
+            "2": 0.55,
+            "4": 0.55,
+            "1": -0.468,
+            "3": -0.468
+          },
+          "components": {
+            "affordance": {
+              "2": 0.0,
+              "4": 0.0,
+              "1": -0.068,
+              "3": -0.068
+            }
+          },
+          "affordance_summary": {
+            "shape": [
+              4,
+              4
+            ],
+            "background": 0,
+            "non_background_count": 1,
+            "changed_count": 0,
+            "rare_value_count": 1,
+            "click_region_count": 0,
+            "click_regions_sample": []
+          },
+          "valence": {
+            "updates": 0,
+            "nonzero_updates": 0,
+            "known_actions": 0,
+            "known_state_actions": 0,
+            "no_effect_state_actions": 0
+          },
+          "forced_cycle": false
+        }
+      },
+      "failure_class": "no_external_reward"
+    },
+    {
+      "step": 1,
+      "obs": {
+        "task_id": "external/gymnasium_toy_text/FrozenLake-v1",
+        "episode_id": "external/gymnasium_toy_text/FrozenLake-v1/seed_0",
+        "step_index": 1,
+        "obs_hash": "8c3fd92b00cf46ac",
+        "grid_summary": {
+          "shape": [
+            4,
+            4
+          ],
+          "hash": "7ff3f1bf29a2be79",
+          "counts": {
+            "0": 15,
+            "2": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_toy_text",
+          "task_id": "FrozenLake-v1",
+          "raw_observation": 4,
+          "score": 0.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "701da9c5de73601d",
+      "score_delta": 0.0,
+      "event_delta": [],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {
+          "visited_cells": 2,
+          "goal": [],
+          "key": [],
+          "door": [],
+          "hazard_count": 0,
+          "resource": [],
+          "have_key": false,
+          "door_open": false
+        },
+        "drive": {
+          "novelty": 1.0,
+          "hazard_level": 0,
+          "resource_level": 0,
+          "body_energy": 0.96
+        },
+        "hypothesis_state": {
+          "semantic_action": 1,
+          "target": null,
+          "need_key": false,
+          "have_key": false,
+          "confidence": 0.45
+        },
+        "policy": {
+          "variant": "affordance_only",
+          "base_action": "2",
+          "chosen_action": "2",
+          "changed_action": false,
+          "state_key": "e317543eeb9c289c",
+          "top_base_scores": {
+            "2": 0.55,
+            "4": 0.55,
+            "1": -0.05,
+            "3": -0.4
+          },
+          "top_adjusted_scores": {
+            "2": 0.55,
+            "4": 0.55,
+            "1": -0.05,
+            "3": -0.468
+          },
+          "components": {
+            "affordance": {
+              "1": 0.0,
+              "2": 0.0,
+              "4": 0.0,
+              "3": -0.068
+            }
+          },
+          "affordance_summary": {
+            "shape": [
+              4,
+              4
+            ],
+            "background": 0,
+            "non_background_count": 1,
+            "changed_count": 0,
+            "rare_value_count": 1,
+            "click_region_count": 0,
+            "click_regions_sample": []
+          },
+          "valence": {
+            "updates": 1,
+            "nonzero_updates": 1,
+            "known_actions": 1,
+            "known_state_actions": 1,
+            "no_effect_state_actions": 0
+          },
+          "forced_cycle": false
+        }
+      },
+      "failure_class": "no_external_reward"
+    },
+    {
+      "step": 2,
+      "obs": {
+        "task_id": "external/gymnasium_toy_text/FrozenLake-v1",
+        "episode_id": "external/gymnasium_toy_text/FrozenLake-v1/seed_0",
+        "step_index": 2,
+        "obs_hash": "701da9c5de73601d",
+        "grid_summary": {
+          "shape": [
+            4,
+            4
+          ],
+          "hash": "54a868249265493d",
+          "counts": {
+            "0": 15,
+            "2": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_toy_text",
+          "task_id": "FrozenLake-v1",
+          "raw_observation": 8,
+          "score": 0.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "080c7c01df57254b",
+      "score_delta": 0.0,
+      "event_delta": [
+        "terminated"
+      ],
+      "terminal": true,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {
+          "visited_cells": 3,
+          "goal": [],
+          "key": [],
+          "door": [],
+          "hazard_count": 0,
+          "resource": [],
+          "have_key": false,
+          "door_open": false
+        },
+        "drive": {
+          "novelty": 0.0,
+          "hazard_level": 0,
+          "resource_level": 0,
+          "body_energy": 0.92
+        },
+        "hypothesis_state": {
+          "semantic_action": 1,
+          "target": null,
+          "need_key": false,
+          "have_key": false,
+          "confidence": 0.45
+        },
+        "policy": {
+          "variant": "affordance_only",
+          "base_action": "2",
+          "chosen_action": "2",
+          "changed_action": false,
+          "state_key": "06df19b75323d784",
+          "top_base_scores": {
+            "2": 0.55,
+            "4": 0.55,
+            "1": -0.05,
+            "3": -0.4
+          },
+          "top_adjusted_scores": {
+            "2": 0.55,
+            "4": 0.55,
+            "1": -0.05,
+            "3": -0.468
+          },
+          "components": {
+            "affordance": {
+              "1": 0.0,
+              "2": 0.0,
+              "4": 0.0,
+              "3": -0.068
+            }
+          },
+          "affordance_summary": {
+            "shape": [
+              4,
+              4
+            ],
+            "background": 0,
+            "non_background_count": 1,
+            "changed_count": 0,
+            "rare_value_count": 1,
+            "click_region_count": 0,
+            "click_regions_sample": []
+          },
+          "valence": {
+            "updates": 2,
+            "nonzero_updates": 2,
+            "known_actions": 1,
+            "known_state_actions": 2,
+            "no_effect_state_actions": 0
+          },
+          "forced_cycle": false
+        }
+      },
+      "failure_class": "no_external_reward"
+    }
+  ]
+}

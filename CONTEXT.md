@@ -3419,3 +3419,415 @@
   - None.
 - Exact next action:
   - Commit this final context note and mark the external-generalization goal complete.
+
+## Step 0144 - External collapse experiment goal intake started
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `git status --short --branch`
+  - `Get-Content -Raw GOAL.MD`
+  - `Get-Content -Tail 120 CONTEXT.MD`
+  - `python -c "import json, pathlib, hashlib; paths=['GOAL.MD','CONTEXT.MD','docs/external_generalization_report.json','docs/arcagi3_failure_report.json']; ..."`
+- Observed results/errors:
+  - Worktree started clean for the new collapse experiment: `## main`.
+  - `GOAL.MD` was reread.
+  - Recent `CONTEXT.MD` was reread through Step 0143.
+  - Required file hashes at intake:
+    - `GOAL.MD`: `7889C5DED870918F1FB4831236725FFE2325A43664837EE37A31FB07799DF246`
+    - `CONTEXT.MD`: `FEA104476DDBC781420889F08BE54D796C0C0532BA6BE2AC1B7B39643A21F0AA`
+    - `docs/external_generalization_report.json`: `34D5E34D0249DEDEA3AAA1A2E31DB33FCAA0CC1DBA70A8F77B30F40628E4C2AC`
+    - `docs/arcagi3_failure_report.json`: `3B9AC146B3BF882757C5A9F24151586EDB019D0F85E652BA4BFEF2ACE81FC8F4`
+- Baseline facts/hypotheses/variants:
+  - Need answer by external experiment whether minimal generic changes reduce external action-collapse and improve external score.
+  - Allowed variants to test: unchanged explorer, valence only, affordance only, loop-aversion only, valence+affordance, valence+affordance+loop, null patch control.
+  - Hypothesis H1: consequence valence from public reward/event/no-op/change can reduce repeated no-effect actions without task-specific scripts.
+  - Hypothesis H2: generic affordance summaries can alter action choice by changing public observation features, but may not improve sealed external score.
+  - Hypothesis H3: loop aversion after exact repeated no-effect in same observed state can reduce repeat collapse, but may trade off score and fail the improvement gate.
+  - Success gate: official ARC repeat collapse drop `>=0.25` and mean normalized score improvement `>=0.01` over unchanged explorer, without reducing best non-ARC sealed score by more than `0.05`; otherwise outcome B.
+- Current blockers:
+  - Need extract exact baseline metrics and inspect adapter/evaluator code to implement wrappers without task-specific behavior.
+- Exact next action:
+  - Query existing reports for baseline metrics and inspect `src.arcagi3_adapter`, `src.external_eval`, `src.arcagi3_diagnose`, and official runtime interfaces.
+
+## Step 0145 - Baseline metrics and action surfaces inspected
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -c "import json; r=json.load(open('docs/external_generalization_report.json')); f=json.load(open('docs/arcagi3_failure_report.json')); ..."`
+  - `rg -n "class ARCAGI3Adapter|def choose_action|def observe_transition|def reset|action_logits|available_actions|policy" src\arcagi3_adapter.py src\external_eval.py src\arcagi3_diagnose.py src\arcagi3_official_eval.py src\arcagi3_eval.py`
+  - `Get-Content -Raw src\arcagi3_baselines.py`
+  - `Get-Content -Raw src\arcagi3_trace.py`
+- Observed results/errors:
+  - Existing official ARC explorer baseline: mean normalized score `0.0`, solve rate `0.0`, repeat collapse `0.9185028932649604`, entropy `0.28457424316200924`, useful events `0.0`, invalid action rate `0.0`.
+  - Official ARC best baseline score from prior report: `coverage_graph_exploration`, `novelty_first`, `greedy_observable_score_delta`, and `oracle_free_observed_graph_bfs` each reached mean normalized score `0.004`; coverage repeat collapse `0.0749172119575549`.
+  - Gymnasium Classic Control explorer baseline: mean normalized score `0.11666666666666665`, repeat collapse `1.0`; best baseline coverage/observed BFS score `0.48333333333333334`.
+  - Gymnasium ToyText explorer baseline: mean normalized score `0.0`, repeat collapse `1.0`; best baseline score `0.0`.
+  - Existing baselines already cover required comparison set: random legal, repeat, coverage/graph, novelty-first, greedy score/event, observed-graph BFS.
+  - `ARCAGI3Adapter.choose_action()` and `observe_transition()` are the main model action hooks; external evaluator already normalizes traces and metrics.
+- Current blockers:
+  - Need inspect the detailed adapter diagnostics/logit path before implementing generic rescoring wrappers.
+- Exact next action:
+  - Read the `ARCAGI3Adapter.choose_action()` implementation and official runtime evaluation loop.
+
+## Step 0146 - Adapter and official runtime loop inspected
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `$lines = Get-Content src\arcagi3_adapter.py; $lines[430..560]`
+  - `$lines = Get-Content src\arcagi3_adapter.py; $lines[560..720]`
+  - `$lines = Get-Content src\arcagi3_official_eval.py; $lines[45..120]`
+  - `$lines = Get-Content src\arcagi3_diagnose.py; $lines[300..380]`
+- Observed results/errors:
+  - `ARCAGI3Adapter.choose_action()` computes `action_scores` from public observation/memory/semantic action, selects max over legal actions, and returns diagnostics containing action scores, memory recall, drive, hypothesis state, behavior, and causal trace.
+  - `ARCAGI3Adapter.observe_transition()` updates adapter memory from public transition result.
+  - Official evaluator loop accepts any controller with `choose_action`/`observe_transition` if treated as adapter-like, or `choose`/`observe` baseline protocol otherwise.
+  - Official traces currently record action, event delta, score delta, memory/drive/hypothesis, entropy, repeat collapse, unique states, and useful events.
+  - This supports a generic wrapper that calls the unchanged adapter, then rescales legal action scores from public consequences/no-effect/change summaries without hidden labels or game IDs.
+- Current blockers:
+  - Need implement generic valence/affordance/loop modules and a collapse experiment runner.
+- Exact next action:
+  - Inspect `src.external_eval` helper functions to reuse Gymnasium external environments and trace schema.
+
+## Step 0147 - Reusable external helper surfaces inspected
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `$lines = Get-Content src\external_eval.py; $lines[0..120]`
+  - `$lines = Get-Content src\external_eval.py; $lines[260..430]`
+  - `$lines = Get-Content src\external_eval.py; $lines[430..570]`
+  - `rg -n "class Official|def load_official|def run_official|load_games|official" src\arcagi3_official.py src\arcagi3_official_eval.py`
+- Observed results/errors:
+  - `src.external_eval` exposes reusable observation summary, JSON-safe hashing, Gymnasium external env wrappers, baseline builders, aggregation, and trace schema.
+  - `run_external_episode()` already saves required per-step fields: observation summary/hash, legal actions, chosen action, baseline actions, score/event delta, memory/drive/hypothesis summary, failure class.
+  - Official ARC environment and runner are available through `src.arcagi3_official` and `src.arcagi3_official_eval`; official env uses public frames and legal action IDs.
+  - Need avoid changing `src.external_eval`; collapse experiment can import helpers and write a separate report/traces.
+- Current blockers:
+  - Need implement generic variant wrapper and experiment runner.
+- Exact next action:
+  - Create `src.external_valence.py`, `src.external_affordance.py`, `src.external_collapse_experiment.py`, and `tests/test_external_collapse.py`.
+
+## Step 0148 - Generic valence and affordance modules added
+
+- Files touched:
+  - `src\external_valence.py`
+  - `src\external_affordance.py`
+  - `CONTEXT.MD`
+- Commands run:
+  - None; code patch applied with `apply_patch`.
+- Observed results/errors:
+  - `src.external_valence` now derives runtime consequence values only from public reward, public events, no-effect, invalid action, and visible grid change.
+  - `ConsequenceValence` stores action and state-action EWMA values plus no-effect counts for exact observed state/action pairs.
+  - `src.external_affordance` now summarizes generic visible grid/click-region/change affordances without game IDs, hidden labels, or task semantics.
+  - No solver, baseline controller, hidden goal, official game branch, or action-family cycling was added.
+- Current blockers:
+  - Need implement the collapse experiment runner and report generator.
+- Exact next action:
+  - Add `src.external_collapse_experiment.py`.
+
+## Step 0149 - External collapse experiment runner added
+
+- Files touched:
+  - `src\external_collapse_experiment.py`
+  - `CONTEXT.MD`
+- Commands run:
+  - None; code patch applied with `apply_patch`.
+- Observed results/errors:
+  - Added collapse variants: baseline unchanged explorer, valence only, affordance only, loop-aversion only, valence+affordance, valence+affordance+loop, null patch control.
+  - Variant controller calls the unchanged model adapter for model action scores, then applies only allowed generic calibration from public consequence valence, public affordance summaries, and same-state/action no-effect memory.
+  - Baselines are run only for comparison and trace baseline-action snapshots; they are not used to choose tested variant actions.
+  - Primary variant selection is based on non-ARC dev aggregates only; official ARC remains sealed for the outcome gate.
+  - Official runtime dispatch uses the `.venv` interpreter only when the current interpreter lacks the official ARC runtime; the same repository code and model checkpoint are used.
+- Current blockers:
+  - Need add focused tests and fix any compile/test issues.
+- Exact next action:
+  - Add `tests\test_external_collapse.py`.
+
+## Step 0150 - Focused collapse tests added and source scan self-match fixed
+
+- Files touched:
+  - `tests\test_external_collapse.py`
+  - `src\external_collapse_experiment.py`
+  - `CONTEXT.MD`
+- Commands run:
+  - None; code patch applied with `apply_patch`.
+- Observed results/errors:
+  - Added tests for public valence/no-effect memory, visible-grid affordance bias, loop aversion only after observed no-effect in the same observed state, null patch control preserving the model action, and collapse no-hack source scan.
+  - Patched `no_hack_proof()` blocked literals by string concatenation so the scanner does not self-match its own denylist.
+- Current blockers:
+  - Need compile and run focused collapse tests.
+- Exact next action:
+  - Run `python -m py_compile src\external_valence.py src\external_affordance.py src\external_collapse_experiment.py tests\test_external_collapse.py` and `pytest -q tests\test_external_collapse.py`.
+
+## Step 0151 - New collapse modules compile and focused tests pass
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m py_compile src\external_valence.py src\external_affordance.py src\external_collapse_experiment.py tests\test_external_collapse.py`
+  - `pytest -q tests\test_external_collapse.py`
+- Observed results/errors:
+  - Python compilation passed for the new modules and test.
+  - Focused collapse tests passed: `6 passed in 1.18s`.
+- Current blockers:
+  - Need run the full required external collapse experiment command; official ARC runtime dispatch may be slow.
+- Exact next action:
+  - Run `python -m src.external_collapse_experiment --config external --json-output docs/external_collapse_report.json --trace-dir docs/external_collapse_traces`.
+
+## Step 0152 - Required external collapse experiment command completed
+
+- Files touched:
+  - `docs\external_collapse_report.json`
+  - `docs\external_collapse_report.md`
+  - `docs\external_collapse_traces\...`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m src.external_collapse_experiment --config external --json-output docs/external_collapse_report.json --trace-dir docs/external_collapse_traces`
+- Observed results/errors:
+  - Main interpreter lacks official ARC runtime, so the runner dispatched official ARC evaluation to `.venv\Scripts\python.exe`; `.venv` has `arc_agi` and `arcengine`.
+  - Official ARC worker evaluated all 25 official games for required variants plus model ablations.
+  - Command returned terminal outcome `NO MINIMAL IMPROVEMENT FOUND`.
+  - Selected variant from non-ARC dev splits: `valence_only`.
+  - Official repeat-collapse drop for selected variant: `0.2898760892775156`, satisfying the `>=0.25` repeat-drop component.
+  - Official score gain for selected variant: `0.005000000000000001`, below the required `>=0.01` score-gain component.
+  - Non-ARC best score drop: `0.0`, satisfying the `<=0.05` non-ARC preservation gate.
+  - Overall improvement gate passes false; answer is no under the required thresholds.
+- Current blockers:
+  - Need inspect report integrity, trace counts, no-hack proof, and exact metrics before running audits/tests.
+- Exact next action:
+  - Query `docs\external_collapse_report.json` for variants, score table, collapse table, traces, ablations, and no-hack proof.
+
+## Step 0153 - External collapse report integrity inspected
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -c "import json; r=json.load(open('docs/external_collapse_report.json')); print(... outcome/gate/no_hack/traces/analysis ...)"`
+  - `python -c "import json; r=json.load(open('docs/external_collapse_report.json')); rows=[... score rows ...]; print(...)"`
+  - `python -c "import json; r=json.load(open('docs/external_collapse_report.json')); rows=[... collapse rows ...]; print(...)"`
+  - `Get-ChildItem docs\external_collapse_traces\official_arcagi3\sealed_eval -Directory | ForEach-Object { ... }`
+- Observed results/errors:
+  - Report outcome: `NO MINIMAL IMPROVEMENT FOUND`; answer `no`.
+  - Improvement gate: selected variant `valence_only`; official repeat drop `0.2898760892775156`; official score gain `0.005000000000000001`; non-ARC best score drop `0.0`; gate passes false because score gain is below `0.01`.
+  - Selection source is `non_arc_dev_only`.
+  - No-hack proof passes true: no findings, no external judge, no forced cycle, baselines comparison only.
+  - Trace count in report: `320`.
+  - Required official trace counts: baseline unchanged `25`, selected variant `25`.
+  - Official trace directories each contain 25 files for baseline, all required variants, and ablations: `ablation_zero_z`, `ablation_corrupt_memory`, `ablation_corrupt_drive`.
+  - Analysis flags: public reward/event/no-op changed valence true; changed valence altered future actions true; repeated no-effect actions became less likely without forced cycling true; affordance exposed useful objects/regions false; score-gain source `no_score_gain`.
+- Current blockers:
+  - `src.generalization_audit` does not yet validate the new collapse report/modules; patch it before running the required post-collapse audit command.
+- Exact next action:
+  - Patch `src.generalization_audit.py` to include collapse modules/report checks.
+
+## Step 0154 - Generalization audit patched for collapse report validation
+
+- Files touched:
+  - `src\generalization_audit.py`
+  - `CONTEXT.MD`
+- Commands run:
+  - `Get-Content -Raw src\generalization_audit.py`
+  - `rg -n "AUDIT_PATHS|external_no_hack_scan|no_text_as_state_check|hidden_target_canary|build_audit|checks =|audit =" src\generalization_audit.py`
+  - Patch edits via `apply_patch`.
+- Observed results/errors:
+  - Initial large patch failed due stale context around the checks dictionary; the audit file was reopened and patched in smaller pieces.
+  - `AUDIT_PATHS` now includes collapse modules, collapse tests, collapse report markdown/JSON, and post-collapse audit output.
+  - `external_no_hack_scan()` now scans `src.external_valence`, `src.external_affordance`, and `src.external_collapse_experiment`.
+  - `no_text_as_state_check()` now also scans collapse modules for blocked text-as-state patterns.
+  - Added `collapse_report_checks()` validating outcome/gate consistency, required variants, required external suites, required baselines, required ablations, trace existence, 25 official traces for baseline and selected variant, no-hack pass, no external judge, and no forced cycle.
+  - `build_audit()` now includes collapse checks when `docs\external_collapse_report.json` exists.
+- Current blockers:
+  - Need compile and run focused tests/audit.
+- Exact next action:
+  - Run py_compile, focused collapse tests, and `python -m src.generalization_audit --json-output docs/generalization_audit_after_collapse.json`.
+
+## Step 0155 - Collapse-aware audit command passes
+
+- Files touched:
+  - `docs\generalization_audit_after_collapse.json`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m py_compile src\generalization_audit.py src\external_collapse_experiment.py src\external_valence.py src\external_affordance.py tests\test_external_collapse.py`
+  - `pytest -q tests\test_external_collapse.py`
+  - `python -m src.generalization_audit --json-output docs/generalization_audit_after_collapse.json`
+- Observed results/errors:
+  - Python compilation passed.
+  - Focused collapse tests passed: `6 passed in 1.18s`.
+  - Post-collapse generalization audit returned `EXTERNAL GENERALIZATION AUDIT PROVEN`.
+  - Collapse checks all true: report present, outcome valid, gate consistent, variants complete, external suites complete, baselines complete, ablations complete, traces exist, 25 required ARC traces for baseline and selected variant, no-hack passes, no external judge, no forced cycle.
+- Current blockers:
+  - Need run exact leakage scan and full pytest commands after audit patch.
+- Exact next action:
+  - Run `python -m audit.leakage_scan` and `pytest -q`.
+
+## Step 0156 - Required leakage scan and full pytest pass
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m audit.leakage_scan`
+  - `pytest -q`
+- Observed results/errors:
+  - Leakage scan returned `passes: true`, findings empty, all leakage checks true.
+  - Full test suite passed: `63 passed in 86.62s`.
+- Current blockers:
+  - Need completion audit over report/traces/hashes/line counts and worktree diff before commit.
+- Exact next action:
+  - Run completion audit query for the collapse experiment artifacts.
+
+## Step 0157 - Collapse experiment completion audit passes
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -c "import json, pathlib, hashlib, sys ... completion audit ..."`
+- Observed results/errors:
+  - Completion audit returned `all_pass: true`.
+  - Proven checks: outcome valid, outcome B expected, gate consistent, variants complete, suites complete, baselines complete, ablations complete, score metrics complete, collapse metrics complete, non-ARC score not reduced by more than threshold, 25 official traces for baseline, 25 official traces for selected variant, all traces exist, no-hack proof passes, post-collapse audit passes, core variant lines within 300.
+  - Core variant line count: `src/external_valence.py` 116 lines plus `src/external_affordance.py` 82 lines, total 198 lines. `src/external_collapse_experiment.py` is 793 lines of experiment orchestration/reporting.
+  - Final hashes from completion audit:
+    - `GOAL.MD`: `7889C5DED870918F1FB4831236725FFE2325A43664837EE37A31FB07799DF246`
+    - `CONTEXT.MD`: `2D3BD1405B45CA436B81A20CFCB6A2914002993D734C6D5E7A38B95ACAB71A09`
+    - `docs/external_collapse_report.json`: `55ED30AD0E7289FB8D2CD0565B99463A3D59314796C7FB973EB3DCB691CF8CE8`
+    - `docs/arcagi3_failure_report.json`: `3B9AC146B3BF882757C5A9F24151586EDB019D0F85E652BA4BFEF2ACE81FC8F4`
+    - `docs/external_generalization_report.json`: `34D5E34D0249DEDEA3AAA1A2E31DB33FCAA0CC1DBA70A8F77B30F40628E4C2AC`
+    - `docs/generalization_audit_after_collapse.json`: `DAB41AEF853BFDFE2D495E130F099AAD55E1527CBE5A029937C32272BAE98B49`
+  - Final outcome: `NO MINIMAL IMPROVEMENT FOUND`.
+  - Selected variant: `valence_only`.
+  - Gate: official repeat drop `0.2898760892775156`, official score gain `0.005000000000000001`, non-ARC best score drop `0.0`, passes false.
+  - Trace count: `320`.
+- Current blockers:
+  - Need inspect worktree diff and commit artifacts.
+- Exact next action:
+  - Run `git status --short`, `git diff --stat`, inspect key diffs, then stage and commit.
+
+## Step 0158 - Affordance analysis corrected across affordance variants
+
+- Files touched:
+  - `src\external_collapse_experiment.py`
+  - `docs\external_collapse_report.json`
+  - `docs\external_collapse_report.md`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -c "import json; r=json.load(open('docs/external_collapse_report.json')); rows=[row for s in r['suite_reports'] for row in s['rows'] if 'affordance' in row['variant']]; print(...)"`
+  - `python -c "import json; from pathlib import Path; from src.external_collapse_experiment import analysis_table, render_markdown, EXPERIMENT_PATHS; ..."`
+- Observed results/errors:
+  - Pre-fix inspection showed affordance variants produced summaries: 105 affordance rows, `7617` affordance observations, and `4611` changed actions.
+  - `analysis_table()` previously answered the affordance question from only the selected `valence_only` rows; patched it to compute affordance exposure across variants whose names include `affordance`.
+  - Refreshed existing report evidence without rerunning the long official experiment.
+  - Updated analysis now says `did_affordance_summaries_expose_objects_regions: true` with `affordance_observations: 7617`.
+  - Report hashes were refreshed.
+- Current blockers:
+  - Need rerun compile/focused tests, post-collapse audit, leakage scan, full pytest, and completion audit after this report/code update.
+- Exact next action:
+  - Run py_compile, focused tests, `python -m src.generalization_audit --json-output docs/generalization_audit_after_collapse.json`, `python -m audit.leakage_scan`, and `pytest -q`.
+
+## Step 0159 - Collapse experiment CUDA path made explicit
+
+- Files touched:
+  - `src\external_collapse_experiment.py`
+  - `src\generalization_audit.py`
+  - `tests\test_external_collapse.py`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m py_compile src\external_collapse_experiment.py src\generalization_audit.py tests\test_external_collapse.py`
+  - `pytest -q tests\test_external_collapse.py`
+  - `python -c "from src.external_collapse_experiment import CUDA_PREFERRED_DEVICE,cuda_runtime_info; ..."`
+- Observed results/errors:
+  - Py compile passed.
+  - Focused collapse tests passed: `8 passed in 1.18s`.
+  - Runtime probe returned default collapse device `cuda`, Torch CUDA `12.8`, two `NVIDIA GeForce RTX 5060 Ti` devices.
+  - `external_collapse_experiment` now defaults to a concrete CUDA request when CUDA is available, asserts the explorer checkpoint parameter device matches the requested device, records device evidence in controller summaries, and writes main/suite CUDA runtime info into reports.
+  - `generalization_audit` now requires collapse reports to include CUDA runtime evidence when CUDA is available.
+- Current blockers:
+  - Existing `docs\external_collapse_report.json` predates the CUDA evidence fields.
+- Exact next action:
+  - Rerun `python -m src.external_collapse_experiment --config external --json-output docs/external_collapse_report.json --trace-dir docs/external_collapse_traces` to regenerate sealed evidence with CUDA recorded.
+
+## Step 0160 - Required collapse experiment rerun completed on CUDA
+
+- Files touched:
+  - `docs\external_collapse_report.json`
+  - `docs\external_collapse_report.md`
+  - `docs\external_collapse_traces\`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m src.external_collapse_experiment --config external --json-output docs/external_collapse_report.json --trace-dir docs/external_collapse_traces`
+  - `nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used --format=csv,noheader,nounits`
+  - report inspection commands over `docs\external_collapse_report.json`
+- Observed results/errors:
+  - Full official ARC sealed evaluation reran successfully.
+  - Runtime telemetry during the run showed GPU 0 active with CUDA memory allocated.
+  - Regenerated report has `requested_device: cuda`, `resolved_device: cuda`.
+  - Main process device evidence: Torch `2.11.0.dev20260120+cu128`, CUDA `12.8`, two `NVIDIA GeForce RTX 5060 Ti` devices.
+  - Official worker device evidence: Torch `2.11.0+cu128`, CUDA `12.8`, two `NVIDIA GeForce RTX 5060 Ti` devices.
+  - Official and Gym controller summaries show `adapter_device: cuda`, `explorer_parameter_device: cuda:0`, `cuda_model_parameters: true`.
+  - Outcome unchanged: `NO MINIMAL IMPROVEMENT FOUND`.
+  - Gate unchanged: selected `valence_only`, official repeat drop `0.2898760892775156`, official score gain `0.005000000000000001`, non-ARC best score drop `0.0`, passes false.
+- Current blockers:
+  - Need rerun tests/audits after CUDA report regeneration.
+- Exact next action:
+  - Run compile, focused tests, leakage scan, post-collapse audit, and full pytest.
+
+## Step 0161 - CUDA report verification and tests pass
+
+- Files touched:
+  - `src\external_collapse_experiment.py`
+  - `src\generalization_audit.py`
+  - `tests\test_external_collapse.py`
+  - `docs\external_collapse_report.json`
+  - `docs\external_collapse_report.md`
+  - `docs\generalization_audit_after_collapse.json`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m py_compile src\external_collapse_experiment.py src\generalization_audit.py tests\test_external_collapse.py`
+  - `pytest -q tests\test_external_collapse.py`
+  - `python -m audit.leakage_scan`
+  - `python -m src.generalization_audit --json-output docs/generalization_audit_after_collapse.json`
+  - `pytest -q`
+- Observed results/errors:
+  - Py compile passed.
+  - Focused collapse tests passed: `8 passed in 1.18s`.
+  - Leakage scan returned `passes: true`, findings empty.
+  - Post-collapse audit returned `EXTERNAL GENERALIZATION AUDIT PROVEN`, including `collapse_cuda_available_recorded`, `collapse_cuda_main_runtime`, and `collapse_cuda_suite_runtimes` all true.
+  - Full test suite passed: `65 passed in 87.91s`.
+- Current blockers:
+  - Need final completion audit/hashes and commit.
+- Exact next action:
+  - Run final audit query, inspect git diff/status, stage all goal artifacts, and commit.
+
+## Step 0162 - Final CUDA collapse completion audit passes
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -c "exec(''' ... final collapse CUDA completion audit ... ''')"`
+- Observed results/errors:
+  - Final completion audit returned `all_pass: true`.
+  - Proven checks: outcome B, gate consistency, CUDA requested/resolved, CUDA main runtime, CUDA suite runtimes, required variants, required suites, required baselines, required ablations, 320 trace paths, all traces exist, 25 official baseline traces, 25 selected-variant traces, no-hack/no external judge, post-collapse audit proven.
+  - Final outcome remains `NO MINIMAL IMPROVEMENT FOUND`.
+  - Selected variant remains `valence_only`.
+  - Gate remains official repeat drop `0.2898760892775156`, official score gain `0.005000000000000001`, non-ARC best score drop `0.0`, passes false.
+  - Device evidence:
+    - Main runtime: `cuda`, Torch `2.11.0.dev20260120+cu128`, CUDA `12.8`, two `NVIDIA GeForce RTX 5060 Ti` devices.
+    - Official worker: `cuda`, Torch `2.11.0+cu128`, CUDA `12.8`, two `NVIDIA GeForce RTX 5060 Ti` devices.
+  - Final artifact hashes:
+    - `GOAL.MD`: `7889C5DED870918F1FB4831236725FFE2325A43664837EE37A31FB07799DF246`
+    - `CONTEXT.md`: `7B21B7D57C6087EA92A130318AE5326447CE1D47ED4805696CFB96D720A83487`
+    - `src/external_valence.py`: `2E76EC9EBC7B7ABFAC1210EDF401F19089C725D2FED004EF0E9896B476FF2112`
+    - `src/external_affordance.py`: `FF0D6601E14871C8CFF83532778EA02EB7F70860790C26E6FC4E9179B81C2D90`
+    - `src/external_collapse_experiment.py`: `2F337C8C4752C197B0EAFEF5ECA3AAE262503615344482F44B4CE7BBC544B467`
+    - `src/generalization_audit.py`: `FB510628BC64FCC4FAAEE63EF9EF0934BF8AC3CCA49106550FC2955B5057BAA8`
+    - `tests/test_external_collapse.py`: `2318A33FAAC180E5EC18798F587C819B765F0E90D9AD31A0281FE4FAE5D039B6`
+    - `docs/external_collapse_report.json`: `6CC4601A2533BF9BDCBCF45EEEACA9DD469A3505132A42918D4CB2296EC49DEF`
+    - `docs/external_collapse_report.md`: `02F3321945E112BB29E19F7052E88689A2983B950F8FE3E755F16B8C9CAD04DA`
+    - `docs/generalization_audit_after_collapse.json`: `E824B88AC7853EACA7A1F5925A6793E080E8DD7B3043D1C2524D1DF0A6907AB3`
+    - `docs/external_generalization_report.json`: `34D5E34D0249DEDEA3AAA1A2E31DB33FCAA0CC1DBA70A8F77B30F40628E4C2AC`
+    - `docs/arcagi3_failure_report.json`: `3B9AC146B3BF882757C5A9F24151586EDB019D0F85E652BA4BFEF2ACE81FC8F4`
+- Current blockers:
+  - None known.
+- Exact next action:
+  - Inspect diff/status, stage all relevant artifacts, commit atomically.
