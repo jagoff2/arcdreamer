@@ -21,14 +21,22 @@ AUDIT_PATHS = [
     "src/external_valence.py",
     "src/external_affordance.py",
     "src/external_collapse_experiment.py",
+    "src/perceptual_affordance.py",
+    "src/perception_train.py",
+    "src/perception_eval.py",
+    "src/external_perception_experiment.py",
     "tests/test_external_generalization.py",
     "tests/test_external_collapse.py",
+    "tests/test_perceptual_affordance.py",
     "docs/external_generalization_report.json",
     "docs/external_generalization_report.md",
     "docs/generalization_audit.json",
     "docs/external_collapse_report.json",
     "docs/external_collapse_report.md",
     "docs/generalization_audit_after_collapse.json",
+    "docs/perceptual_affordance_report.json",
+    "docs/perceptual_affordance_report.md",
+    "docs/generalization_audit_after_perception.json",
     "frozen/recurrent_latent_fast.pt",
     "runs/explorer_tiny.pt",
 ]
@@ -47,6 +55,10 @@ def external_no_hack_scan(report: dict[str, Any]) -> dict[str, Any]:
         Path("src/external_valence.py"),
         Path("src/external_affordance.py"),
         Path("src/external_collapse_experiment.py"),
+        Path("src/perceptual_affordance.py"),
+        Path("src/perception_train.py"),
+        Path("src/perception_eval.py"),
+        Path("src/external_perception_experiment.py"),
     ]
     forbidden_literals = [
         "hidden" + "_goal",
@@ -96,6 +108,10 @@ def no_text_as_state_check() -> dict[str, Any]:
             Path("src/external_valence.py"),
             Path("src/external_affordance.py"),
             Path("src/external_collapse_experiment.py"),
+            Path("src/perceptual_affordance.py"),
+            Path("src/perception_train.py"),
+            Path("src/perception_eval.py"),
+            Path("src/external_perception_experiment.py"),
         ]
         if path.exists()
     )
@@ -230,6 +246,79 @@ def collapse_report_checks(report_path: str | Path = "docs/external_collapse_rep
     }
 
 
+def perception_report_checks(report_path: str | Path = "docs/perceptual_affordance_report.json") -> dict[str, Any]:
+    path = Path(report_path)
+    if not path.exists():
+        return {"present": False, "passes": True}
+    report = load_json(path)
+    variants = {item.get("variant_id") for item in report.get("variants", [])}
+    suites = {item.get("suite_id") for item in report.get("suite_reports", [])}
+    baselines = {item.get("baseline") for item in report.get("baselines", [])}
+    trace_paths = [Path(item) for item in report.get("trace_paths", [])]
+    missing = [str(item) for item in trace_paths if not item.exists()]
+    required_arc = report.get("required_arc_trace_paths", {})
+    gate = report.get("improvement_gate", {})
+    outcome = report.get("terminal_outcome")
+    cuda_available = bool(torch.cuda.is_available())
+    device_runtime = report.get("device_runtime", {})
+    suite_device_runtime = report.get("suite_device_runtime", {})
+    diagnostics = report.get("selected_diagnostics", {})
+    analysis = report.get("analysis", {})
+    gate_consistent = (
+        (bool(gate.get("passes")) and outcome == "PERCEPTUAL AFFORDANCE IMPROVEMENT FOUND")
+        or ((not bool(gate.get("passes"))) and outcome == "NO IMPROVEMENT FOUND")
+    )
+    required_variants = {
+        "baseline_unchanged",
+        "component_only",
+        "temporal_slots",
+        "action_effect_memory",
+        "predictive_object_model",
+        "full_perceptual_affordance",
+        "null_patch_control",
+    }
+    checks = {
+        "perception_report_present": True,
+        "perception_outcome_valid": outcome in {"PERCEPTUAL AFFORDANCE IMPROVEMENT FOUND", "NO IMPROVEMENT FOUND"},
+        "perception_gate_consistent": gate_consistent,
+        "perception_variants_complete": required_variants.issubset(variants),
+        "perception_external_suites_complete": {"official_arcagi3", "gymnasium_classic_control", "gymnasium_toy_text"}.issubset(suites),
+        "perception_baselines_complete": {
+            "random_legal",
+            "repeat_last_action",
+            "coverage_graph_exploration",
+            "novelty_first",
+            "greedy_observable_score_delta",
+            "oracle_free_observed_graph_bfs",
+        }.issubset(baselines),
+        "perception_ablations_present": bool(report.get("ablations")),
+        "perception_traces_exist": bool(trace_paths) and not missing,
+        "perception_required_arc_traces": int(required_arc.get("baseline_unchanged_count", 0)) == 25
+        and int(required_arc.get("selected_variant_count", 0)) == 25,
+        "perception_no_hack_passes": bool(report.get("no_hack_proof", {}).get("passes")),
+        "perception_no_external_judge": bool(report.get("no_hack_proof", {}).get("no_external_judge")),
+        "perception_no_forced_cycle": bool(report.get("no_hack_proof", {}).get("no_forced_cycle")),
+        "perception_cuda_available_recorded": bool(device_runtime.get("torch_cuda_available")) == cuda_available,
+        "perception_cuda_main_runtime": (not cuda_available) or str(device_runtime.get("resolved_device", "")).startswith("cuda"),
+        "perception_cuda_suite_runtimes": (not cuda_available)
+        or (
+            {"official_arcagi3", "gymnasium_classic_control", "gymnasium_toy_text"}.issubset(suite_device_runtime)
+            and all(str(item.get("resolved_device", "")).startswith("cuda") for item in suite_device_runtime.values())
+        ),
+        "perception_components_extracted": bool(analysis.get("did_components_extract_regions")),
+        "perception_action_effects_recorded": bool(analysis.get("did_action_effect_memory_update")),
+        "perception_selected_diagnostics_present": bool(diagnostics),
+    }
+    return {
+        "present": True,
+        "passes": all(checks.values()),
+        "checks": checks,
+        "missing_traces": missing[:20],
+        "outcome": outcome,
+        "selected_variant": gate.get("selected_variant"),
+    }
+
+
 def build_audit(
     *,
     report_path: str | Path,
@@ -243,6 +332,7 @@ def build_audit(
     traces = trace_checks(report)
     canary = hidden_target_canary()
     collapse = collapse_report_checks()
+    perception = perception_report_checks()
     hashes = collect_hashes(AUDIT_PATHS + EXTERNAL_AUDITED_PATHS)
     frozen_ok = (
         hashes["frozen/recurrent_latent_fast.pt"].get("sha256") == "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD"
@@ -259,6 +349,8 @@ def build_audit(
     }
     if collapse["present"]:
         checks.update(collapse.get("checks", {}))
+    if perception["present"]:
+        checks.update(perception.get("checks", {}))
     audit = {
         "terminal_outcome": "EXTERNAL GENERALIZATION AUDIT PROVEN" if all(value is True or not isinstance(value, bool) for value in checks.values()) else "NOT PROVEN",
         "external_report": str(report_path),
@@ -269,6 +361,7 @@ def build_audit(
         "trace_checks": traces,
         "hidden_target_canary": canary,
         "collapse_report_checks": collapse,
+        "perception_report_checks": perception,
         "hashes": hashes,
         "limitations": [],
     }

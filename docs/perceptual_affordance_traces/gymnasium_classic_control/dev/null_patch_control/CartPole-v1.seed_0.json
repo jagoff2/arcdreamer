@@ -1,0 +1,2326 @@
+{
+  "metadata": {
+    "suite_id": "gymnasium_classic_control",
+    "task_id": "CartPole-v1",
+    "variant": "null_patch_control",
+    "split": "dev",
+    "seed": 0
+  },
+  "summary": {
+    "suite_id": "gymnasium_classic_control",
+    "task_id": "CartPole-v1",
+    "split": "dev",
+    "variant": "null_patch_control",
+    "seed": 0,
+    "score": 11.0,
+    "normalized_score": 0.1375,
+    "solved": false,
+    "steps": 11,
+    "invalid_action_rate": 0.0,
+    "unique_states": 12,
+    "useful_events": 11,
+    "action_entropy": -0.0,
+    "repeat_collapse": 1.0,
+    "actions": [
+      "1",
+      "1",
+      "1",
+      "1",
+      "1",
+      "1",
+      "1",
+      "1",
+      "1",
+      "1",
+      "1"
+    ],
+    "controller_summary": {
+      "changed_actions": 0,
+      "reason_counts": {
+        "component": 0,
+        "temporal": 0,
+        "effect": 0,
+        "prediction": 0
+      },
+      "forced_cycle": false,
+      "device": {
+        "adapter_device": "cuda",
+        "explorer_parameter_device": "cuda:0",
+        "cuda_model_parameters": true
+      },
+      "perception": {
+        "frames_seen": 11,
+        "track_count": 3,
+        "stable_tracks": 3,
+        "component_count": 3,
+        "click_regions": 0,
+        "changed_regions": 2,
+        "changed_count": 4,
+        "effect_entries": 2,
+        "prediction": {
+          "trials": 11,
+          "model_correct": 5,
+          "null_correct": 3,
+          "model_accuracy": 0.45454545454545453,
+          "null_accuracy": 0.2727272727272727,
+          "above_null": true
+        },
+        "affordance_causality": {
+          "trials": 11,
+          "changed_actions": 0,
+          "changed_rate": 0.0
+        },
+        "top_effects": [
+          {
+            "key": "move|move:background:0",
+            "count": 11,
+            "change_rate": 0.7272727272727273,
+            "mean_reward": 1.0,
+            "no_effect_rate": 0.0,
+            "terminal_count": 1,
+            "value_ewma": 1.037668,
+            "change_ewma": 0.773648,
+            "score": 0.981097
+          }
+        ]
+      }
+    },
+    "scorecard": {}
+  },
+  "steps": [
+    {
+      "step": 0,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_0",
+        "step_index": 0,
+        "obs_hash": "742312dce72ae9e4",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "53cf26e1852c5899",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            0.013696,
+            -0.023021,
+            -0.045903,
+            -0.048347
+          ],
+          "score": 0.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "0efea3a086f66d32",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {
+          "visited_cells": 1,
+          "goal": [
+            [
+              1,
+              3
+            ]
+          ],
+          "key": [],
+          "door": [],
+          "hazard_count": 0,
+          "resource": [
+            [
+              3,
+              0
+            ]
+          ],
+          "have_key": false,
+          "door_open": false
+        },
+        "drive": {
+          "novelty": 1.0,
+          "hazard_level": 0,
+          "resource_level": 1,
+          "body_energy": 1.0
+        },
+        "hypothesis_state": {
+          "semantic_action": 5,
+          "target": [
+            1,
+            3
+          ],
+          "need_key": false,
+          "have_key": false,
+          "confidence": 0.95
+        },
+        "policy": {
+          "variant": "null_patch_control",
+          "base_action": "1",
+          "chosen_action": "1",
+          "changed_action": false,
+          "top_base_scores": {
+            "1": 1.0,
+            "2": -1.0
+          },
+          "top_adjusted_scores": {
+            "1": 0.99175,
+            "2": -1.00825
+          },
+          "perception_bias": {
+            "1": -0.00825,
+            "2": -0.00825
+          },
+          "perception_components": {
+            "1": {
+              "component": -0.00825
+            },
+            "2": {
+              "component": -0.00825
+            }
+          },
+          "frame": {
+            "shape": [
+              8,
+              8
+            ],
+            "background": 0,
+            "component_count": 3,
+            "stable_tracks": 0,
+            "click_regions": 0,
+            "changed_regions": 0,
+            "changed_count": 0,
+            "regions_sample": [
+              {
+                "region_id": "2b1d20ce4ad0",
+                "track_id": 1,
+                "value": 5,
+                "area": 1,
+                "bbox": [
+                  1,
+                  3,
+                  1,
+                  3
+                ],
+                "centroid": [
+                  1.0,
+                  3.0
+                ],
+                "changed_count": 0,
+                "stable_frames": 1
+              },
+              {
+                "region_id": "15f683528fd5",
+                "track_id": 2,
+                "value": 7,
+                "area": 1,
+                "bbox": [
+                  3,
+                  0,
+                  3,
+                  0
+                ],
+                "centroid": [
+                  3.0,
+                  0.0
+                ],
+                "changed_count": 0,
+                "stable_frames": 1
+              },
+              {
+                "region_id": "080e6b50c6fa",
+                "track_id": 3,
+                "value": 2,
+                "area": 1,
+                "bbox": [
+                  6,
+                  4,
+                  6,
+                  4
+                ],
+                "centroid": [
+                  6.0,
+                  4.0
+                ],
+                "changed_count": 0,
+                "stable_frames": 1
+              }
+            ],
+            "click_regions_sample": []
+          },
+          "forced_cycle": false
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 1,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_0",
+        "step_index": 1,
+        "obs_hash": "0efea3a086f66d32",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "f227777fc2369a8e",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            0.013236,
+            -0.217456,
+            -0.04687,
+            0.229507
+          ],
+          "score": 1.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "60cbc32293c5a981",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {
+          "visited_cells": 1,
+          "goal": [
+            [
+              1,
+              3
+            ]
+          ],
+          "key": [],
+          "door": [],
+          "hazard_count": 0,
+          "resource": [
+            [
+              3,
+              0
+            ],
+            [
+              3,
+              1
+            ]
+          ],
+          "have_key": false,
+          "door_open": false
+        },
+        "drive": {
+          "novelty": 1.0,
+          "hazard_level": 0,
+          "resource_level": 2,
+          "body_energy": 0.96
+        },
+        "hypothesis_state": {
+          "semantic_action": 5,
+          "target": [
+            1,
+            3
+          ],
+          "need_key": false,
+          "have_key": false,
+          "confidence": 0.95
+        },
+        "policy": {
+          "variant": "null_patch_control",
+          "base_action": "1",
+          "chosen_action": "1",
+          "changed_action": false,
+          "top_base_scores": {
+            "1": 1.0,
+            "2": -1.0
+          },
+          "top_adjusted_scores": {
+            "1": 1.52664,
+            "2": -0.47336
+          },
+          "perception_bias": {
+            "1": 0.52664,
+            "2": 0.52664
+          },
+          "perception_components": {
+            "1": {
+              "component": -0.00825,
+              "effect": 0.51564,
+              "prediction": 0.01925
+            },
+            "2": {
+              "component": -0.00825,
+              "effect": 0.51564,
+              "prediction": 0.01925
+            }
+          },
+          "frame": {
+            "shape": [
+              8,
+              8
+            ],
+            "background": 0,
+            "component_count": 3,
+            "stable_tracks": 0,
+            "click_regions": 0,
+            "changed_regions": 1,
+            "changed_count": 2,
+            "regions_sample": [
+              {
+                "region_id": "2b1d20ce4ad0",
+                "track_id": 1,
+                "value": 5,
+                "area": 1,
+                "bbox": [
+                  1,
+                  3,
+                  1,
+                  3
+                ],
+                "centroid": [
+                  1.0,
+                  3.0
+                ],
+                "changed_count": 0,
+                "stable_frames": 2
+              },
+              {
+                "region_id": "e1248ae52c98",
+                "track_id": 2,
+                "value": 7,
+                "area": 1,
+                "bbox": [
+                  3,
+                  1,
+                  3,
+                  1
+                ],
+                "centroid": [
+                  3.0,
+                  1.0
+                ],
+                "changed_count": 1,
+                "stable_frames": 2
+              },
+              {
+                "region_id": "080e6b50c6fa",
+                "track_id": 3,
+                "value": 2,
+                "area": 1,
+                "bbox": [
+                  6,
+                  4,
+                  6,
+                  4
+                ],
+                "centroid": [
+                  6.0,
+                  4.0
+                ],
+                "changed_count": 0,
+                "stable_frames": 2
+              }
+            ],
+            "click_regions_sample": []
+          },
+          "forced_cycle": false
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 2,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_0",
+        "step_index": 2,
+        "obs_hash": "60cbc32293c5a981",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "f227777fc2369a8e",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            0.008887,
+            -0.411878,
+            -0.042279,
+            0.507045
+          ],
+          "score": 2.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "3580390b6d3568b7",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {
+          "visited_cells": 1,
+          "goal": [
+            [
+              1,
+              3
+            ]
+          ],
+          "key": [],
+          "door": [],
+          "hazard_count": 0,
+          "resource": [
+            [
+              3,
+              0
+            ],
+            [
+              3,
+              1
+            ]
+          ],
+          "have_key": false,
+          "door_open": false
+        },
+        "drive": {
+          "novelty": 0.0,
+          "hazard_level": 0,
+          "resource_level": 2,
+          "body_energy": 0.92
+        },
+        "hypothesis_state": {
+          "semantic_action": 5,
+          "target": [
+            1,
+            3
+          ],
+          "need_key": false,
+          "have_key": false,
+          "confidence": 0.95
+        },
+        "policy": {
+          "variant": "null_patch_control",
+          "base_action": "1",
+          "chosen_action": "1",
+          "changed_action": false,
+          "top_base_scores": {
+            "1": 1.0,
+            "2": -1.0
+          },
+          "top_adjusted_scores": {
+            "1": 1.675428,
+            "2": -0.324572
+          },
+          "perception_bias": {
+            "1": 0.675428,
+            "2": 0.675428
+          },
+          "perception_components": {
+            "1": {
+              "component": -0.00825,
+              "effect": 0.671166,
+              "prediction": 0.012513
+            },
+            "2": {
+              "component": -0.00825,
+              "effect": 0.671166,
+              "prediction": 0.012513
+            }
+          },
+          "frame": {
+            "shape": [
+              8,
+              8
+            ],
+            "background": 0,
+            "component_count": 3,
+            "stable_tracks": 3,
+            "click_regions": 0,
+            "changed_regions": 0,
+            "changed_count": 0,
+            "regions_sample": [
+              {
+                "region_id": "2b1d20ce4ad0",
+                "track_id": 1,
+                "value": 5,
+                "area": 1,
+                "bbox": [
+                  1,
+                  3,
+                  1,
+                  3
+                ],
+                "centroid": [
+                  1.0,
+                  3.0
+                ],
+                "changed_count": 0,
+                "stable_frames": 3
+              },
+              {
+                "region_id": "e1248ae52c98",
+                "track_id": 2,
+                "value": 7,
+                "area": 1,
+                "bbox": [
+                  3,
+                  1,
+                  3,
+                  1
+                ],
+                "centroid": [
+                  3.0,
+                  1.0
+                ],
+                "changed_count": 0,
+                "stable_frames": 3
+              },
+              {
+                "region_id": "080e6b50c6fa",
+                "track_id": 3,
+                "value": 2,
+                "area": 1,
+                "bbox": [
+                  6,
+                  4,
+                  6,
+                  4
+                ],
+                "centroid": [
+                  6.0,
+                  4.0
+                ],
+                "changed_count": 0,
+                "stable_frames": 3
+              }
+            ],
+            "click_regions_sample": []
+          },
+          "forced_cycle": false
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 3,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_0",
+        "step_index": 3,
+        "obs_hash": "3580390b6d3568b7",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "0570ac790b75c50d",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            0.000649,
+            -0.606379,
+            -0.032139,
+            0.78611
+          ],
+          "score": 3.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "7d535a67278677a4",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {
+          "visited_cells": 1,
+          "goal": [
+            [
+              1,
+              3
+            ]
+          ],
+          "key": [],
+          "door": [],
+          "hazard_count": 0,
+          "resource": [
+            [
+              3,
+              0
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              3,
+              2
+            ]
+          ],
+          "have_key": false,
+          "door_open": false
+        },
+        "drive": {
+          "novelty": 0.0,
+          "hazard_level": 0,
+          "resource_level": 3,
+          "body_energy": 0.88
+        },
+        "hypothesis_state": {
+          "semantic_action": 5,
+          "target": [
+            1,
+            3
+          ],
+          "need_key": false,
+          "have_key": false,
+          "confidence": 0.95
+        },
+        "policy": {
+          "variant": "null_patch_control",
+          "base_action": "1",
+          "chosen_action": "1",
+          "changed_action": false,
+          "top_base_scores": {
+            "1": 1.0,
+            "2": -1.0
+          },
+          "top_adjusted_scores": {
+            "1": 1.893031,
+            "2": -0.106969
+          },
+          "perception_bias": {
+            "1": 0.893031,
+            "2": 0.893031
+          },
+          "perception_components": {
+            "1": {
+              "component": -0.00825,
+              "effect": 0.873898,
+              "prediction": 0.027383
+            },
+            "2": {
+              "component": -0.00825,
+              "effect": 0.873898,
+              "prediction": 0.027383
+            }
+          },
+          "frame": {
+            "shape": [
+              8,
+              8
+            ],
+            "background": 0,
+            "component_count": 3,
+            "stable_tracks": 3,
+            "click_regions": 0,
+            "changed_regions": 1,
+            "changed_count": 2,
+            "regions_sample": [
+              {
+                "region_id": "2b1d20ce4ad0",
+                "track_id": 1,
+                "value": 5,
+                "area": 1,
+                "bbox": [
+                  1,
+                  3,
+                  1,
+                  3
+                ],
+                "centroid": [
+                  1.0,
+                  3.0
+                ],
+                "changed_count": 0,
+                "stable_frames": 4
+              },
+              {
+                "region_id": "ebd22c3d48aa",
+                "track_id": 2,
+                "value": 7,
+                "area": 1,
+                "bbox": [
+                  3,
+                  2,
+                  3,
+                  2
+                ],
+                "centroid": [
+                  3.0,
+                  2.0
+                ],
+                "changed_count": 1,
+                "stable_frames": 4
+              },
+              {
+                "region_id": "080e6b50c6fa",
+                "track_id": 3,
+                "value": 2,
+                "area": 1,
+                "bbox": [
+                  6,
+                  4,
+                  6,
+                  4
+                ],
+                "centroid": [
+                  6.0,
+                  4.0
+                ],
+                "changed_count": 0,
+                "stable_frames": 4
+              }
+            ],
+            "click_regions_sample": []
+          },
+          "forced_cycle": false
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 4,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_0",
+        "step_index": 4,
+        "obs_hash": "7d535a67278677a4",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "bc01e62143d9d9d5",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.011479,
+            -0.801045,
+            -0.016416,
+            1.068511
+          ],
+          "score": 4.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "e16e65e88ba291b4",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {
+          "visited_cells": 2,
+          "goal": [
+            [
+              1,
+              3
+            ]
+          ],
+          "key": [],
+          "door": [],
+          "hazard_count": 0,
+          "resource": [
+            [
+              3,
+              0
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              3,
+              2
+            ]
+          ],
+          "have_key": false,
+          "door_open": false
+        },
+        "drive": {
+          "novelty": 0.0,
+          "hazard_level": 0,
+          "resource_level": 3,
+          "body_energy": 0.84
+        },
+        "hypothesis_state": {
+          "semantic_action": 5,
+          "target": [
+            1,
+            3
+          ],
+          "need_key": false,
+          "have_key": false,
+          "confidence": 0.95
+        },
+        "policy": {
+          "variant": "null_patch_control",
+          "base_action": "1",
+          "chosen_action": "1",
+          "changed_action": false,
+          "top_base_scores": {
+            "1": 1.0,
+            "2": -1.0
+          },
+          "top_adjusted_scores": {
+            "1": 2.034473,
+            "2": 0.034473
+          },
+          "perception_bias": {
+            "1": 1.034473,
+            "2": 1.034473
+          },
+          "perception_components": {
+            "1": {
+              "component": -0.00825,
+              "effect": 1.005674,
+              "prediction": 0.037049
+            },
+            "2": {
+              "component": -0.00825,
+              "effect": 1.005674,
+              "prediction": 0.037049
+            }
+          },
+          "frame": {
+            "shape": [
+              8,
+              8
+            ],
+            "background": 0,
+            "component_count": 3,
+            "stable_tracks": 3,
+            "click_regions": 0,
+            "changed_regions": 1,
+            "changed_count": 2,
+            "regions_sample": [
+              {
+                "region_id": "2b1d20ce4ad0",
+                "track_id": 1,
+                "value": 5,
+                "area": 1,
+                "bbox": [
+                  1,
+                  3,
+                  1,
+                  3
+                ],
+                "centroid": [
+                  1.0,
+                  3.0
+                ],
+                "changed_count": 0,
+                "stable_frames": 5
+              },
+              {
+                "region_id": "ebd22c3d48aa",
+                "track_id": 2,
+                "value": 7,
+                "area": 1,
+                "bbox": [
+                  3,
+                  2,
+                  3,
+                  2
+                ],
+                "centroid": [
+                  3.0,
+                  2.0
+                ],
+                "changed_count": 0,
+                "stable_frames": 5
+              },
+              {
+                "region_id": "40d7c1473ce0",
+                "track_id": 3,
+                "value": 2,
+                "area": 1,
+                "bbox": [
+                  6,
+                  3,
+                  6,
+                  3
+                ],
+                "centroid": [
+                  6.0,
+                  3.0
+                ],
+                "changed_count": 1,
+                "stable_frames": 5
+              }
+            ],
+            "click_regions_sample": []
+          },
+          "forced_cycle": false
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 5,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_0",
+        "step_index": 5,
+        "obs_hash": "e16e65e88ba291b4",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "668ab057a0800a9b",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.027499,
+            -0.995947,
+            0.004954,
+            1.355997
+          ],
+          "score": 5.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "29bb94c5b6cdf44f",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {
+          "visited_cells": 2,
+          "goal": [
+            [
+              1,
+              3
+            ],
+            [
+              1,
+              4
+            ]
+          ],
+          "key": [],
+          "door": [],
+          "hazard_count": 0,
+          "resource": [
+            [
+              3,
+              0
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              3,
+              2
+            ],
+            [
+              3,
+              3
+            ]
+          ],
+          "have_key": false,
+          "door_open": false
+        },
+        "drive": {
+          "novelty": 0.0,
+          "hazard_level": 0,
+          "resource_level": 3,
+          "body_energy": 0.8
+        },
+        "hypothesis_state": {
+          "semantic_action": 5,
+          "target": [
+            1,
+            3
+          ],
+          "need_key": false,
+          "have_key": false,
+          "confidence": 0.95
+        },
+        "policy": {
+          "variant": "null_patch_control",
+          "base_action": "1",
+          "chosen_action": "1",
+          "changed_action": false,
+          "top_base_scores": {
+            "1": 1.0,
+            "2": -1.0
+          },
+          "top_adjusted_scores": {
+            "1": 2.12641,
+            "2": 0.12641
+          },
+          "perception_bias": {
+            "1": 1.12641,
+            "2": 1.12641
+          },
+          "perception_components": {
+            "1": {
+              "component": -0.00825,
+              "effect": 1.091328,
+              "prediction": 0.043332
+            },
+            "2": {
+              "component": -0.00825,
+              "effect": 1.091328,
+              "prediction": 0.043332
+            }
+          },
+          "frame": {
+            "shape": [
+              8,
+              8
+            ],
+            "background": 0,
+            "component_count": 3,
+            "stable_tracks": 3,
+            "click_regions": 0,
+            "changed_regions": 2,
+            "changed_count": 4,
+            "regions_sample": [
+              {
+                "region_id": "cfddfc2e44c1",
+                "track_id": 1,
+                "value": 5,
+                "area": 1,
+                "bbox": [
+                  1,
+                  4,
+                  1,
+                  4
+                ],
+                "centroid": [
+                  1.0,
+                  4.0
+                ],
+                "changed_count": 1,
+                "stable_frames": 6
+              },
+              {
+                "region_id": "c2dd1f7f2c14",
+                "track_id": 2,
+                "value": 7,
+                "area": 1,
+                "bbox": [
+                  3,
+                  3,
+                  3,
+                  3
+                ],
+                "centroid": [
+                  3.0,
+                  3.0
+                ],
+                "changed_count": 1,
+                "stable_frames": 6
+              },
+              {
+                "region_id": "40d7c1473ce0",
+                "track_id": 3,
+                "value": 2,
+                "area": 1,
+                "bbox": [
+                  6,
+                  3,
+                  6,
+                  3
+                ],
+                "centroid": [
+                  6.0,
+                  3.0
+                ],
+                "changed_count": 0,
+                "stable_frames": 6
+              }
+            ],
+            "click_regions_sample": []
+          },
+          "forced_cycle": false
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 6,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_0",
+        "step_index": 6,
+        "obs_hash": "29bb94c5b6cdf44f",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "607a197f8d1ec639",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.047418,
+            -1.19113,
+            0.032074,
+            1.650226
+          ],
+          "score": 6.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "bc2da1f2eee379ac",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {
+          "visited_cells": 2,
+          "goal": [
+            [
+              1,
+              3
+            ],
+            [
+              1,
+              4
+            ]
+          ],
+          "key": [],
+          "door": [],
+          "hazard_count": 0,
+          "resource": [
+            [
+              3,
+              0
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              3,
+              2
+            ],
+            [
+              3,
+              3
+            ]
+          ],
+          "have_key": false,
+          "door_open": false
+        },
+        "drive": {
+          "novelty": 0.0,
+          "hazard_level": 0,
+          "resource_level": 3,
+          "body_energy": 0.76
+        },
+        "hypothesis_state": {
+          "semantic_action": 5,
+          "target": [
+            1,
+            3
+          ],
+          "need_key": false,
+          "have_key": false,
+          "confidence": 0.95
+        },
+        "policy": {
+          "variant": "null_patch_control",
+          "base_action": "1",
+          "chosen_action": "1",
+          "changed_action": false,
+          "top_base_scores": {
+            "1": 1.0,
+            "2": -1.0
+          },
+          "top_adjusted_scores": {
+            "1": 2.186169,
+            "2": 0.186169
+          },
+          "perception_bias": {
+            "1": 1.186169,
+            "2": 1.186169
+          },
+          "perception_components": {
+            "1": {
+              "component": -0.00825,
+              "effect": 1.147003,
+              "prediction": 0.047416
+            },
+            "2": {
+              "component": -0.00825,
+              "effect": 1.147003,
+              "prediction": 0.047416
+            }
+          },
+          "frame": {
+            "shape": [
+              8,
+              8
+            ],
+            "background": 0,
+            "component_count": 3,
+            "stable_tracks": 3,
+            "click_regions": 0,
+            "changed_regions": 1,
+            "changed_count": 2,
+            "regions_sample": [
+              {
+                "region_id": "cfddfc2e44c1",
+                "track_id": 1,
+                "value": 5,
+                "area": 1,
+                "bbox": [
+                  1,
+                  4,
+                  1,
+                  4
+                ],
+                "centroid": [
+                  1.0,
+                  4.0
+                ],
+                "changed_count": 0,
+                "stable_frames": 7
+              },
+              {
+                "region_id": "172c327e610e",
+                "track_id": 2,
+                "value": 7,
+                "area": 1,
+                "bbox": [
+                  3,
+                  4,
+                  3,
+                  4
+                ],
+                "centroid": [
+                  3.0,
+                  4.0
+                ],
+                "changed_count": 1,
+                "stable_frames": 7
+              },
+              {
+                "region_id": "40d7c1473ce0",
+                "track_id": 3,
+                "value": 2,
+                "area": 1,
+                "bbox": [
+                  6,
+                  3,
+                  6,
+                  3
+                ],
+                "centroid": [
+                  6.0,
+                  3.0
+                ],
+                "changed_count": 0,
+                "stable_frames": 7
+              }
+            ],
+            "click_regions_sample": []
+          },
+          "forced_cycle": false
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 7,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_0",
+        "step_index": 7,
+        "obs_hash": "bc2da1f2eee379ac",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "607a197f8d1ec639",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.071241,
+            -1.386612,
+            0.065078,
+            1.952725
+          ],
+          "score": 7.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "b53a1fedff46acf6",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {
+          "visited_cells": 2,
+          "goal": [
+            [
+              1,
+              3
+            ],
+            [
+              1,
+              4
+            ]
+          ],
+          "key": [],
+          "door": [],
+          "hazard_count": 0,
+          "resource": [
+            [
+              3,
+              0
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              3,
+              2
+            ],
+            [
+              3,
+              3
+            ]
+          ],
+          "have_key": false,
+          "door_open": false
+        },
+        "drive": {
+          "novelty": 0.0,
+          "hazard_level": 0,
+          "resource_level": 3,
+          "body_energy": 0.72
+        },
+        "hypothesis_state": {
+          "semantic_action": 5,
+          "target": [
+            1,
+            3
+          ],
+          "need_key": false,
+          "have_key": false,
+          "confidence": 0.95
+        },
+        "policy": {
+          "variant": "null_patch_control",
+          "base_action": "1",
+          "chosen_action": "1",
+          "changed_action": false,
+          "top_base_scores": {
+            "1": 1.0,
+            "2": -1.0
+          },
+          "top_adjusted_scores": {
+            "1": 2.104122,
+            "2": 0.104122
+          },
+          "perception_bias": {
+            "1": 1.104122,
+            "2": 1.104122
+          },
+          "perception_components": {
+            "1": {
+              "component": -0.00825,
+              "effect": 1.081552,
+              "prediction": 0.03082
+            },
+            "2": {
+              "component": -0.00825,
+              "effect": 1.081552,
+              "prediction": 0.03082
+            }
+          },
+          "frame": {
+            "shape": [
+              8,
+              8
+            ],
+            "background": 0,
+            "component_count": 3,
+            "stable_tracks": 3,
+            "click_regions": 0,
+            "changed_regions": 0,
+            "changed_count": 0,
+            "regions_sample": [
+              {
+                "region_id": "cfddfc2e44c1",
+                "track_id": 1,
+                "value": 5,
+                "area": 1,
+                "bbox": [
+                  1,
+                  4,
+                  1,
+                  4
+                ],
+                "centroid": [
+                  1.0,
+                  4.0
+                ],
+                "changed_count": 0,
+                "stable_frames": 8
+              },
+              {
+                "region_id": "172c327e610e",
+                "track_id": 2,
+                "value": 7,
+                "area": 1,
+                "bbox": [
+                  3,
+                  4,
+                  3,
+                  4
+                ],
+                "centroid": [
+                  3.0,
+                  4.0
+                ],
+                "changed_count": 0,
+                "stable_frames": 8
+              },
+              {
+                "region_id": "40d7c1473ce0",
+                "track_id": 3,
+                "value": 2,
+                "area": 1,
+                "bbox": [
+                  6,
+                  3,
+                  6,
+                  3
+                ],
+                "centroid": [
+                  6.0,
+                  3.0
+                ],
+                "changed_count": 0,
+                "stable_frames": 8
+              }
+            ],
+            "click_regions_sample": []
+          },
+          "forced_cycle": false
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 8,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_0",
+        "step_index": 8,
+        "obs_hash": "b53a1fedff46acf6",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "a50536f487d2f347",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.098973,
+            -1.582362,
+            0.104133,
+            2.264849
+          ],
+          "score": 8.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "426cfa0db65c7c52",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {
+          "visited_cells": 2,
+          "goal": [
+            [
+              1,
+              3
+            ],
+            [
+              1,
+              4
+            ],
+            [
+              1,
+              5
+            ]
+          ],
+          "key": [],
+          "door": [],
+          "hazard_count": 0,
+          "resource": [
+            [
+              3,
+              0
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              3,
+              2
+            ],
+            [
+              3,
+              3
+            ]
+          ],
+          "have_key": false,
+          "door_open": false
+        },
+        "drive": {
+          "novelty": 0.0,
+          "hazard_level": 0,
+          "resource_level": 3,
+          "body_energy": 0.6799999999999999
+        },
+        "hypothesis_state": {
+          "semantic_action": 5,
+          "target": [
+            1,
+            3
+          ],
+          "need_key": false,
+          "have_key": false,
+          "confidence": 0.95
+        },
+        "policy": {
+          "variant": "null_patch_control",
+          "base_action": "1",
+          "chosen_action": "1",
+          "changed_action": false,
+          "top_base_scores": {
+            "1": 1.0,
+            "2": -1.0
+          },
+          "top_adjusted_scores": {
+            "1": 2.171682,
+            "2": 0.171682
+          },
+          "perception_bias": {
+            "1": 1.171682,
+            "2": 1.171682
+          },
+          "perception_components": {
+            "1": {
+              "component": -0.00825,
+              "effect": 1.140649,
+              "prediction": 0.039283
+            },
+            "2": {
+              "component": -0.00825,
+              "effect": 1.140649,
+              "prediction": 0.039283
+            }
+          },
+          "frame": {
+            "shape": [
+              8,
+              8
+            ],
+            "background": 0,
+            "component_count": 3,
+            "stable_tracks": 3,
+            "click_regions": 0,
+            "changed_regions": 2,
+            "changed_count": 4,
+            "regions_sample": [
+              {
+                "region_id": "00c66ae72231",
+                "track_id": 1,
+                "value": 5,
+                "area": 1,
+                "bbox": [
+                  1,
+                  5,
+                  1,
+                  5
+                ],
+                "centroid": [
+                  1.0,
+                  5.0
+                ],
+                "changed_count": 1,
+                "stable_frames": 9
+              },
+              {
+                "region_id": "c93d5b0e4613",
+                "track_id": 2,
+                "value": 7,
+                "area": 1,
+                "bbox": [
+                  3,
+                  5,
+                  3,
+                  5
+                ],
+                "centroid": [
+                  3.0,
+                  5.0
+                ],
+                "changed_count": 1,
+                "stable_frames": 9
+              },
+              {
+                "region_id": "40d7c1473ce0",
+                "track_id": 3,
+                "value": 2,
+                "area": 1,
+                "bbox": [
+                  6,
+                  3,
+                  6,
+                  3
+                ],
+                "centroid": [
+                  6.0,
+                  3.0
+                ],
+                "changed_count": 0,
+                "stable_frames": 9
+              }
+            ],
+            "click_regions_sample": []
+          },
+          "forced_cycle": false
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 9,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_0",
+        "step_index": 9,
+        "obs_hash": "426cfa0db65c7c52",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "a50536f487d2f347",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.13062,
+            -1.778292,
+            0.14943,
+            2.587711
+          ],
+          "score": 9.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "9f72ccbde208cfa9",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward"
+      ],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {
+          "visited_cells": 2,
+          "goal": [
+            [
+              1,
+              3
+            ],
+            [
+              1,
+              4
+            ],
+            [
+              1,
+              5
+            ]
+          ],
+          "key": [],
+          "door": [],
+          "hazard_count": 0,
+          "resource": [
+            [
+              3,
+              0
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              3,
+              2
+            ],
+            [
+              3,
+              3
+            ]
+          ],
+          "have_key": false,
+          "door_open": false
+        },
+        "drive": {
+          "novelty": 0.0,
+          "hazard_level": 0,
+          "resource_level": 3,
+          "body_energy": 0.64
+        },
+        "hypothesis_state": {
+          "semantic_action": 5,
+          "target": [
+            1,
+            3
+          ],
+          "need_key": false,
+          "have_key": false,
+          "confidence": 0.95
+        },
+        "policy": {
+          "variant": "null_patch_control",
+          "base_action": "1",
+          "chosen_action": "1",
+          "changed_action": false,
+          "top_base_scores": {
+            "1": 1.0,
+            "2": -1.0
+          },
+          "top_adjusted_scores": {
+            "1": 2.094706,
+            "2": 0.094706
+          },
+          "perception_bias": {
+            "1": 1.094706,
+            "2": 1.094706
+          },
+          "perception_components": {
+            "1": {
+              "component": -0.00825,
+              "effect": 1.077422,
+              "prediction": 0.025534
+            },
+            "2": {
+              "component": -0.00825,
+              "effect": 1.077422,
+              "prediction": 0.025534
+            }
+          },
+          "frame": {
+            "shape": [
+              8,
+              8
+            ],
+            "background": 0,
+            "component_count": 3,
+            "stable_tracks": 3,
+            "click_regions": 0,
+            "changed_regions": 0,
+            "changed_count": 0,
+            "regions_sample": [
+              {
+                "region_id": "00c66ae72231",
+                "track_id": 1,
+                "value": 5,
+                "area": 1,
+                "bbox": [
+                  1,
+                  5,
+                  1,
+                  5
+                ],
+                "centroid": [
+                  1.0,
+                  5.0
+                ],
+                "changed_count": 0,
+                "stable_frames": 10
+              },
+              {
+                "region_id": "c93d5b0e4613",
+                "track_id": 2,
+                "value": 7,
+                "area": 1,
+                "bbox": [
+                  3,
+                  5,
+                  3,
+                  5
+                ],
+                "centroid": [
+                  3.0,
+                  5.0
+                ],
+                "changed_count": 0,
+                "stable_frames": 10
+              },
+              {
+                "region_id": "40d7c1473ce0",
+                "track_id": 3,
+                "value": 2,
+                "area": 1,
+                "bbox": [
+                  6,
+                  3,
+                  6,
+                  3
+                ],
+                "centroid": [
+                  6.0,
+                  3.0
+                ],
+                "changed_count": 0,
+                "stable_frames": 10
+              }
+            ],
+            "click_regions_sample": []
+          },
+          "forced_cycle": false
+        }
+      },
+      "failure_class": "none"
+    },
+    {
+      "step": 10,
+      "obs": {
+        "task_id": "external/gymnasium_classic_control/CartPole-v1",
+        "episode_id": "external/gymnasium_classic_control/CartPole-v1/seed_0",
+        "step_index": 10,
+        "obs_hash": "9f72ccbde208cfa9",
+        "grid_summary": {
+          "shape": [
+            8,
+            8
+          ],
+          "hash": "c9190d0cbe27c461",
+          "counts": {
+            "0": 61,
+            "2": 1,
+            "5": 1,
+            "7": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_classic_control",
+          "task_id": "CartPole-v1",
+          "raw_observation": [
+            -0.166186,
+            -1.974234,
+            0.201184,
+            2.922119
+          ],
+          "score": 10.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "b3b35fd118443a2c",
+      "score_delta": 1.0,
+      "event_delta": [
+        "positive_reward",
+        "terminated"
+      ],
+      "terminal": true,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {
+          "visited_cells": 2,
+          "goal": [
+            [
+              1,
+              3
+            ],
+            [
+              1,
+              4
+            ],
+            [
+              1,
+              5
+            ],
+            [
+              1,
+              6
+            ]
+          ],
+          "key": [],
+          "door": [],
+          "hazard_count": 0,
+          "resource": [
+            [
+              3,
+              0
+            ],
+            [
+              3,
+              1
+            ],
+            [
+              3,
+              2
+            ],
+            [
+              3,
+              3
+            ]
+          ],
+          "have_key": false,
+          "door_open": false
+        },
+        "drive": {
+          "novelty": 0.0,
+          "hazard_level": 0,
+          "resource_level": 3,
+          "body_energy": 0.6
+        },
+        "hypothesis_state": {
+          "semantic_action": 5,
+          "target": [
+            1,
+            3
+          ],
+          "need_key": false,
+          "have_key": false,
+          "confidence": 0.95
+        },
+        "policy": {
+          "variant": "null_patch_control",
+          "base_action": "1",
+          "chosen_action": "1",
+          "changed_action": false,
+          "top_base_scores": {
+            "1": 1.0,
+            "2": -1.0
+          },
+          "top_adjusted_scores": {
+            "1": 2.165561,
+            "2": 0.165561
+          },
+          "perception_bias": {
+            "1": 1.165561,
+            "2": 1.165561
+          },
+          "perception_components": {
+            "1": {
+              "component": -0.00825,
+              "effect": 1.137964,
+              "prediction": 0.035847
+            },
+            "2": {
+              "component": -0.00825,
+              "effect": 1.137964,
+              "prediction": 0.035847
+            }
+          },
+          "frame": {
+            "shape": [
+              8,
+              8
+            ],
+            "background": 0,
+            "component_count": 3,
+            "stable_tracks": 3,
+            "click_regions": 0,
+            "changed_regions": 2,
+            "changed_count": 4,
+            "regions_sample": [
+              {
+                "region_id": "3739c1b6c164",
+                "track_id": 1,
+                "value": 5,
+                "area": 1,
+                "bbox": [
+                  1,
+                  6,
+                  1,
+                  6
+                ],
+                "centroid": [
+                  1.0,
+                  6.0
+                ],
+                "changed_count": 1,
+                "stable_frames": 11
+              },
+              {
+                "region_id": "e66470550eca",
+                "track_id": 2,
+                "value": 7,
+                "area": 1,
+                "bbox": [
+                  3,
+                  6,
+                  3,
+                  6
+                ],
+                "centroid": [
+                  3.0,
+                  6.0
+                ],
+                "changed_count": 1,
+                "stable_frames": 11
+              },
+              {
+                "region_id": "40d7c1473ce0",
+                "track_id": 3,
+                "value": 2,
+                "area": 1,
+                "bbox": [
+                  6,
+                  3,
+                  6,
+                  3
+                ],
+                "centroid": [
+                  6.0,
+                  3.0
+                ],
+                "changed_count": 0,
+                "stable_frames": 11
+              }
+            ],
+            "click_regions_sample": []
+          },
+          "forced_cycle": false
+        }
+      },
+      "failure_class": "none"
+    }
+  ]
+}

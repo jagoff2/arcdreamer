@@ -3831,3 +3831,176 @@
   - None known.
 - Exact next action:
   - Inspect diff/status, stage all relevant artifacts, commit atomically.
+
+## Step 0163 - Perceptual affordance goal initialized
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `git status --short --branch`
+  - `Get-Content GOAL.MD`
+  - `Get-Content CONTEXT.md | Select-Object -Last 140`
+  - `python -c "exec(''' ... hash and report inspection ... ''')"`
+  - `python -c "import json; ... docs/arcagi3_failure_report.json ..."`
+  - `python -c "import json; ... docs/external_generalization_report.json ..."`
+  - Read `src\external_collapse_experiment.py`, `src\external_affordance.py`, `src\external_valence.py`, `src\external_eval.py`, and `src\external_registry.py`.
+- Observed results/errors:
+  - Worktree was clean on `main` at start.
+  - Active goal is now perceptual/affordance learning for external tasks.
+  - `GOAL.MD` remains the original recurrent-latent project spec; active external-perception objective is from the thread goal.
+  - Current source hashes:
+    - `GOAL.MD`: `7889C5DED870918F1FB4831236725FFE2325A43664837EE37A31FB07799DF246`
+    - `CONTEXT.md`: `E807942E6862EE16EE27964286CB5DF4367D1455B61802C00D1A856AF02E4306`
+    - `docs/external_collapse_report.json`: `6CC4601A2533BF9BDCBCF45EEEACA9DD469A3505132A42918D4CB2296EC49DEF`
+    - `docs/arcagi3_failure_report.json`: `3B9AC146B3BF882757C5A9F24151586EDB019D0F85E652BA4BFEF2ACE81FC8F4`
+    - `docs/external_generalization_report.json`: `34D5E34D0249DEDEA3AAA1A2E31DB33FCAA0CC1DBA70A8F77B30F40628E4C2AC`
+  - Baseline official ARC facts:
+    - `docs/arcagi3_failure_report.json` original official explorer score `0.0`, useful events `0.0`, repeat collapse `0.9185028932649604`.
+    - Existing best official baseline score `0.004` and useful events `0.08`.
+    - Latest collapse rerun unchanged explorer score `0.004`, useful events `0.04`, repeat collapse `0.8579215341806236`, invalid rate `0.0`.
+    - Latest collapse `valence_only` score `0.009000000000000001`, useful events `0.08`, repeat collapse `0.5680454449031079`; it failed the gate because official score gain was only `0.005 < 0.01`.
+  - Non-ARC baseline facts from collapse report:
+    - Gym classic unchanged score `0.11666666666666665`, useful events `9.333333333333334`, repeat collapse `1.0`.
+    - Gym toy unchanged score `0.0`, useful events `0.0`, repeat collapse `1.0`.
+  - Failure causes to address generically:
+    - Prior explorer and null control collapse to repeated actions on external tasks.
+    - Prior generic valence reduced collapse but still lacked enough official score gain.
+    - Existing static affordance summaries exposed regions but were not learned from action effects.
+  - Proposed perception variants:
+    - `baseline_unchanged`: unchanged explorer action scores.
+    - `component_only`: connected components and click/move region salience only.
+    - `temporal_slots`: component tracking, persistence counts, and stable region slots.
+    - `action_effect_memory`: online action/region effect table from public transitions.
+    - `predictive_object_model`: online next-change predictor from action/region effects.
+    - `full_perceptual_affordance`: components + temporal slots + action-effect memory + predictive scoring.
+    - `null_patch_control`: perception runs but cannot alter model action.
+- Current blockers:
+  - Need implement perception modules/tests and experiment runner.
+- Exact next action:
+  - Add `src\perceptual_affordance.py`, `src\perception_train.py`, `src\perception_eval.py`, `src\external_perception_experiment.py`, and `tests\test_perceptual_affordance.py`.
+
+## Step 0164 - Perceptual affordance modules and focused tests pass
+
+- Files touched:
+  - `src\perceptual_affordance.py`
+  - `src\perception_train.py`
+  - `src\perception_eval.py`
+  - `src\external_perception_experiment.py`
+  - `src\generalization_audit.py`
+  - `tests\test_perceptual_affordance.py`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m py_compile src\perceptual_affordance.py src\perception_train.py src\perception_eval.py src\external_perception_experiment.py src\generalization_audit.py tests\test_perceptual_affordance.py`
+  - `pytest -q tests\test_perceptual_affordance.py`
+- Observed results/errors:
+  - Compilation passed.
+  - Focused perception tests passed: `7 passed in 1.22s`.
+  - Implemented generic online perception:
+    - connected non-background components and click-region summaries,
+    - temporal track IDs and stable-frame counts,
+    - action-target binding for click/move/legal actions,
+    - action/region effect memory from public reward/change/no-effect/terminal observations,
+    - next-change prediction counters against no-change null,
+    - affordance perturbation diagnostics measuring action-choice sensitivity.
+  - Implemented experiment runner variants:
+    - `baseline_unchanged`, `component_only`, `temporal_slots`, `action_effect_memory`, `predictive_object_model`, `full_perceptual_affordance`, `null_patch_control`.
+  - `generalization_audit` now checks perception report presence, variants, suites, baselines, ablations, traces, CUDA runtime evidence, no-hack proof, and perception diagnostics when `docs\perceptual_affordance_report.json` exists.
+- Current blockers:
+  - Need run the required external perception experiment over official ARC and Gym sealed/dev splits.
+- Exact next action:
+  - Run `python -m src.external_perception_experiment --config external --json-output docs/perceptual_affordance_report.json --trace-dir docs/perceptual_affordance_traces`.
+
+## Step 0165 - Perception experiment dev-selection schema fixed
+
+- Files touched:
+  - `src\external_perception_experiment.py`
+  - `docs\perceptual_affordance_traces\` partial Gym traces from failed run
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m src.external_perception_experiment --config external --json-output docs/perceptual_affordance_report.json --trace-dir docs/perceptual_affordance_traces`
+- Observed results/errors:
+  - Command failed before official ARC dispatch.
+  - Error: `KeyError: 'solved'` from `aggregate_rows()` inside `select_primary_variant()`.
+  - Cause: dev-selection candidate rows used shortened keys and omitted fields required by shared `aggregate_rows()`.
+  - Fix: patched `select_primary_variant()` to provide full aggregate schema: `score`, `normalized_score`, `solved`, `steps`, `invalid_action_rate`, `unique_states`, `useful_events`, `action_entropy`, and `repeat_collapse`.
+- Current blockers:
+  - Need recompile and rerun the required experiment.
+- Exact next action:
+  - Run py_compile for `src\external_perception_experiment.py`, then rerun the required external perception experiment command.
+
+## Step 0166 - CUDA placement verified for perception experiment
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -c "import torch; print('cuda_available', torch.cuda.is_available()); print('cuda_version', torch.version.cuda); print('device_count', torch.cuda.device_count()); print('devices', [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())])"`
+  - `nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits`
+- Observed results/errors:
+  - PyTorch reports CUDA available: `True`.
+  - PyTorch CUDA runtime: `12.8`.
+  - CUDA device count: `2`.
+  - CUDA devices: `NVIDIA GeForce RTX 5060 Ti`, `NVIDIA GeForce RTX 5060 Ti`.
+  - `nvidia-smi` showed GPU 0 with approximately `4806 MiB` allocated and GPU 1 idle at the time of the probe.
+  - Generated perception traces from the active experiment record `adapter_device: cuda`, `explorer_parameter_device: cuda:0`, and `cuda_model_parameters: true`.
+  - The perception experiment CLI already defaults to `CUDA_PREFERRED_DEVICE`, which resolves to `cuda` when `torch.cuda.is_available()` is true.
+- Current blockers:
+  - Active experiment is still running with no stdout; continue polling.
+- Exact next action:
+  - Poll the existing experiment process and inspect `docs\perceptual_affordance_report.json` when it exits.
+
+## Step 0167 - CUDA-backed perception experiment completed
+
+- Files touched:
+  - `src\external_perception_experiment.py`
+  - `src\generalization_audit.py`
+  - `docs\perceptual_affordance_report.json`
+  - `docs\perceptual_affordance_report.md`
+  - `docs\perceptual_affordance_traces\`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m src.external_perception_experiment --config external --json-output docs/perceptual_affordance_report.json --trace-dir docs/perceptual_affordance_traces`
+  - `python -c "import json; from pathlib import Path; from src.external_perception_experiment import EXPERIMENT_PATHS, render_markdown; from src.arcagi3_eval import collect_hashes; ..."`
+- Observed results/errors:
+  - Required external perception experiment completed with exit code `0`.
+  - Runtime device fields report requested device `cuda`, resolved device `cuda`, CUDA available `True`, CUDA runtime `12.8`, and two `NVIDIA GeForce RTX 5060 Ti` devices.
+  - Trace count after completion: `406` JSON trace files.
+  - Terminal outcome: `NO IMPROVEMENT FOUND`.
+  - Yes/no answer: `no`.
+  - Selected variant from non-ARC dev: `full_perceptual_affordance`.
+  - Official selected variant score `0.0` vs unchanged `0.004`; score gain `-0.004`.
+  - Official selected useful events `0.0` vs unchanged `0.04`; useful-event gain `-0.04`.
+  - Official selected repeat collapse `0.6394730799254836` vs unchanged `0.8579215341806236`; repeat collapse improved but without score/useful-event gain.
+  - Invalid action rate stayed `0.0`.
+  - Non-ARC best score drop was `0.0`.
+  - Ablations did not support causality: best ablations tied selected score/useful events, so `supports_if_needed` was `False`.
+  - Shape fix after completion: added top-level `selected_variant` and `external_score_table` aliases to the report builder, refreshed the generated JSON/Markdown from completed run data only, and fixed `generalization_audit` to treat non-empty direct `selected_diagnostics` as present.
+- Current blockers:
+  - Need run full required test/audit commands.
+- Exact next action:
+  - Run `pytest -q`, `python -m audit.leakage_scan`, and `python -m src.generalization_audit --json-output docs/generalization_audit_after_perception.json`.
+
+## Step 0168 - Perception verification commands pass
+
+- Files touched:
+  - `docs\generalization_audit_after_perception.json`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m py_compile src\external_perception_experiment.py src\generalization_audit.py`
+  - `pytest -q`
+  - `python -m audit.leakage_scan`
+  - `python -m src.generalization_audit --json-output docs/generalization_audit_after_perception.json`
+- Observed results/errors:
+  - Py compile passed for patched perception experiment and generalization audit files.
+  - Full test suite passed: `72 passed in 52.24s`.
+  - Leakage scan passed with no findings.
+  - Generalization audit terminal outcome: `EXTERNAL GENERALIZATION AUDIT PROVEN`.
+  - Generalization audit perception checks passed:
+    - perception report present/outcome/gate/variants/suites/baselines/ablations/traces,
+    - required ARC baseline and selected traces each count `25`,
+    - no-hack/no external judge/no forced cycle,
+    - CUDA main and suite runtimes,
+    - components extracted, action effects recorded, and selected diagnostics present.
+- Current blockers:
+  - Need inspect final diff and commit all perception goal artifacts atomically.
+- Exact next action:
+  - Review `git diff --stat`, targeted report summaries, then stage and commit.
