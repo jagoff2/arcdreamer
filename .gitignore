@@ -12,3 +12,9 @@ runs/
 .venv/
 venv/
 env/
+docs/arcagi3_official_traces/
+docs/arcagi3_official_cuda_traces/
+docs/arcagi3_official_smoke_traces/
+docs/arcagi3_official_cuda_smoke_traces/
+docs/arcagi3_official_smoke_report.json
+docs/arcagi3_official_cuda_smoke_report.json
