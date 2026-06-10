@@ -24,6 +24,7 @@ from .explore_env import (
     SOCIAL_STATE_DIM,
     Z_DIM,
 )
+from .unified_policy import UnifiedAffordancePolicy, UnifiedPolicyConfig, fused_memory_state
 
 
 @dataclass
@@ -72,9 +73,10 @@ class ExplorerCore(nn.Module):
         self.safety_head = nn.Linear(self.config.hidden_dim, 2)
         self.partner_head = nn.Linear(self.config.hidden_dim, NUM_PARTNERS)
         self.mind_head = nn.Linear(self.config.hidden_dim, NUM_MIND_ACTS)
+        self.unified_policy = UnifiedAffordancePolicy(UnifiedPolicyConfig(hidden_dim=self.config.hidden_dim))
         self.to(resolve_device(device))
 
-    def forward(
+    def shared_features(
         self,
         obs: torch.Tensor,
         z: torch.Tensor,
@@ -90,7 +92,7 @@ class ExplorerCore(nn.Module):
         project_enabled: bool = True,
         social_enabled: bool = True,
         intrinsic_enabled: bool = True,
-    ) -> dict[str, torch.Tensor]:
+    ) -> torch.Tensor:
         if not z_enabled:
             z = torch.zeros_like(z)
         if not hypothesis_enabled:
@@ -115,22 +117,73 @@ class ExplorerCore(nn.Module):
             ],
             dim=-1,
         )
-        h = self.trunk(features)
+        return self.trunk(features)
+
+    def probe_readouts(self, shared_state: torch.Tensor) -> dict[str, torch.Tensor]:
         return {
-            "action_logits": self.action_head(h),
-            "planner_logits": self.planner_head(h),
-            "counterfactual_logits": self.counterfactual_head(h),
-            "next_state_logits": self.next_state_head(h),
-            "uncertainty_logits": self.uncertainty_head(h),
-            "novelty_logits": self.novelty_head(h),
-            "skill_logits": self.skill_head(h),
-            "project_logits": self.project_head(h),
-            "question_logits": self.question_head(h),
-            "conflict_logits": self.conflict_head(h),
-            "safety_logits": self.safety_head(h),
-            "partner_logits": self.partner_head(h),
-            "mind_logits": self.mind_head(h),
+            "action_logits": self.action_head(shared_state),
+            "planner_logits": self.planner_head(shared_state),
+            "counterfactual_logits": self.counterfactual_head(shared_state),
+            "next_state_logits": self.next_state_head(shared_state),
+            "uncertainty_logits": self.uncertainty_head(shared_state),
+            "novelty_logits": self.novelty_head(shared_state),
+            "skill_logits": self.skill_head(shared_state),
+            "project_logits": self.project_head(shared_state),
+            "question_logits": self.question_head(shared_state),
+            "conflict_logits": self.conflict_head(shared_state),
+            "safety_logits": self.safety_head(shared_state),
+            "partner_logits": self.partner_head(shared_state),
+            "mind_logits": self.mind_head(shared_state),
         }
+
+    def forward(
+        self,
+        obs: torch.Tensor,
+        z: torch.Tensor,
+        hypothesis: torch.Tensor,
+        skill_memory: torch.Tensor,
+        project_state: torch.Tensor,
+        social_state: torch.Tensor,
+        intrinsic: torch.Tensor,
+        *,
+        z_enabled: bool = True,
+        hypothesis_enabled: bool = True,
+        skill_enabled: bool = True,
+        project_enabled: bool = True,
+        social_enabled: bool = True,
+        intrinsic_enabled: bool = True,
+    ) -> dict[str, torch.Tensor]:
+        shared_state = self.shared_features(
+            obs,
+            z,
+            hypothesis,
+            skill_memory,
+            project_state,
+            social_state,
+            intrinsic,
+            z_enabled=z_enabled,
+            hypothesis_enabled=hypothesis_enabled,
+            skill_enabled=skill_enabled,
+            project_enabled=project_enabled,
+            social_enabled=social_enabled,
+            intrinsic_enabled=intrinsic_enabled,
+        )
+        outputs = self.probe_readouts(shared_state)
+        outputs["shared_state"] = shared_state
+        outputs["unified"] = self.unified_policy(
+            shared_state,
+            z if z_enabled else torch.zeros_like(z),
+            fused_memory_state(
+                {
+                    "hypothesis": hypothesis if hypothesis_enabled else torch.zeros_like(hypothesis),
+                    "skill_memory": skill_memory if skill_enabled else torch.zeros_like(skill_memory),
+                    "project_state": project_state if project_enabled else torch.zeros_like(project_state),
+                    "social_state": social_state if social_enabled else torch.zeros_like(social_state),
+                }
+            ),
+            intrinsic if intrinsic_enabled else torch.zeros_like(intrinsic),
+        )
+        return outputs
 
 
 def explorer_forward(

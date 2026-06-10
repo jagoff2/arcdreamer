@@ -169,13 +169,14 @@ def _category_latent(
     seed: int,
     device: torch.device,
 ) -> torch.Tensor:
-    generator = make_generator(seed + 900, device)
+    del seed
+    generator = make_generator(819271, device)
     table = torch.randn(NUM_RULES + NUM_PROJECTS + NUM_SKILLS + NUM_PARTNERS, Z_DIM, generator=generator, device=device)
     table = F.normalize(table, dim=-1)
     p0 = NUM_RULES
     s0 = p0 + NUM_PROJECTS
     a0 = s0 + NUM_SKILLS
-    return 0.16 * (table[rule] + table[p0 + project] + table[s0 + skill] + table[a0 + partner])
+    return 0.85 * (table[rule] + table[p0 + project] + table[s0 + skill] + table[a0 + partner])
 
 
 def build_explorer_dataset(
@@ -365,7 +366,7 @@ def build_explorer_dataset(
         dim=-1,
     )
 
-    z = _latent_from_frozen_core(count, seed, target_device, checkpoint)
+    z = 0.10 * _latent_from_frozen_core(count, seed, target_device, checkpoint)
     z = z + _category_latent(rule_id, project_id, skill_id, partner_id, seed, target_device)
 
     informative_mask = ~noise

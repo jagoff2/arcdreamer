@@ -80,15 +80,19 @@ AUDITED_PATHS = [
     "src/conversation_eval.py",
     "src/explore_env.py",
     "src/intrinsic_motivation.py",
+    "src/unified_policy.py",
     "src/world_model.py",
     "src/explorer_train.py",
     "src/explorer_eval.py",
+    "src/head_collapse.py",
+    "src/head_collapse_eval.py",
     "src/train.py",
     "src/evaluate.py",
     "src/metrics.py",
     "tests/test_dialogue_organ.py",
     "tests/test_grounded_conversation.py",
     "tests/test_explorer_mindlike.py",
+    "tests/test_head_collapse.py",
     "README.md",
     "docs/living_system_report.json",
     "docs/evidence_dossier.json",
@@ -96,6 +100,9 @@ AUDITED_PATHS = [
     "docs/conversation_report.json",
     "docs/explorer_report.json",
     "docs/audit_after_explorer.json",
+    "docs/head_collapse_report.json",
+    "docs/explorer_report_after_head_collapse.json",
+    "docs/audit_after_head_collapse.json",
 ]
 
 ACTION_NAMES = {
@@ -734,6 +741,14 @@ def run_audit(checkpoint: str | Path, config: str, json_output: str | Path, devi
                 "python -m src.explorer_train --config tiny --output runs/explorer_tiny.pt",
                 "python -m src.explorer_eval --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --config tiny --json-output docs/explorer_report.json",
                 "python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_explorer.json",
+            ]
+        )
+    if Path("docs/head_collapse_report.json").exists():
+        commands_required.extend(
+            [
+                "python -m src.head_collapse_eval --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --config tiny --json-output docs/head_collapse_report.json",
+                "python -m src.explorer_eval --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --config tiny --json-output docs/explorer_report_after_head_collapse.json",
+                "python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_head_collapse.json",
             ]
         )
 

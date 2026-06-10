@@ -27,6 +27,7 @@ def batch_slice(tensors: dict[str, torch.Tensor], indices: torch.Tensor) -> dict
 
 
 def compute_explorer_losses(outputs: dict[str, torch.Tensor], batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    unified = outputs["unified"]
     action = _masked_ce(outputs["action_logits"], batch["action_target"], batch["informative_mask"])
     planner = _masked_ce(outputs["planner_logits"], batch["planner_target"], batch["planning_mask"])
     counter = _masked_ce(outputs["counterfactual_logits"], batch["counterfactual_target"], batch["counterfactual_mask"])
@@ -42,6 +43,32 @@ def compute_explorer_losses(outputs: dict[str, torch.Tensor], batch: dict[str, t
     safety = _masked_ce(outputs["safety_logits"], batch["safety_target"], batch["safety_mask"])
     partner = _masked_ce(outputs["partner_logits"], batch["partner_target"], batch["partner_restart_mask"])
     mind = _masked_ce(outputs["mind_logits"], batch["mind_target"], batch["mind_mask"])
+    unified_action = _masked_ce(unified["action_logits"], batch["action_target"], batch["informative_mask"])
+    unified_inspect = _masked_ce(unified["inspect_logits"], batch["planner_target"], batch["planning_mask"])
+    unified_private = _masked_ce(
+        unified["private_action_logits"],
+        batch["counterfactual_target"],
+        batch["counterfactual_mask"],
+    )
+    unified_speech = _masked_ce(unified["speech_action_logits"], batch["mind_target"], batch["mind_mask"])
+    unified_state = F.cross_entropy(unified["memory_state_logits"], batch["next_state_target"])
+    unified_project = _masked_ce(unified["memory_project_logits"], batch["project_target"], batch["project_mask"])
+    unified_partner = _masked_ce(unified["memory_partner_logits"], batch["partner_target"], batch["partner_restart_mask"])
+    unified_skill = _masked_ce(unified["memory_skill_logits"], batch["skill_target"], batch["skill_mask"])
+    positive_alignment = F.cosine_similarity(unified["predicted_z"], batch["z"], dim=-1)
+    negative_alignment = F.cosine_similarity(unified["predicted_z"], batch["z"].roll(1, dims=0), dim=-1)
+    unified_binding = torch.relu(0.40 - positive_alignment + negative_alignment).mean()
+    unified_loss = (
+        1.5 * unified_action
+        + 1.3 * unified_inspect
+        + 1.2 * unified_private
+        + unified_speech
+        + 1.4 * unified_state
+        + unified_project
+        + unified_partner
+        + unified_skill
+        + 3.0 * unified_binding
+    )
     total = (
         1.5 * action
         + 1.4 * planner
@@ -58,6 +85,7 @@ def compute_explorer_losses(outputs: dict[str, torch.Tensor], batch: dict[str, t
         + safety
         + partner
         + 1.2 * mind
+        + 1.6 * unified_loss
     )
     return {
         "total": total,
@@ -76,6 +104,16 @@ def compute_explorer_losses(outputs: dict[str, torch.Tensor], batch: dict[str, t
         "safety": safety.detach(),
         "partner": partner.detach(),
         "mind": mind.detach(),
+        "unified": unified_loss.detach(),
+        "unified_action": unified_action.detach(),
+        "unified_inspect": unified_inspect.detach(),
+        "unified_private": unified_private.detach(),
+        "unified_speech": unified_speech.detach(),
+        "unified_state": unified_state.detach(),
+        "unified_project": unified_project.detach(),
+        "unified_partner": unified_partner.detach(),
+        "unified_skill": unified_skill.detach(),
+        "unified_binding": unified_binding.detach(),
     }
 
 
@@ -122,11 +160,17 @@ def train_explorer(
     with torch.no_grad():
         sample = batch_slice(tensors, torch.arange(min(2048, count), device=target_device))
         sample_out = explorer_forward(model, sample)
+        unified = sample_out["unified"]
     metrics = {
         "sample_action_accuracy": plain_accuracy(sample_out["action_logits"], sample["action_target"]),
         "sample_planner_accuracy": plain_accuracy(sample_out["planner_logits"], sample["planner_target"]),
         "sample_next_state_accuracy": plain_accuracy(sample_out["next_state_logits"], sample["next_state_target"]),
         "sample_skill_accuracy": plain_accuracy(sample_out["skill_logits"], sample["skill_target"]),
+        "sample_unified_action_accuracy": plain_accuracy(unified["action_logits"], sample["action_target"]),
+        "sample_unified_inspect_accuracy": plain_accuracy(unified["inspect_logits"], sample["planner_target"]),
+        "sample_unified_state_accuracy": plain_accuracy(unified["memory_state_logits"], sample["next_state_target"]),
+        "sample_unified_skill_accuracy": plain_accuracy(unified["memory_skill_logits"], sample["skill_target"]),
+        "sample_z_memory_alignment": float(unified["z_memory_alignment"].mean().item()),
         "records": float(count),
     }
     summary: dict[str, Any] = {

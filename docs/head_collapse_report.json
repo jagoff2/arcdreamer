@@ -1,0 +1,863 @@
+{
+  "terminal_outcome": "HEAD-COLLAPSE PROVEN",
+  "checkpoint": "frozen/recurrent_latent_fast.pt",
+  "explorer_checkpoint": "runs/explorer_tiny.pt",
+  "config": "tiny",
+  "architecture_summary": "HeadCollapsedExplorer routes behavior through UnifiedAffordancePolicy only. Structured explorer heads remain available as diagnostic probes, but they are disabled or absent on the causal behavior path.",
+  "hashes": {
+    "frozen/recurrent_latent_fast.pt": {
+      "sha256": "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD",
+      "size_bytes": 169185
+    },
+    "frozen/manifest.json": {
+      "sha256": "DC1B411C5B33A70DE352DC5D3789DB3CED4283A17D8E7926AB2B9BB7D8FEB1C2",
+      "size_bytes": 614
+    },
+    "runs/explorer_tiny.pt": {
+      "sha256": "F0A2F8BE9F64B7928083E6EF59A5535998AF5E8465F4FDD3E3C1B7EDDB6727E9",
+      "size_bytes": 607937
+    },
+    "src/unified_policy.py": {
+      "sha256": "C3A4E518B1F38005842A8171794928284FEB78E478902577B34DC81C41A53E2A",
+      "size_bytes": 4554
+    },
+    "src/head_collapse.py": {
+      "sha256": "B54334C4D272059C832AFBE31F02F115FA01FA7B02102EF1ECE183E2BABA54AE",
+      "size_bytes": 4685
+    },
+    "src/head_collapse_eval.py": {
+      "sha256": "6901DB34B1589A55C6B828C163C9F1EE8E998D08A99315528B8D0B7A93BD85D5",
+      "size_bytes": 20774
+    },
+    "src/world_model.py": {
+      "sha256": "D3A3A32B48BD0ABA4050F643BF8AD690E577A4BB61FBD916097AA227D1665744",
+      "size_bytes": 8858
+    },
+    "src/explorer_train.py": {
+      "sha256": "668468F111307720B235FF42FD876A8C58066CDC62B9B206E1F42E0C0CF36B23",
+      "size_bytes": 9770
+    },
+    "tests/test_head_collapse.py": {
+      "sha256": "A9C3B958EAB0C606915B109E881111F2815A83BD22D619CE9A62D9EE1DA453B8",
+      "size_bytes": 2520
+    }
+  },
+  "dataset": {
+    "config": {
+      "name": "tiny",
+      "train_records": 32768,
+      "eval_records": 16384,
+      "steps": 420,
+      "batch_size": 512,
+      "lr": 0.0025,
+      "hidden_dim": 128,
+      "seed": 9310,
+      "long_ticks": 16384
+    },
+    "split": "heldout",
+    "records": 16384,
+    "checkpoint": "frozen/recurrent_latent_fast.pt",
+    "open_world_features": [
+      "objects",
+      "tools",
+      "doors",
+      "hazards",
+      "resources",
+      "partial_observability",
+      "agents",
+      "changing_rules",
+      "irreversible_events"
+    ],
+    "long_ticks": 16384
+  },
+  "unified_behavior": {
+    "informative_action_rate": 0.9999328851699829,
+    "random_baseline_success": 0.08580636978149414,
+    "repeat_collapse": 0.08917236328125,
+    "self_directed_exploration_ticks": 16384.0,
+    "next_state_prediction": 0.977783203125,
+    "planner_accuracy": 0.9999100565910339,
+    "reactive_baseline_accuracy": 0.12370670586824417,
+    "counterfactual_choice": 1.0,
+    "skill_accuracy": 0.99993896484375,
+    "skill_count_learned": 8.0,
+    "skill_class_rows": [
+      {
+        "id": 0,
+        "accuracy": 1.0,
+        "records": 2029
+      },
+      {
+        "id": 1,
+        "accuracy": 1.0,
+        "records": 2079
+      },
+      {
+        "id": 2,
+        "accuracy": 1.0,
+        "records": 1998
+      },
+      {
+        "id": 3,
+        "accuracy": 1.0,
+        "records": 2066
+      },
+      {
+        "id": 4,
+        "accuracy": 1.0,
+        "records": 2058
+      },
+      {
+        "id": 5,
+        "accuracy": 1.0,
+        "records": 2039
+      },
+      {
+        "id": 6,
+        "accuracy": 1.0,
+        "records": 2099
+      },
+      {
+        "id": 7,
+        "accuracy": 0.999504029750824,
+        "records": 2016
+      }
+    ],
+    "skill_transfer": 0.99993896484375,
+    "project_accuracy": 0.9998779296875,
+    "multi_step_projects": 4.0,
+    "project_class_rows": [
+      {
+        "id": 0,
+        "accuracy": 1.0,
+        "records": 4166
+      },
+      {
+        "id": 1,
+        "accuracy": 1.0,
+        "records": 3998
+      },
+      {
+        "id": 2,
+        "accuracy": 0.9995173811912537,
+        "records": 4144
+      },
+      {
+        "id": 3,
+        "accuracy": 1.0,
+        "records": 4076
+      }
+    ],
+    "restart_resume": 1.0,
+    "useful_question_under_uncertainty": 0.9973913431167603,
+    "testimony_observation_conflict_resolution": 0.9999999403953552,
+    "partner_history_restart_recall": 0.997194230556488,
+    "no_forced_reply": 0.9998082518577576,
+    "speech_action_coverage": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "random_margin": 0.9141265153884888,
+    "planner_margin": 0.8762033507227898,
+    "core_score": 0.9971836805343628
+  },
+  "head_disabled_behavior": {
+    "informative_action_rate": 0.9999328851699829,
+    "random_baseline_success": 0.08580636978149414,
+    "repeat_collapse": 0.08917236328125,
+    "self_directed_exploration_ticks": 16384.0,
+    "next_state_prediction": 0.977783203125,
+    "planner_accuracy": 0.9999100565910339,
+    "reactive_baseline_accuracy": 0.12370670586824417,
+    "counterfactual_choice": 1.0,
+    "skill_accuracy": 0.99993896484375,
+    "skill_count_learned": 8.0,
+    "skill_class_rows": [
+      {
+        "id": 0,
+        "accuracy": 1.0,
+        "records": 2029
+      },
+      {
+        "id": 1,
+        "accuracy": 1.0,
+        "records": 2079
+      },
+      {
+        "id": 2,
+        "accuracy": 1.0,
+        "records": 1998
+      },
+      {
+        "id": 3,
+        "accuracy": 1.0,
+        "records": 2066
+      },
+      {
+        "id": 4,
+        "accuracy": 1.0,
+        "records": 2058
+      },
+      {
+        "id": 5,
+        "accuracy": 1.0,
+        "records": 2039
+      },
+      {
+        "id": 6,
+        "accuracy": 1.0,
+        "records": 2099
+      },
+      {
+        "id": 7,
+        "accuracy": 0.999504029750824,
+        "records": 2016
+      }
+    ],
+    "skill_transfer": 0.99993896484375,
+    "project_accuracy": 0.9998779296875,
+    "multi_step_projects": 4.0,
+    "project_class_rows": [
+      {
+        "id": 0,
+        "accuracy": 1.0,
+        "records": 4166
+      },
+      {
+        "id": 1,
+        "accuracy": 1.0,
+        "records": 3998
+      },
+      {
+        "id": 2,
+        "accuracy": 0.9995173811912537,
+        "records": 4144
+      },
+      {
+        "id": 3,
+        "accuracy": 1.0,
+        "records": 4076
+      }
+    ],
+    "restart_resume": 1.0,
+    "useful_question_under_uncertainty": 0.9973913431167603,
+    "testimony_observation_conflict_resolution": 0.9999999403953552,
+    "partner_history_restart_recall": 0.997194230556488,
+    "no_forced_reply": 0.9998082518577576,
+    "speech_action_coverage": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "random_margin": 0.9141265153884888,
+    "planner_margin": 0.8762033507227898,
+    "core_score": 0.9971836805343628
+  },
+  "probe_removed_behavior": {
+    "informative_action_rate": 0.9999328851699829,
+    "random_baseline_success": 0.08580636978149414,
+    "repeat_collapse": 0.08917236328125,
+    "self_directed_exploration_ticks": 16384.0,
+    "next_state_prediction": 0.977783203125,
+    "planner_accuracy": 0.9999100565910339,
+    "reactive_baseline_accuracy": 0.12370670586824417,
+    "counterfactual_choice": 1.0,
+    "skill_accuracy": 0.99993896484375,
+    "skill_count_learned": 8.0,
+    "skill_class_rows": [
+      {
+        "id": 0,
+        "accuracy": 1.0,
+        "records": 2029
+      },
+      {
+        "id": 1,
+        "accuracy": 1.0,
+        "records": 2079
+      },
+      {
+        "id": 2,
+        "accuracy": 1.0,
+        "records": 1998
+      },
+      {
+        "id": 3,
+        "accuracy": 1.0,
+        "records": 2066
+      },
+      {
+        "id": 4,
+        "accuracy": 1.0,
+        "records": 2058
+      },
+      {
+        "id": 5,
+        "accuracy": 1.0,
+        "records": 2039
+      },
+      {
+        "id": 6,
+        "accuracy": 1.0,
+        "records": 2099
+      },
+      {
+        "id": 7,
+        "accuracy": 0.999504029750824,
+        "records": 2016
+      }
+    ],
+    "skill_transfer": 0.99993896484375,
+    "project_accuracy": 0.9998779296875,
+    "multi_step_projects": 4.0,
+    "project_class_rows": [
+      {
+        "id": 0,
+        "accuracy": 1.0,
+        "records": 4166
+      },
+      {
+        "id": 1,
+        "accuracy": 1.0,
+        "records": 3998
+      },
+      {
+        "id": 2,
+        "accuracy": 0.9995173811912537,
+        "records": 4144
+      },
+      {
+        "id": 3,
+        "accuracy": 1.0,
+        "records": 4076
+      }
+    ],
+    "restart_resume": 1.0,
+    "useful_question_under_uncertainty": 0.9973913431167603,
+    "testimony_observation_conflict_resolution": 0.9999999403953552,
+    "partner_history_restart_recall": 0.997194230556488,
+    "no_forced_reply": 0.9998082518577576,
+    "speech_action_coverage": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "random_margin": 0.9141265153884888,
+    "planner_margin": 0.8762033507227898,
+    "core_score": 0.9971836805343628
+  },
+  "probe_only_proof": {
+    "disable_delta": 0.0,
+    "remove_delta": 0.0
+  },
+  "latent_memory_drive_ablations": {
+    "normal_core_score": 0.9971836805343628,
+    "zero_z_core_score": 0.07111888211220503,
+    "shuffled_z_core_score": 0.47695187032222747,
+    "corrupt_memory_core_score": 0.24200203716754914,
+    "corrupt_drive_core_score": 0.07111888211220503,
+    "zero_z_delta": 0.9260647984221577,
+    "shuffled_z_delta": 0.5202318102121353,
+    "corrupt_memory_delta": 0.7551816433668137,
+    "corrupt_drive_delta": 0.9260647984221577
+  },
+  "ablation_details": {
+    "zero_z": {
+      "informative_action_rate": 0.08392641693353653,
+      "random_baseline_success": 0.08580636978149414,
+      "repeat_collapse": 1.0,
+      "self_directed_exploration_ticks": 0.0,
+      "next_state_prediction": 0.056640625,
+      "planner_accuracy": 0.02528115175664425,
+      "reactive_baseline_accuracy": 0.12370670586824417,
+      "counterfactual_choice": 0.0,
+      "skill_accuracy": 0.12384033203125,
+      "skill_count_learned": 1.0,
+      "skill_class_rows": [
+        {
+          "id": 0,
+          "accuracy": 1.0,
+          "records": 2029
+        },
+        {
+          "id": 1,
+          "accuracy": 0.0,
+          "records": 2079
+        },
+        {
+          "id": 2,
+          "accuracy": 0.0,
+          "records": 1998
+        },
+        {
+          "id": 3,
+          "accuracy": 0.0,
+          "records": 2066
+        },
+        {
+          "id": 4,
+          "accuracy": 0.0,
+          "records": 2058
+        },
+        {
+          "id": 5,
+          "accuracy": 0.0,
+          "records": 2039
+        },
+        {
+          "id": 6,
+          "accuracy": 0.0,
+          "records": 2099
+        },
+        {
+          "id": 7,
+          "accuracy": 0.0,
+          "records": 2016
+        }
+      ],
+      "skill_transfer": 0.12384033203125,
+      "project_accuracy": 0.2542724609375,
+      "multi_step_projects": 1.0,
+      "project_class_rows": [
+        {
+          "id": 0,
+          "accuracy": 1.0,
+          "records": 4166
+        },
+        {
+          "id": 1,
+          "accuracy": 0.0,
+          "records": 3998
+        },
+        {
+          "id": 2,
+          "accuracy": 0.0,
+          "records": 4144
+        },
+        {
+          "id": 3,
+          "accuracy": 0.0,
+          "records": 4076
+        }
+      ],
+      "restart_resume": 0.24254882335662842,
+      "useful_question_under_uncertainty": 0.0,
+      "testimony_observation_conflict_resolution": 0.0,
+      "partner_history_restart_recall": 0.1672278344631195,
+      "no_forced_reply": 0.0,
+      "speech_action_coverage": [
+        0
+      ],
+      "random_margin": -0.001879952847957611,
+      "planner_margin": -0.09842555411159992,
+      "core_score": 0.07111888211220503
+    },
+    "shuffled_z": {
+      "informative_action_rate": 0.5541828870773315,
+      "random_baseline_success": 0.08580636978149414,
+      "repeat_collapse": 0.55780029296875,
+      "self_directed_exploration_ticks": 0.0,
+      "next_state_prediction": 0.2596435546875,
+      "planner_accuracy": 0.6400359869003296,
+      "reactive_baseline_accuracy": 0.12370670586824417,
+      "counterfactual_choice": 0.6131781935691833,
+      "skill_accuracy": 0.35809326171875,
+      "skill_count_learned": 1.0,
+      "skill_class_rows": [
+        {
+          "id": 0,
+          "accuracy": 1.0,
+          "records": 2029
+        },
+        {
+          "id": 1,
+          "accuracy": 0.24819625914096832,
+          "records": 2079
+        },
+        {
+          "id": 2,
+          "accuracy": 0.2222222238779068,
+          "records": 1998
+        },
+        {
+          "id": 3,
+          "accuracy": 0.17521782219409943,
+          "records": 2066
+        },
+        {
+          "id": 4,
+          "accuracy": 0.3644315004348755,
+          "records": 2058
+        },
+        {
+          "id": 5,
+          "accuracy": 0.2805296778678894,
+          "records": 2039
+        },
+        {
+          "id": 6,
+          "accuracy": 0.3106240928173065,
+          "records": 2099
+        },
+        {
+          "id": 7,
+          "accuracy": 0.2688492238521576,
+          "records": 2016
+        }
+      ],
+      "skill_transfer": 0.35809326171875,
+      "project_accuracy": 0.44976806640625,
+      "multi_step_projects": 1.0,
+      "project_class_rows": [
+        {
+          "id": 0,
+          "accuracy": 1.0,
+          "records": 4166
+        },
+        {
+          "id": 1,
+          "accuracy": 0.24137069284915924,
+          "records": 3998
+        },
+        {
+          "id": 2,
+          "accuracy": 0.25,
+          "records": 4144
+        },
+        {
+          "id": 3,
+          "accuracy": 0.2948969602584839,
+          "records": 4076
+        }
+      ],
+      "restart_resume": 0.46351492404937744,
+      "useful_question_under_uncertainty": 0.43478262424468994,
+      "testimony_observation_conflict_resolution": 0.4599774181842804,
+      "partner_history_restart_recall": 0.4595959782600403,
+      "no_forced_reply": 0.5402607321739197,
+      "speech_action_coverage": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "random_margin": 0.4683765172958374,
+      "planner_margin": 0.5163292810320854,
+      "core_score": 0.47695187032222747
+    },
+    "corrupt_memory": {
+      "informative_action_rate": 0.54283607006073,
+      "random_baseline_success": 0.08580636978149414,
+      "repeat_collapse": 0.56085205078125,
+      "self_directed_exploration_ticks": 0.0,
+      "next_state_prediction": 0.124267578125,
+      "planner_accuracy": 0.23940621316432953,
+      "reactive_baseline_accuracy": 0.12370670586824417,
+      "counterfactual_choice": 0.22955332696437836,
+      "skill_accuracy": 0.184326171875,
+      "skill_count_learned": 1.0,
+      "skill_class_rows": [
+        {
+          "id": 0,
+          "accuracy": 0.8255298137664795,
+          "records": 2029
+        },
+        {
+          "id": 1,
+          "accuracy": 0.08273208141326904,
+          "records": 2079
+        },
+        {
+          "id": 2,
+          "accuracy": 0.10360360145568848,
+          "records": 1998
+        },
+        {
+          "id": 3,
+          "accuracy": 0.08180058002471924,
+          "records": 2066
+        },
+        {
+          "id": 4,
+          "accuracy": 0.1141885295510292,
+          "records": 2058
+        },
+        {
+          "id": 5,
+          "accuracy": 0.08925944566726685,
+          "records": 2039
+        },
+        {
+          "id": 6,
+          "accuracy": 0.0871843695640564,
+          "records": 2099
+        },
+        {
+          "id": 7,
+          "accuracy": 0.0977182611823082,
+          "records": 2016
+        }
+      ],
+      "skill_transfer": 0.184326171875,
+      "project_accuracy": 0.36566162109375,
+      "multi_step_projects": 1.0,
+      "project_class_rows": [
+        {
+          "id": 0,
+          "accuracy": 0.9205473065376282,
+          "records": 4166
+        },
+        {
+          "id": 1,
+          "accuracy": 0.1620810478925705,
+          "records": 3998
+        },
+        {
+          "id": 2,
+          "accuracy": 0.15347489714622498,
+          "records": 4144
+        },
+        {
+          "id": 3,
+          "accuracy": 0.2139352262020111,
+          "records": 4076
+        }
+      ],
+      "restart_resume": 0.35046249628067017,
+      "useful_question_under_uncertainty": 0.08608695864677429,
+      "testimony_observation_conflict_resolution": 0.08455467224121094,
+      "partner_history_restart_recall": 0.25140291452407837,
+      "no_forced_reply": 0.31192484498023987,
+      "speech_action_coverage": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "random_margin": 0.45702970027923584,
+      "planner_margin": 0.11569950729608536,
+      "core_score": 0.24200203716754914
+    },
+    "corrupt_drive": {
+      "informative_action_rate": 0.08392641693353653,
+      "random_baseline_success": 0.08580636978149414,
+      "repeat_collapse": 1.0,
+      "self_directed_exploration_ticks": 0.0,
+      "next_state_prediction": 0.056640625,
+      "planner_accuracy": 0.02528115175664425,
+      "reactive_baseline_accuracy": 0.12370670586824417,
+      "counterfactual_choice": 0.0,
+      "skill_accuracy": 0.12384033203125,
+      "skill_count_learned": 1.0,
+      "skill_class_rows": [
+        {
+          "id": 0,
+          "accuracy": 1.0,
+          "records": 2029
+        },
+        {
+          "id": 1,
+          "accuracy": 0.0,
+          "records": 2079
+        },
+        {
+          "id": 2,
+          "accuracy": 0.0,
+          "records": 1998
+        },
+        {
+          "id": 3,
+          "accuracy": 0.0,
+          "records": 2066
+        },
+        {
+          "id": 4,
+          "accuracy": 0.0,
+          "records": 2058
+        },
+        {
+          "id": 5,
+          "accuracy": 0.0,
+          "records": 2039
+        },
+        {
+          "id": 6,
+          "accuracy": 0.0,
+          "records": 2099
+        },
+        {
+          "id": 7,
+          "accuracy": 0.0,
+          "records": 2016
+        }
+      ],
+      "skill_transfer": 0.12384033203125,
+      "project_accuracy": 0.2542724609375,
+      "multi_step_projects": 1.0,
+      "project_class_rows": [
+        {
+          "id": 0,
+          "accuracy": 1.0,
+          "records": 4166
+        },
+        {
+          "id": 1,
+          "accuracy": 0.0,
+          "records": 3998
+        },
+        {
+          "id": 2,
+          "accuracy": 0.0,
+          "records": 4144
+        },
+        {
+          "id": 3,
+          "accuracy": 0.0,
+          "records": 4076
+        }
+      ],
+      "restart_resume": 0.24254882335662842,
+      "useful_question_under_uncertainty": 0.0,
+      "testimony_observation_conflict_resolution": 0.0,
+      "partner_history_restart_recall": 0.1672278344631195,
+      "no_forced_reply": 0.0,
+      "speech_action_coverage": [
+        0
+      ],
+      "random_margin": -0.001879952847957611,
+      "planner_margin": -0.09842555411159992,
+      "core_score": 0.07111888211220503
+    }
+  },
+  "anti_crutch_audit": {
+    "passes": true,
+    "findings": [],
+    "scanned_functions": [
+      "HeadCollapsedExplorer.forward",
+      "select_behavior_channels"
+    ],
+    "blocked_structured_keys": [
+      "action_logits",
+      "planner_logits",
+      "counterfactual_logits",
+      "next_state_logits",
+      "uncertainty_logits",
+      "novelty_logits",
+      "skill_logits",
+      "project_logits",
+      "question_logits",
+      "conflict_logits",
+      "safety_logits",
+      "partner_logits",
+      "mind_logits"
+    ],
+    "runtime_trace": {
+      "causal_decoder": "UnifiedAffordancePolicy.affordance_decoder",
+      "causal_channels": [
+        "action_logits",
+        "inspect_logits",
+        "private_action_logits",
+        "speech_action_logits",
+        "memory_state_logits",
+        "memory_project_logits",
+        "memory_partner_logits",
+        "memory_skill_logits"
+      ],
+      "structured_heads_disabled": true,
+      "probe_modules_present": true,
+      "old_head_logits_used_for_behavior": false,
+      "behavior_source": "unified_affordance_channels_only"
+    },
+    "behavior_channels": [
+      "action_logits",
+      "inspect_logits",
+      "private_action_logits",
+      "speech_action_logits",
+      "memory_state_logits",
+      "memory_project_logits",
+      "memory_partner_logits",
+      "memory_skill_logits"
+    ],
+    "structured_probe_keys": [
+      "action_logits",
+      "planner_logits",
+      "counterfactual_logits",
+      "next_state_logits",
+      "uncertainty_logits",
+      "novelty_logits",
+      "skill_logits",
+      "project_logits",
+      "question_logits",
+      "conflict_logits",
+      "safety_logits",
+      "partner_logits",
+      "mind_logits"
+    ]
+  },
+  "prior_properties": {
+    "pytest_passes": true,
+    "retention_eval_passes": true,
+    "memory_eval_passes": true,
+    "living_eval_passes": true,
+    "dialogue_eval_passes": true,
+    "explorer_eval_passes": true,
+    "leakage_scan_passes": true,
+    "hidden_target_canary_diff": 0.0,
+    "hidden_target_canary_zero": true,
+    "independent_verify_passes": true,
+    "no_text_as_state_path": true
+  },
+  "gate_checks": {
+    "head_disabled_informative_ge_0_70": true,
+    "head_disabled_random_margin_ge_0_30": true,
+    "head_disabled_repeat_collapse_lt_0_20": true,
+    "head_disabled_next_state_ge_0_75": true,
+    "head_disabled_planner_margin_ge_0_25": true,
+    "head_disabled_counterfactual_ge_0_70": true,
+    "head_disabled_skills_ge_5": true,
+    "head_disabled_skill_transfer_ge_0_70": true,
+    "head_disabled_projects_ge_3": true,
+    "head_disabled_restart_ge_0_80": true,
+    "head_disabled_social_questions_ge_0_80": true,
+    "head_disabled_social_conflict_ge_0_80": true,
+    "head_disabled_partner_ge_0_80": true,
+    "head_disabled_no_forced_reply_ge_0_80": true,
+    "structured_disable_delta_le_0_05": true,
+    "probe_removal_delta_le_0_05": true,
+    "zero_z_degrades_ge_0_30": true,
+    "shuffled_z_degrades_ge_0_30": true,
+    "corrupt_memory_degrades_ge_0_40": true,
+    "corrupt_drive_degrades_ge_0_25": true,
+    "anti_crutch_source_scan_passes": true,
+    "runtime_trace_old_heads_not_used": true,
+    "pytest_passes": true,
+    "retention_eval_passes": true,
+    "memory_eval_passes": true,
+    "living_eval_passes": true,
+    "dialogue_eval_passes": true,
+    "explorer_eval_passes": true,
+    "leakage_scan_passes": true,
+    "hidden_target_canary_zero": true,
+    "independent_verify_passes": true,
+    "no_text_as_state_path": true
+  },
+  "limitations": []
+}
