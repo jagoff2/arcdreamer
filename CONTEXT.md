@@ -1624,3 +1624,138 @@
   - None. Commit pending.
 - Exact next action:
   - Stage and commit the grounded conversation implementation atomically, then verify clean status.
+## Step 0061 - Explorer objective intake
+
+- Files touched: `CONTEXT.md`
+- Commands run:
+  - `git status --short --branch`
+  - `git rev-parse HEAD`
+  - `Get-FileHash frozen\recurrent_latent_fast.pt, frozen\manifest.json, docs\audit_after_dialogue.json, docs\audit_after_human_memory.json, docs\conversation_report.json, docs\audit_after_conversation.json`
+  - `Test-Path src\explore_env.py; Test-Path src\intrinsic_motivation.py; Test-Path src\world_model.py; Test-Path src\explorer_train.py; Test-Path src\explorer_eval.py; Test-Path tests\test_explorer_mindlike.py; Test-Path docs\explorer_report.json`
+- Observed results/errors:
+  - Worktree is clean on `main` at `5dbd314b415d6e3e15b3682bafdac5237c2d9a36`.
+  - Required explorer files are absent: `src/explore_env.py`, `src/intrinsic_motivation.py`, `src/world_model.py`, `src/explorer_train.py`, `src/explorer_eval.py`, `tests/test_explorer_mindlike.py`, and `docs/explorer_report.json`.
+  - Prior reports remain proven: `docs/audit_after_dialogue.json` and `docs/audit_after_human_memory.json` both report `AUDIT PROVEN`; `docs/conversation_report.json` reports `GROUNDED CONVERSATION PROVEN`.
+- Starting hashes:
+  - `frozen/recurrent_latent_fast.pt`: `D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD`.
+  - `frozen/manifest.json`: `DC1B411C5B33A70DE352DC5D3789DB3CED4283A17D8E7926AB2B9BB7D8FEB1C2`.
+  - `docs/audit_after_dialogue.json`: `BC2DCEFC1AB4ECE63E69E492A906752FC4C71E0BB8E54A160A0B0DF57C2A1353`.
+  - `docs/audit_after_human_memory.json`: `AAFDAF482311A71721CF815BA317EA859869B401C5587DC6A085852A83AA4F19`.
+  - `docs/conversation_report.json`: `8F7FFC90407C0C61C71A79F954EDF1A906031D2616371FE48B9100FE2288C179`.
+  - `docs/audit_after_conversation.json`: `0BFB907B8D56C09DA578624E8CBC53C259016916E1372AAD8A4D01F7255BC56A`.
+- Current objective:
+  - Implement the explorer objective: autonomous open-ended exploration, intrinsic motivation, learned world model, imagined planning, reusable skills, projects, social uncertainty handling, mindlike action coverage, prior-property preservation, and a report-backed proof.
+- Plan:
+  - Add an open-world synthetic environment with held-out families, partial observability, objects/tools/doors/hazards/resources/agents/rule changes, and tensor memories for hypothesis, skill, project, and social state.
+  - Add tensor intrinsic-motivation helpers and a learned `ExplorerCore` with heads for action, next state, uncertainty, planning, skills, projects, safety, questions, conflict handling, and mindlike action type.
+  - Add train/eval entrypoints, focused tests, report generation, and independent-audit hash coverage.
+  - Run the required commands: `pytest -q`, tiny explorer training, tiny explorer evaluation, leakage scan, and post-explorer independent verification.
+- Current blockers:
+  - Explorer modules, tests, report, and audit coverage need implementation.
+- Exact next action:
+  - Implement the explorer source files and focused tests, then run smoke verification.
+
+## Step 0062 - Explorer modules and audit coverage added
+
+- Files touched:
+  - `src/explore_env.py`
+  - `src/intrinsic_motivation.py`
+  - `src/world_model.py`
+  - `src/explorer_train.py`
+  - `src/explorer_eval.py`
+  - `tests/test_explorer_mindlike.py`
+  - `audit/independent_verify.py`
+  - `CONTEXT.md`
+- Changes made:
+  - Added open-world explorer dataset generation with objects, tools, doors, hazards, resources, partial observability, agents, changing rules, frozen-core latent snapshots, hypothesis memory, skill memory, project state, social state, and intrinsic-drive tensors.
+  - Added tensor intrinsic-motivation helpers for learning progress, uncertainty, novelty, preservation, projects, and social gaps.
+  - Added `ExplorerCore`, a local neural world model with heads for action, planning, counterfactual action, next state, uncertainty, novelty, skills, projects, questions, conflict resolution, safety, partner recall, and mindlike action type.
+  - Added trainer and evaluator entrypoints that generate `runs/explorer_tiny.pt` and `docs/explorer_report.json`.
+  - Added focused explorer tests and extended independent audit hash coverage for explorer artifacts.
+- Commands run:
+  - `python -m py_compile src\explore_env.py src\intrinsic_motivation.py src\world_model.py src\explorer_train.py src\explorer_eval.py tests\test_explorer_mindlike.py audit\independent_verify.py`
+- Observed results/errors:
+  - Compilation passed.
+- Current blockers:
+  - Focused tests and tiny train/eval have not run yet.
+- Exact next action:
+  - Run `pytest -q tests/test_explorer_mindlike.py`, patch failures, then train/evaluate the tiny explorer.
+
+## Step 0063 - Focused explorer verification and tiny skip-prior proof
+
+- Files touched:
+  - `runs/explorer_tiny.pt` (generated, ignored)
+  - `docs/explorer_report.json`
+  - `docs/explorer_report.md`
+  - `CONTEXT.md`
+- Commands run:
+  - `pytest -q tests/test_explorer_mindlike.py`
+  - `python -m src.explorer_train --config tiny --output runs/explorer_tiny.pt`
+  - `python -m src.explorer_eval --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --config tiny --json-output docs/explorer_report.json --skip-prior`
+- Observed results/errors:
+  - Focused tests passed: `3 passed in 3.40s`.
+  - Tiny explorer training completed `420` steps over `32768` records and wrote `runs/explorer_tiny.pt`.
+  - Training sample metrics: action accuracy `0.91748046875`, planner accuracy `0.91552734375`, next-state accuracy `0.99169921875`, skill accuracy `1.0`.
+  - Skip-prior explorer evaluation returned `EXPLORER CORE PROVEN` with no limitations.
+  - All explorer gate checks were true in the generated report; prior checks in that run were marked by the skipped-prior fast path.
+- Current blockers:
+  - Required full evaluator without `--skip-prior`, full `pytest -q`, leakage scan, and post-explorer independent verification remain.
+- Exact next action:
+  - Run the required command set exactly, patch any failures, then collect final hashes and commit.
+
+## Step 0064 - Explorer core proven and final verification passed
+
+- Files touched:
+  - `src/explore_env.py`
+  - `src/intrinsic_motivation.py`
+  - `src/world_model.py`
+  - `src/explorer_train.py`
+  - `src/explorer_eval.py`
+  - `tests/test_explorer_mindlike.py`
+  - `audit/independent_verify.py`
+  - `docs/explorer_report.json`
+  - `docs/explorer_report.md`
+  - `docs/audit_after_explorer.json`
+  - `docs/audit_after_explorer.md`
+  - `CONTEXT.md`
+- Commands run:
+  - `python -m py_compile src\explorer_eval.py`
+  - `pytest -q tests/test_explorer_mindlike.py`
+  - `python -m src.explorer_eval --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --config tiny --json-output docs/explorer_report.json`
+  - `pytest -q`
+  - `python -m audit.leakage_scan`
+  - `python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_explorer.json`
+  - `Get-FileHash` over explorer sources, tests, reports, generated tiny checkpoint, frozen checkpoint, and manifest
+- Observed results/errors:
+  - Focused explorer tests passed after the final report-hash hygiene patch: `3 passed in 3.18s`.
+  - Full repository tests passed after the final source patch: `42 passed in 47.85s`.
+  - Full explorer evaluation returned `EXPLORER CORE PROVEN`, no limitations.
+  - Leakage scan returned `passes: true`, no findings.
+  - Post-explorer independent verifier returned `AUDIT PROVEN`, no limitations.
+  - `runs/explorer_tiny.pt` was generated and remains ignored.
+- Final explorer gates:
+  - Informative action rate `0.9999328851699829`; random margin `0.9141265153884888`; repeat collapse `0.0888671875`; self-directed exploration ticks `16384`.
+  - Prediction/uncertainty improvement `0.9775390625`; novelty distractor rejection `1.0`; noise fixation `0.0`.
+  - Held-out next-state prediction `0.9881591796875`; imagined planner margin over reactive baseline `0.875843457877636`; counterfactual choice `0.9999111890792847`.
+  - Reusable skills learned `8`; transfer accuracy `0.99993896484375`; skill ablation delta `0.87420654296875`.
+  - Multi-step projects maintained `4`; restart resume accuracy `1.0`; safety preservation `1.0`.
+  - Useful question accuracy under uncertainty `1.0`; testimony/observation conflict resolution `1.0`; partner-history restart recall `0.9927048683166504`.
+  - Mindlike checks passed: long session not random/reactive `true`; no forced reply `1.0`; action coverage includes act, wait, ask, refuse, explore, uncertainty report, and self-correct.
+- Prior properties:
+  - Retention eval, human-memory eval, living eval, dialogue eval, conversation eval, leakage scan, hidden canary, independent verification, and no-text-as-state path are all passing in `docs/explorer_report.json`.
+- Final hashes:
+  - `frozen/recurrent_latent_fast.pt`: `D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD`.
+  - `frozen/manifest.json`: `DC1B411C5B33A70DE352DC5D3789DB3CED4283A17D8E7926AB2B9BB7D8FEB1C2`.
+  - `runs/explorer_tiny.pt`: `4D9561B8F3CE3E9E6F16D654C88189F7953A8DAACEC5DD400BEE63ACFB789632`.
+  - `src/explore_env.py`: `3FDE4A120C8897F029795F9A4DD646298DC00E2F9F66BF386579D3312EAE5AE0`.
+  - `src/intrinsic_motivation.py`: `E8592E448B964B7C9A2131E123DE973BEF6F98831456698AA9028EC8594733CD`.
+  - `src/world_model.py`: `AD2A836D2EDFD3229F665767F64039D9E784E39806FEBF256B26004C6994F446`.
+  - `src/explorer_train.py`: `F3B00A70FE062CEA529A158DA2CCE9E11176E6A4E3B614AD07DDD1F6BC335C17`.
+  - `src/explorer_eval.py`: `8A90FDDF4B72F362F857DA2FD0AFE5FDBD3903093E03BBEB69F844DE67241B0F`.
+  - `tests/test_explorer_mindlike.py`: `6F1CB06A9521179DE7E79C1547E4B2918E4E64B08760BD66302A9BC17DCC2E4A`.
+  - `docs/explorer_report.json`: `468FE75373322CF9C277204A4722E2A45EFD0FEA6FACF1639F86D9A330E4D818`.
+  - `docs/audit_after_explorer.json`: `436950EFD99B41A96B4C52A9CFF63009251E12973F6030FBB107E8E8B6D98786`.
+- Current blockers:
+  - None. Commit pending.
+- Exact next action:
+  - Run final diff/status checks, stage explorer artifacts, commit atomically, and verify clean status.

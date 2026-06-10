@@ -78,16 +78,24 @@ AUDITED_PATHS = [
     "src/conversation_env.py",
     "src/conversation_train.py",
     "src/conversation_eval.py",
+    "src/explore_env.py",
+    "src/intrinsic_motivation.py",
+    "src/world_model.py",
+    "src/explorer_train.py",
+    "src/explorer_eval.py",
     "src/train.py",
     "src/evaluate.py",
     "src/metrics.py",
     "tests/test_dialogue_organ.py",
     "tests/test_grounded_conversation.py",
+    "tests/test_explorer_mindlike.py",
     "README.md",
     "docs/living_system_report.json",
     "docs/evidence_dossier.json",
     "docs/dialogue_report.json",
     "docs/conversation_report.json",
+    "docs/explorer_report.json",
+    "docs/audit_after_explorer.json",
 ]
 
 ACTION_NAMES = {
@@ -714,14 +722,24 @@ def run_audit(checkpoint: str | Path, config: str, json_output: str | Path, devi
         and before_hashes["frozen/manifest.json"] == after_hashes["frozen/manifest.json"]
     )
 
+    commands_required = [
+        "pytest -q",
+        "python -m audit.leakage_scan",
+        "python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_conversation.json",
+        "python -m audit.probe_examples --checkpoint frozen/recurrent_latent_fast.pt --output docs/audit_probe_examples.md",
+    ]
+    if Path("docs/explorer_report.json").exists():
+        commands_required.extend(
+            [
+                "python -m src.explorer_train --config tiny --output runs/explorer_tiny.pt",
+                "python -m src.explorer_eval --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --config tiny --json-output docs/explorer_report.json",
+                "python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_explorer.json",
+            ]
+        )
+
     report: dict[str, Any] = {
         "terminal_outcome": "PENDING",
-        "commands_required": [
-            "pytest -q",
-            "python -m audit.leakage_scan",
-            "python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_conversation.json",
-            "python -m audit.probe_examples --checkpoint frozen/recurrent_latent_fast.pt --output docs/audit_probe_examples.md",
-        ],
+        "commands_required": commands_required,
         "hashes": {
             "before": before_hashes,
             "after": after_hashes,

@@ -1,0 +1,302 @@
+{
+  "terminal_outcome": "EXPLORER CORE PROVEN",
+  "checkpoint": "frozen/recurrent_latent_fast.pt",
+  "explorer_checkpoint": "runs/explorer_tiny.pt",
+  "config": "tiny",
+  "architecture_summary": "ExplorerCore is a local neural world model over observation tensors, frozen-core z, hypothesis memory, skill memory, project state, social state, and intrinsic-drive tensors. Public dialogue remains an action channel, not persistent state.",
+  "training_metadata": {
+    "config": "tiny",
+    "checkpoint": "frozen/recurrent_latent_fast.pt",
+    "output": "runs/explorer_tiny.pt",
+    "steps": 420,
+    "losses": {
+      "loss_total": 0.33169302344322205,
+      "loss_action": 0.0037919925525784492,
+      "loss_planner": 0.006962483748793602,
+      "loss_counterfactual": 0.001034111250191927,
+      "loss_next_state": 0.20533180236816406,
+      "loss_uncertainty": 0.003544431645423174,
+      "loss_novelty": 0.000656162912491709,
+      "loss_skill": 0.0037203957326710224,
+      "loss_transfer": 0.001488403300754726,
+      "loss_project": 0.0023455126211047173,
+      "loss_restart": 0.00024571307585574687,
+      "loss_question": 0.00013878755271434784,
+      "loss_conflict": 1.6309024431393482e-05,
+      "loss_safety": 0.001422389061190188,
+      "loss_partner": 0.007394729182124138,
+      "loss_mind": 0.004069289658218622
+    },
+    "metrics": {
+      "sample_action_accuracy": 0.91748046875,
+      "sample_planner_accuracy": 0.91552734375,
+      "sample_next_state_accuracy": 0.99169921875,
+      "sample_skill_accuracy": 1.0,
+      "records": 32768.0
+    },
+    "dataset": {
+      "config": {
+        "name": "tiny",
+        "train_records": 32768,
+        "eval_records": 16384,
+        "steps": 420,
+        "batch_size": 512,
+        "lr": 0.0025,
+        "hidden_dim": 128,
+        "seed": 9310,
+        "long_ticks": 16384
+      },
+      "split": "train",
+      "records": 32768,
+      "checkpoint": "frozen/recurrent_latent_fast.pt",
+      "open_world_features": [
+        "objects",
+        "tools",
+        "doors",
+        "hazards",
+        "resources",
+        "partial_observability",
+        "agents",
+        "changing_rules",
+        "irreversible_events"
+      ],
+      "long_ticks": 16384
+    }
+  },
+  "hashes": {
+    "frozen/recurrent_latent_fast.pt": {
+      "sha256": "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD",
+      "size_bytes": 169185
+    },
+    "frozen/manifest.json": {
+      "sha256": "DC1B411C5B33A70DE352DC5D3789DB3CED4283A17D8E7926AB2B9BB7D8FEB1C2",
+      "size_bytes": 614
+    },
+    "src/explore_env.py": {
+      "sha256": "3FDE4A120C8897F029795F9A4DD646298DC00E2F9F66BF386579D3312EAE5AE0",
+      "size_bytes": 16113
+    },
+    "src/intrinsic_motivation.py": {
+      "sha256": "E8592E448B964B7C9A2131E123DE973BEF6F98831456698AA9028EC8594733CD",
+      "size_bytes": 2766
+    },
+    "src/world_model.py": {
+      "sha256": "AD2A836D2EDFD3229F665767F64039D9E784E39806FEBF256B26004C6994F446",
+      "size_bytes": 6584
+    },
+    "src/explorer_train.py": {
+      "sha256": "F3B00A70FE062CEA529A158DA2CCE9E11176E6A4E3B614AD07DDD1F6BC335C17",
+      "size_bytes": 7129
+    },
+    "src/explorer_eval.py": {
+      "sha256": "8A90FDDF4B72F362F857DA2FD0AFE5FDBD3903093E03BBEB69F844DE67241B0F",
+      "size_bytes": 18920
+    },
+    "tests/test_explorer_mindlike.py": {
+      "sha256": "6F1CB06A9521179DE7E79C1547E4B2918E4E64B08760BD66302A9BC17DCC2E4A",
+      "size_bytes": 3059
+    },
+    "runs/explorer_tiny.pt": {
+      "sha256": "4D9561B8F3CE3E9E6F16D654C88189F7953A8DAACEC5DD400BEE63ACFB789632",
+      "size_bytes": 415255
+    }
+  },
+  "dataset": {
+    "config": {
+      "name": "tiny",
+      "train_records": 32768,
+      "eval_records": 16384,
+      "steps": 420,
+      "batch_size": 512,
+      "lr": 0.0025,
+      "hidden_dim": 128,
+      "seed": 9310,
+      "long_ticks": 16384
+    },
+    "split": "heldout",
+    "records": 16384,
+    "checkpoint": "frozen/recurrent_latent_fast.pt",
+    "open_world_features": [
+      "objects",
+      "tools",
+      "doors",
+      "hazards",
+      "resources",
+      "partial_observability",
+      "agents",
+      "changing_rules",
+      "irreversible_events"
+    ],
+    "long_ticks": 16384
+  },
+  "exploration": {
+    "informative_action_rate": 0.9999328851699829,
+    "random_baseline_success": 0.08580636978149414,
+    "random_margin": 0.9141265153884888,
+    "repeat_collapse": 0.0888671875,
+    "self_directed_exploration_ticks": 16384.0
+  },
+  "learning": {
+    "next_state_accuracy": 0.9881591796875,
+    "next_state_without_intrinsic": 0.0106201171875,
+    "prediction_uncertainty_improvement": 0.9775390625,
+    "uncertainty_accuracy": 0.99981689453125,
+    "novelty_accuracy": 1.0,
+    "novelty_distractor_rejection": 1.0,
+    "noise_fixation": 0.0
+  },
+  "planning": {
+    "next_state_prediction": 0.9881591796875,
+    "planner_accuracy": 0.9995501637458801,
+    "reactive_baseline_accuracy": 0.12370670586824417,
+    "imagined_planner_margin": 0.875843457877636,
+    "counterfactual_choice": 0.9999111890792847,
+    "planner_repeat_collapse": 0.30853271484375
+  },
+  "skills": {
+    "skill_accuracy": 0.99993896484375,
+    "skill_count_learned": 8.0,
+    "skill_class_rows": [
+      {
+        "id": 0,
+        "accuracy": 1.0,
+        "records": 2029
+      },
+      {
+        "id": 1,
+        "accuracy": 1.0,
+        "records": 2079
+      },
+      {
+        "id": 2,
+        "accuracy": 1.0,
+        "records": 1998
+      },
+      {
+        "id": 3,
+        "accuracy": 1.0,
+        "records": 2066
+      },
+      {
+        "id": 4,
+        "accuracy": 1.0,
+        "records": 2058
+      },
+      {
+        "id": 5,
+        "accuracy": 1.0,
+        "records": 2039
+      },
+      {
+        "id": 6,
+        "accuracy": 0.9995235800743103,
+        "records": 2099
+      },
+      {
+        "id": 7,
+        "accuracy": 1.0,
+        "records": 2016
+      }
+    ],
+    "transfer_accuracy": 0.99993896484375,
+    "skill_without_skill_memory": 0.125732421875,
+    "skill_ablation_delta": 0.87420654296875
+  },
+  "projects": {
+    "project_accuracy": 0.99993896484375,
+    "multi_step_projects": 4.0,
+    "project_class_rows": [
+      {
+        "id": 0,
+        "accuracy": 1.0,
+        "records": 4166
+      },
+      {
+        "id": 1,
+        "accuracy": 0.9997498989105225,
+        "records": 3998
+      },
+      {
+        "id": 2,
+        "accuracy": 1.0,
+        "records": 4144
+      },
+      {
+        "id": 3,
+        "accuracy": 1.0,
+        "records": 4076
+      }
+    ],
+    "restart_resume_accuracy": 1.0,
+    "restart_without_project_state": 0.24974307417869568,
+    "safety_preservation": 1.0
+  },
+  "social": {
+    "useful_question_under_uncertainty": 1.0,
+    "testimony_observation_conflict_resolution": 1.0,
+    "partner_history_restart_recall": 0.9927048683166504,
+    "partner_without_social_state": 0.16835017502307892,
+    "partner_social_delta": 0.8243546932935715
+  },
+  "mindlike": {
+    "long_session_not_random_or_reactive": true,
+    "no_forced_reply": 1.0,
+    "mind_action_accuracy": 1.0,
+    "mind_action_coverage": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "required_action_coverage_met": true
+  },
+  "prior_properties": {
+    "retention_eval_passes": true,
+    "memory_eval_passes": true,
+    "living_eval_passes": true,
+    "dialogue_eval_passes": true,
+    "conversation_eval_passes": true,
+    "leakage_scan_passes": true,
+    "hidden_target_canary_diff": 0.0,
+    "hidden_target_canary_zero": true,
+    "independent_verify_passes": true,
+    "independent_verify_limitations": [],
+    "no_text_as_state_path": true
+  },
+  "gate_checks": {
+    "exploration_informative_rate_ge_0_70": true,
+    "exploration_random_margin_ge_0_30": true,
+    "exploration_repeat_collapse_lt_0_20": true,
+    "exploration_ticks_ge_10000": true,
+    "learning_improvement_ge_0_25": true,
+    "learning_distractor_rejection_ge_0_80": true,
+    "learning_noise_fixation_lt_0_10": true,
+    "planning_next_state_ge_0_75": true,
+    "planning_margin_ge_0_25": true,
+    "planning_counterfactual_ge_0_70": true,
+    "skills_count_ge_5": true,
+    "skills_transfer_ge_0_70": true,
+    "skills_ablation_delta_ge_0_25": true,
+    "projects_count_ge_3": true,
+    "projects_restart_ge_0_80": true,
+    "projects_safety_ge_0_80": true,
+    "social_questions_ge_0_70": true,
+    "social_conflict_ge_0_80": true,
+    "social_partner_restart_ge_0_80": true,
+    "mindlike_not_random_or_reactive": true,
+    "mindlike_no_forced_reply_ge_0_80": true,
+    "mindlike_action_coverage": true,
+    "retention_eval_passes": true,
+    "memory_eval_passes": true,
+    "living_eval_passes": true,
+    "dialogue_eval_passes": true,
+    "leakage_scan_passes": true,
+    "hidden_target_canary_zero": true,
+    "independent_verify_passes": true,
+    "no_text_as_state_path": true
+  },
+  "limitations": []
+}
