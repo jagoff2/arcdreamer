@@ -668,11 +668,11 @@ def render_markdown(report: dict[str, Any]) -> str:
     lines.append("")
     lines.append("## Claim Registry")
     lines.append("")
-    lines.append("| Claim | Metric | Baseline | Ablation | Status |")
-    lines.append("| --- | --- | --- | --- | --- |")
+    lines.append("| Claim | External Prediction | Metric | Baseline | Ablation | Status |")
+    lines.append("| --- | --- | --- | --- | --- | --- |")
     for row in report["claim_registry"]:
         lines.append(
-            f"| {row['claim_id']} | {row['external_metric']} | {row['baseline_to_beat']} | {row['ablation_expected_to_hurt']} | {row['status']} |"
+            f"| {row['claim_id']} | {row['external_prediction']} | {row['external_metric']} | {row['baseline_to_beat']} | {row['ablation_expected_to_hurt']} | {row['status']} |"
         )
     lines.append("")
     lines.append("## Aggregate Scores")

@@ -3,7 +3,7 @@
   "config": "external",
   "checkpoint": "frozen/recurrent_latent_fast.pt",
   "explorer_checkpoint": "runs/explorer_tiny.pt",
-  "requested_device": "cuda",
+  "requested_device": "auto",
   "resolved_device": "cuda",
   "external_suites_discovered": [
     {
@@ -5986,6 +5986,7 @@
       "external_metric": "sealed_eval.mean_normalized_score",
       "baseline_to_beat": "best external baseline",
       "ablation_expected_to_hurt": "corrupt_memory",
+      "external_prediction": "Delayed or sparse external reward cues should improve held-out external return and corrupt-memory ablations should hurt.",
       "result": {
         "best_external_margin": 0.0,
         "max_external_ablation_drop": 0.0,
@@ -6005,6 +6006,7 @@
       "external_metric": "sealed_eval.mean_normalized_score",
       "baseline_to_beat": "best external baseline",
       "ablation_expected_to_hurt": "zero_z",
+      "external_prediction": "Explorer should beat simple legal-action baselines on external interactive tasks.",
       "result": {
         "best_external_margin": 0.0,
         "max_external_ablation_drop": 0.0,
@@ -6024,6 +6026,7 @@
       "external_metric": "sealed_eval.mean_normalized_score",
       "baseline_to_beat": "best external baseline",
       "ablation_expected_to_hurt": "no_dialogue",
+      "external_prediction": "Removing dialogue/private-language paths should reduce external task performance if language is externally useful.",
       "result": {
         "best_external_margin": 0.0,
         "max_external_ablation_drop": 0.0,
@@ -6043,6 +6046,7 @@
       "external_metric": "sealed_eval.mean_normalized_score",
       "baseline_to_beat": "best external baseline",
       "ablation_expected_to_hurt": "disable_planner_imagination",
+      "external_prediction": "Unified head-collapsed policy should preserve or improve external task performance over simple baselines.",
       "result": {
         "best_external_margin": 0.0,
         "max_external_ablation_drop": 0.0,
@@ -6062,6 +6066,7 @@
       "external_metric": "sealed_eval.mean_normalized_score",
       "baseline_to_beat": "best external baseline",
       "ablation_expected_to_hurt": "disable_planner_imagination",
+      "external_prediction": "Disabling planner/imagination should lower external score or event progress.",
       "result": {
         "best_external_margin": 0.0,
         "max_external_ablation_drop": 0.0,
@@ -6081,6 +6086,7 @@
       "external_metric": "sealed_eval.mean_unique_states",
       "baseline_to_beat": "best external baseline",
       "ablation_expected_to_hurt": "corrupt_drive",
+      "external_prediction": "Corrupting drive should reduce external exploration progress.",
       "result": {
         "best_external_margin": 0.0,
         "max_external_ablation_drop": 0.0,
@@ -6100,6 +6106,7 @@
       "external_metric": "sealed_eval.mean_normalized_score",
       "baseline_to_beat": "best external baseline",
       "ablation_expected_to_hurt": "no_social_state",
+      "external_prediction": "Social-state perturbation should affect external multi-agent or social tasks.",
       "result": {
         "best_external_margin": 0.0,
         "max_external_ablation_drop": 0.0,
@@ -6121,6 +6128,7 @@
       "external_metric": "sealed_eval.mean_normalized_score",
       "baseline_to_beat": "best external baseline",
       "ablation_expected_to_hurt": "corrupt_memory",
+      "external_prediction": "Delayed or sparse external reward cues should improve held-out external return and corrupt-memory ablations should hurt.",
       "result": {
         "best_external_margin": 0.0,
         "max_external_ablation_drop": 0.0,
@@ -6140,6 +6148,7 @@
       "external_metric": "sealed_eval.mean_normalized_score",
       "baseline_to_beat": "best external baseline",
       "ablation_expected_to_hurt": "zero_z",
+      "external_prediction": "Explorer should beat simple legal-action baselines on external interactive tasks.",
       "result": {
         "best_external_margin": 0.0,
         "max_external_ablation_drop": 0.0,
@@ -6159,6 +6168,7 @@
       "external_metric": "sealed_eval.mean_normalized_score",
       "baseline_to_beat": "best external baseline",
       "ablation_expected_to_hurt": "no_dialogue",
+      "external_prediction": "Removing dialogue/private-language paths should reduce external task performance if language is externally useful.",
       "result": {
         "best_external_margin": 0.0,
         "max_external_ablation_drop": 0.0,
@@ -6178,6 +6188,7 @@
       "external_metric": "sealed_eval.mean_normalized_score",
       "baseline_to_beat": "best external baseline",
       "ablation_expected_to_hurt": "disable_planner_imagination",
+      "external_prediction": "Unified head-collapsed policy should preserve or improve external task performance over simple baselines.",
       "result": {
         "best_external_margin": 0.0,
         "max_external_ablation_drop": 0.0,
@@ -6197,6 +6208,7 @@
       "external_metric": "sealed_eval.mean_normalized_score",
       "baseline_to_beat": "best external baseline",
       "ablation_expected_to_hurt": "disable_planner_imagination",
+      "external_prediction": "Disabling planner/imagination should lower external score or event progress.",
       "result": {
         "best_external_margin": 0.0,
         "max_external_ablation_drop": 0.0,
@@ -6216,6 +6228,7 @@
       "external_metric": "sealed_eval.mean_unique_states",
       "baseline_to_beat": "best external baseline",
       "ablation_expected_to_hurt": "corrupt_drive",
+      "external_prediction": "Corrupting drive should reduce external exploration progress.",
       "result": {
         "best_external_margin": 0.0,
         "max_external_ablation_drop": 0.0,
@@ -6235,6 +6248,7 @@
       "external_metric": "sealed_eval.mean_normalized_score",
       "baseline_to_beat": "best external baseline",
       "ablation_expected_to_hurt": "no_social_state",
+      "external_prediction": "Social-state perturbation should affect external multi-agent or social tasks.",
       "result": {
         "best_external_margin": 0.0,
         "max_external_ablation_drop": 0.0,
@@ -7009,31 +7023,31 @@
   ],
   "hashes": {
     "src/external_registry.py": {
-      "sha256": "4A50D4C3BAEA03162D9DB15F702778A84BDE3A4AD1BD59F092084C0F61066532",
-      "size_bytes": 5390
+      "sha256": "3EE5774FE296399E7723F3346CA4843B62244A5AEFC9C851244E5977940AE440",
+      "size_bytes": 5480
     },
     "src/external_eval.py": {
-      "sha256": "B7E788E05B9B043451C33B5810E150070996E01379BF6B3ED7FEA78009C89E2F",
-      "size_bytes": 31400
+      "sha256": "C73110F2242292090932936D8B3EC66EE4C2B1AC820B24B6B67D65E731417C1D",
+      "size_bytes": 31459
     },
     "src/generalization_audit.py": {
       "sha256": "AEEA3979A74B65AF2DA7189DED4DF07EF8643CA7C0E2D0EE56B9FAA28103282D",
       "size_bytes": 7998
     },
     "tests/test_external_generalization.py": {
-      "sha256": "DFD49A73856C8D9A165A0EDD0928718A7521BEA8CBC7666AD41C20D42D488771",
-      "size_bytes": 3254
+      "sha256": "195D4E4991970BBEF88E51B442FD8C2BC01A18A3421AB02704DCA72318AFAFD2",
+      "size_bytes": 3355
     },
     "docs/external_generalization_report.json": {
-      "sha256": "B76B0BA87A6E5389BEA3BCDB52596069AEB860FB1B047CAE45CAE66FD805DFBD",
-      "size_bytes": 250596
+      "sha256": "F6E1DACC6E56EF160B26CDA0DDF82A0343C6CC5B1C5934B8E3378543ECBEBDE0",
+      "size_bytes": 252340
     },
     "docs/external_generalization_report.md": {
-      "sha256": "4467F090FAB1313FD9269CAFCF2A29D23F8A5DAB2E79E6423EA9552F3B4654E6",
-      "size_bytes": 9715
+      "sha256": "C7FC4D96CAF978DB928EC7EE52043BB41D69278F5EBF37A040A0933899DFC226",
+      "size_bytes": 10398
     },
     "docs/generalization_audit.json": {
-      "sha256": "59C4124FE1DE1C114E3FFCC013BE23C322D378F42B8089071882B94849ECF6E5",
+      "sha256": "E916E129B735BCBAD15BDAFBF8528047819B921766CD3D9E9CA86CA5A843C71D",
       "size_bytes": 5807
     },
     "src/arcagi3_diagnose.py": {

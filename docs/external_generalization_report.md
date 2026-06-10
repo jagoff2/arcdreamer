@@ -12,15 +12,15 @@ Terminal outcome: **EXTERNAL GENERALIZATION DISCIPLINE PROVEN**
 
 ## Claim Registry
 
-| Claim | Metric | Baseline | Ablation | Status |
-| --- | --- | --- | --- | --- |
-| memory | sealed_eval.mean_normalized_score | best external baseline | corrupt_memory | unsupported |
-| exploration | sealed_eval.mean_normalized_score | best external baseline | zero_z | unsupported |
-| dialogue | sealed_eval.mean_normalized_score | best external baseline | no_dialogue | unsupported |
-| head_collapse | sealed_eval.mean_normalized_score | best external baseline | disable_planner_imagination | unsupported |
-| planner | sealed_eval.mean_normalized_score | best external baseline | disable_planner_imagination | unsupported |
-| curiosity | sealed_eval.mean_unique_states | best external baseline | corrupt_drive | unsupported |
-| social_state | sealed_eval.mean_normalized_score | best external baseline | no_social_state | unsupported |
+| Claim | External Prediction | Metric | Baseline | Ablation | Status |
+| --- | --- | --- | --- | --- | --- |
+| memory | Delayed or sparse external reward cues should improve held-out external return and corrupt-memory ablations should hurt. | sealed_eval.mean_normalized_score | best external baseline | corrupt_memory | unsupported |
+| exploration | Explorer should beat simple legal-action baselines on external interactive tasks. | sealed_eval.mean_normalized_score | best external baseline | zero_z | unsupported |
+| dialogue | Removing dialogue/private-language paths should reduce external task performance if language is externally useful. | sealed_eval.mean_normalized_score | best external baseline | no_dialogue | unsupported |
+| head_collapse | Unified head-collapsed policy should preserve or improve external task performance over simple baselines. | sealed_eval.mean_normalized_score | best external baseline | disable_planner_imagination | unsupported |
+| planner | Disabling planner/imagination should lower external score or event progress. | sealed_eval.mean_normalized_score | best external baseline | disable_planner_imagination | unsupported |
+| curiosity | Corrupting drive should reduce external exploration progress. | sealed_eval.mean_unique_states | best external baseline | corrupt_drive | unsupported |
+| social_state | Social-state perturbation should affect external multi-agent or social tasks. | sealed_eval.mean_normalized_score | best external baseline | no_social_state | unsupported |
 
 ## Aggregate Scores
 

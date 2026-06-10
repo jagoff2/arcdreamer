@@ -11,6 +11,7 @@ from src.generalization_audit import claim_discipline_checks, trace_checks
 def test_external_registry_contains_required_claims_and_arc_suite() -> None:
     claims = claim_registry_template()
     assert {row["claim_id"] for row in claims} == {claim.claim_id for claim in CLAIMS}
+    assert all(row["external_prediction"] == row["external_behavioral_prediction"] for row in claims)
     suites = discover_external_suites()
     assert any(suite.suite_id == "official_arcagi3" for suite in suites)
     assert all(suite.generated_by_repo is False for suite in suites)
@@ -77,4 +78,3 @@ def test_trace_checks_require_external_trace_schema(tmp_path: Path) -> None:
     )
     checks = trace_checks({"trace_paths": [str(trace)]})
     assert checks["passes"] is True
-

@@ -34,7 +34,9 @@ class ClaimSpec:
     ablation_expected_to_hurt: str
 
     def to_dict(self) -> dict[str, str]:
-        return asdict(self)
+        row = asdict(self)
+        row["external_prediction"] = self.external_behavioral_prediction
+        return row
 
 
 CLAIMS: tuple[ClaimSpec, ...] = (
@@ -161,4 +163,3 @@ def claim_registry_template() -> list[dict[str, Any]]:
         }
         for claim in CLAIMS
     ]
-

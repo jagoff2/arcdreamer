@@ -3091,3 +3091,301 @@
   - None.
 - Exact next action:
   - Stage intended files and create an atomic commit.
+
+## Step 0126 - Post-compaction reread started and hash command failed
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `Get-Content -Raw GOAL.MD`
+  - `Get-Content -Tail 220 CONTEXT.MD`
+  - `python - <<'PY' ... PY`
+  - `git status --short --branch`
+- Observed results/errors:
+  - Reread of `GOAL.MD` completed.
+  - Reread of recent `CONTEXT.MD` completed through Step 0125.
+  - Worktree was clean at start of completion audit: `## main`.
+  - Hash command failed because PowerShell does not support Unix heredoc syntax with `python - <<'PY'`.
+- Current blockers:
+  - Need rerun hash/report inspection with PowerShell-compatible commands.
+- Exact next action:
+  - Run a `python -c` hash/report inspection command and continue completion audit.
+
+## Step 0127 - Post-compaction hashes and report state inspected
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -c "import hashlib,pathlib,json; paths=[...]; ..."`
+  - `python -c "import json; r=json.load(open('docs/external_generalization_report.json')); ..."`
+  - `git status --short --branch`
+- Observed results/errors:
+  - Required file hashes:
+    - `GOAL.MD`: `7889C5DED870918F1FB4831236725FFE2325A43664837EE37A31FB07799DF246`
+    - `CONTEXT.MD`: `050BB461108EF33A8B31F5EB8A1A916526F7E8F1739F3A570972FE1629C1DDA8`
+    - `docs/arcagi3_failure_report.json`: `3B9AC146B3BF882757C5A9F24151586EDB019D0F85E652BA4BFEF2ACE81FC8F4`
+    - `docs/audit_after_arcagi3_diagnosis.json`: `A7439E4F2DEDE7D31D525EC0C6B7730BC01C246AA7E8F6898DCDA871640CCC30`
+    - `docs/external_generalization_report.json`: `33CF71320D8E4C186481A1DF47F111D2A2D0A75232843B28937BD0CF5F06235B`
+    - `docs/generalization_audit.json`: `10960B9B8FA92FBFA5D9F87BF205B379E2959886F8CA5453CB1DD47969AC9DDA`
+    - `docs/audit_after_external_generalization.json`: `5A9DAB9B5472F4E1954036F66D3466586C87CF651003CDE5F1B9079B9A29FC88`
+  - External report state before exact-command reruns: outcome `EXTERNAL GENERALIZATION DISCIPLINE PROVEN`; requested device `cuda`; resolved device `cuda`; CUDA available true; trace count `175`.
+  - Claim statuses before exact-command reruns: memory, exploration, dialogue, head-collapse, planner, curiosity, and social_state are all `unsupported`.
+  - Generalization audit outcome before rerun: `EXTERNAL GENERALIZATION AUDIT PROVEN`.
+  - Independent verifier outcome before rerun: `AUDIT PROVEN`; resolved device `cuda`.
+  - Worktree is dirty only because this `CONTEXT.MD` completion-audit entry is being appended.
+- Current blockers:
+  - Need current-run evidence for the exact required command forms after the latest committed code.
+- Exact next action:
+  - Rerun required commands in the command-list form and verify reports still resolve to CUDA.
+
+## Step 0128 - Exact external evaluator command passes and resolves to CUDA
+
+- Files touched:
+  - `docs\external_generalization_report.json`
+  - `docs\external_generalization_report.md`
+  - `docs\external_traces\...`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m src.external_eval --config external --json-output docs/external_generalization_report.json --trace-dir docs/external_traces`
+  - `python -c "import json; r=json.load(open('docs/external_generalization_report.json')); print({...})"`
+- Observed results/errors:
+  - Exact external evaluator command returned terminal outcome `EXTERNAL GENERALIZATION DISCIPLINE PROVEN`.
+  - All requirements in the external report are true.
+  - Unsupported claims remain memory, exploration, dialogue, head-collapse, planner, curiosity, and social_state.
+  - The exact command used default `auto` device and the report proves it resolved to CUDA: `requested_device: auto`, `resolved_device: cuda`, CUDA available true, device count `2`.
+  - Trace count remains `175`.
+- Current blockers:
+  - Need rerun exact generalization audit command on this regenerated report.
+- Exact next action:
+  - Run `python -m src.generalization_audit --json-output docs/generalization_audit.json`.
+
+## Step 0129 - Exact generalization audit command passes
+
+- Files touched:
+  - `docs\generalization_audit.json`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m src.generalization_audit --json-output docs/generalization_audit.json`
+- Observed results/errors:
+  - Generalization audit returned `EXTERNAL GENERALIZATION AUDIT PROVEN`.
+  - All audit checks true: external report proven, leakage scan, external no-hack, no text-as-state, hidden-target canary diff zero, frozen hash unchanged, traceability, claim registry complete, supported thresholds, no dev-only support, unsupported claims preserved.
+  - Supported claims remain empty.
+- Current blockers:
+  - Need rerun exact leakage scan command.
+- Exact next action:
+  - Run `python -m audit.leakage_scan`.
+
+## Step 0130 - Exact leakage scan command passes
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m audit.leakage_scan`
+- Observed results/errors:
+  - Leakage scan returned `passes: true`.
+  - Findings list is empty.
+  - Checks all true: no external/pretrained imports, no external/pretrained text patterns, no unexpected weight files, runtime not prompt loop.
+- Current blockers:
+  - Need rerun exact independent verifier command and verify it resolves to CUDA.
+- Exact next action:
+  - Run `python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_external_generalization.json`.
+
+## Step 0131 - Exact independent verifier command passes and resolves to CUDA
+
+- Files touched:
+  - `docs\audit_after_external_generalization.json`
+  - `docs\audit_after_external_generalization.md`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_external_generalization.json`
+  - `python -c "import json; v=json.load(open('docs/audit_after_external_generalization.json')); print({...})"`
+- Observed results/errors:
+  - Exact independent verifier command returned `AUDIT PROVEN`.
+  - Verdict passes true.
+  - Durable restart memory-file accuracy remained `0.9375`; zero-reset memory accuracy `0.1796875`.
+  - Idle non-collapse and repetition gates remained passing: public repetition `0.28159844875335693`, private repetition `0.0`, latent active fraction `1.0`, latent effective rank `15.644668579101562`.
+  - The exact command used default `auto` device and the report proves it resolved to CUDA: `requested_device: auto`, `resolved_device: cuda`, CUDA available true, device count `2`.
+- Current blockers:
+  - Need run exact `pytest -q` command after report regeneration.
+- Exact next action:
+  - Run `pytest -q`.
+
+## Step 0132 - Exact pytest command passes after exact report regeneration
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `pytest -q`
+- Observed results/errors:
+  - Full test suite passed: `57 passed in 52.09s`.
+- Current blockers:
+  - Need complete requirement-by-requirement audit and commit regenerated artifacts/context if needed.
+- Exact next action:
+  - Inspect current reports, artifacts, command evidence, and worktree diff for completion audit.
+
+## Step 0133 - Completion audit found claim prediction alias gap
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -c "import json, pathlib, sys ... completion audit checks ..."`
+  - `python -c "import json; r=json.load(open('docs/external_generalization_report.json')); print(... claim registry ...)"`
+  - `Get-Content -Raw src\external_registry.py`
+  - `rg -n "behavioral_prediction|external_prediction|ClaimSpec|claim_registry_template" src tests docs\external_generalization_report.md docs\external_generalization_report.json`
+- Observed results/errors:
+  - Completion audit passed every checked requirement except `claim_fields_complete`.
+  - The claim registry contains `external_behavioral_prediction`, which matches the objective prose, but not the shorter `external_prediction` alias used by the audit check.
+  - Existing report evidence otherwise passed: outcome proven, CUDA resolved, official ARC plus two Gymnasium suites present, all required baselines and ablations present, all traces exist, trace schema sample passes, no-hack/leakage/no-text/canary/frozen checks pass, unsupported claims preserved.
+- Current blockers:
+  - Add explicit `external_prediction` alias and rerun affected reports/tests.
+- Exact next action:
+  - Patch `src.external_registry` and markdown rendering to include the alias/prediction text explicitly.
+
+## Step 0134 - Claim registry prediction alias patched
+
+- Files touched:
+  - `src\external_registry.py`
+  - `src\external_eval.py`
+  - `tests\test_external_generalization.py`
+  - `CONTEXT.MD`
+- Commands run:
+  - None; code patch applied with `apply_patch`.
+- Observed results/errors:
+  - `ClaimSpec.to_dict()` now includes `external_prediction` as an alias of `external_behavioral_prediction`.
+  - External report markdown claim registry now includes an `External Prediction` column.
+  - Focused test coverage now asserts the alias equals the full behavioral-prediction field.
+- Current blockers:
+  - Need compile, focused tests, regenerate external report, and rerun audits.
+- Exact next action:
+  - Run py_compile and focused external-generalization tests.
+
+## Step 0135 - Claim registry alias patch compiles and focused tests pass
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m py_compile src\external_registry.py src\external_eval.py tests\test_external_generalization.py`
+  - `pytest -q tests\test_external_generalization.py`
+- Observed results/errors:
+  - Python compilation passed.
+  - Focused external-generalization tests passed: `4 passed in 1.16s`.
+- Current blockers:
+  - Need regenerate external report and downstream audits with the new claim registry field.
+- Exact next action:
+  - Run `python -m src.external_eval --config external --json-output docs/external_generalization_report.json --trace-dir docs/external_traces`.
+
+## Step 0136 - External report regenerated with prediction alias
+
+- Files touched:
+  - `docs\external_generalization_report.json`
+  - `docs\external_generalization_report.md`
+  - `docs\external_traces\...`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m src.external_eval --config external --json-output docs/external_generalization_report.json --trace-dir docs/external_traces`
+  - `python -c "import json; r=json.load(open('docs/external_generalization_report.json')); print({...})"`
+- Observed results/errors:
+  - External evaluator returned `EXTERNAL GENERALIZATION DISCIPLINE PROVEN`.
+  - All external report requirements remain true.
+  - Report now includes `external_prediction` aliases for every claim and each alias equals `external_behavioral_prediction`.
+  - Exact command used default `auto` and resolved to CUDA: `requested_device: auto`, `resolved_device: cuda`.
+  - Trace count remains `175`.
+- Current blockers:
+  - Need rerun generalization audit after report regeneration.
+- Exact next action:
+  - Run `python -m src.generalization_audit --json-output docs/generalization_audit.json`.
+
+## Step 0137 - Generalization audit passes after prediction alias update
+
+- Files touched:
+  - `docs\generalization_audit.json`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m src.generalization_audit --json-output docs/generalization_audit.json`
+- Observed results/errors:
+  - Generalization audit returned `EXTERNAL GENERALIZATION AUDIT PROVEN`.
+  - All checks true, including claim registry complete, supported thresholds, no dev-only supported claims, unsupported claims preserved, traceability, no-hack, no text-as-state, hidden canary zero, and frozen hash unchanged.
+- Current blockers:
+  - Need rerun leakage scan and independent verifier after source/report changes.
+- Exact next action:
+  - Run `python -m audit.leakage_scan` and `python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_external_generalization.json`.
+
+## Step 0138 - Leakage scan and independent verifier pass after alias update
+
+- Files touched:
+  - `docs\audit_after_external_generalization.json`
+  - `docs\audit_after_external_generalization.md`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m audit.leakage_scan`
+  - `python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_external_generalization.json`
+  - `python -c "import json; v=json.load(open('docs/audit_after_external_generalization.json')); print({...})"`
+- Observed results/errors:
+  - Leakage scan returned `passes: true`; findings list empty; all leakage checks true.
+  - Independent verifier returned `AUDIT PROVEN`; verdict passes true.
+  - Verifier report proves exact command resolved to CUDA: `requested_device: auto`, `resolved_device: cuda`, CUDA available true, device count `2`.
+- Current blockers:
+  - Need final full pytest after alias patch and report regeneration.
+- Exact next action:
+  - Run `pytest -q`.
+
+## Step 0139 - Final full pytest passes after alias patch
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `pytest -q`
+- Observed results/errors:
+  - Full test suite passed: `57 passed in 52.68s`.
+- Current blockers:
+  - Need rerun completion audit query that previously found the claim field gap.
+- Exact next action:
+  - Run completion audit query over current generated reports and traces.
+
+## Step 0140 - Completion audit query passes all explicit external-discipline checks
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -c "import json, pathlib, sys ... completion audit checks ..."`
+- Observed results/errors:
+  - Completion audit query returned `all_pass: true`.
+  - Proven checks: external outcome, generalization audit outcome, independent verifier outcome, CUDA resolution for external evaluator and verifier, official ARC included, two additional external suites included, claim registry complete, claim fields complete, claim alias consistent, negative results preserved, required baselines complete, required ablations complete, dev/sealed split present, all traces exist, trace schema sample passes, no-hack passes, leakage passes, no text-as-state, hidden canary zero, frozen hash unchanged, no dev-only supported claims, unsupported claims preserved by audit.
+  - Suites verified: `official_arcagi3`, `gymnasium_classic_control`, `gymnasium_toy_text`.
+  - Trace count verified: `175`.
+  - Unsupported claims verified: curiosity, dialogue, exploration, head_collapse, memory, planner, social_state.
+  - Exact commands resolved to CUDA through auto device: external `[auto, cuda]`, verifier `[auto, cuda]`.
+- Current blockers:
+  - None for completion audit.
+- Exact next action:
+  - Inspect worktree diff and commit follow-up alias/report/context updates.
+
+## Step 0141 - Follow-up diff inspected before commit
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `git status --short`
+  - `git diff --stat`
+  - `git diff -- src\external_registry.py src\external_eval.py tests\test_external_generalization.py | Select-Object -First 220`
+- Observed results/errors:
+  - Modified files are scoped to `CONTEXT.MD`, regenerated external/audit reports, `src\external_eval.py`, `src\external_registry.py`, and `tests\test_external_generalization.py`.
+  - Code diff only adds the `external_prediction` alias, exposes prediction text in the markdown claim table, and tests alias consistency.
+  - Report diffs reflect exact command reruns and regenerated hashes/device metadata.
+- Current blockers:
+  - None.
+- Exact next action:
+  - Stage and commit the follow-up alias/report/context updates.
+
+## Step 0142 - Combined stage/commit command failed in PowerShell
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `git add CONTEXT.md src\external_registry.py src\external_eval.py tests\test_external_generalization.py docs\external_generalization_report.json docs\external_generalization_report.md docs\generalization_audit.json docs\audit_after_external_generalization.json docs\audit_after_external_generalization.md docs\external_traces && git commit -m "Add explicit external claim prediction field"`
+- Observed results/errors:
+  - Command failed before staging because this PowerShell version rejected `&&` as a statement separator.
+- Current blockers:
+  - None.
+- Exact next action:
+  - Run `git add` and `git commit` as separate commands.
