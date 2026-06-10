@@ -1,0 +1,1517 @@
+{
+  "terminal_outcome": "AUDIT PROVEN",
+  "requested_device": "auto",
+  "resolved_device": "cuda",
+  "runtime_status": {
+    "torch_cuda_available": true,
+    "torch_cuda_version": "12.8",
+    "torch_device_count": 2,
+    "torch_cuda_devices": [
+      "NVIDIA GeForce RTX 5060 Ti",
+      "NVIDIA GeForce RTX 5060 Ti"
+    ]
+  },
+  "commands_required": [
+    "pytest -q",
+    "python -m audit.leakage_scan",
+    "python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_conversation.json",
+    "python -m audit.probe_examples --checkpoint frozen/recurrent_latent_fast.pt --output docs/audit_probe_examples.md",
+    "python -m src.explorer_train --config tiny --output runs/explorer_tiny.pt",
+    "python -m src.explorer_eval --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --config tiny --json-output docs/explorer_report.json",
+    "python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_explorer.json",
+    "python -m src.head_collapse_eval --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --config tiny --json-output docs/head_collapse_report.json",
+    "python -m src.explorer_eval --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --config tiny --json-output docs/explorer_report_after_head_collapse.json",
+    "python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_head_collapse.json",
+    "python -m src.arcagi3_eval --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --config public --json-output docs/arcagi3_report.json --trace-dir docs/arcagi3_traces",
+    "python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_arcagi3.json",
+    "python -m src.arcagi3_diagnose --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --config official --json-output docs/arcagi3_failure_report.json --trace-dir docs/arcagi3_official_traces",
+    "python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_arcagi3_diagnosis.json",
+    "python -m src.external_eval --config external --json-output docs/external_generalization_report.json --trace-dir docs/external_traces --device cuda",
+    "python -m src.generalization_audit --json-output docs/generalization_audit.json",
+    "python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_external_generalization.json --device cuda"
+  ],
+  "hashes": {
+    "before": {
+      "frozen/recurrent_latent_fast.pt": {
+        "sha256": "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD",
+        "size_bytes": 169185
+      },
+      "frozen/manifest.json": {
+        "sha256": "DC1B411C5B33A70DE352DC5D3789DB3CED4283A17D8E7926AB2B9BB7D8FEB1C2",
+        "size_bytes": 614
+      },
+      "src/device.py": {
+        "sha256": "39DE3FFE33C752376B510FE7511071457D443995A7AB0D3778C3F970972999EE",
+        "size_bytes": 1323
+      },
+      "src/model.py": {
+        "sha256": "CE2838225E6852E64CA22D5A934B8ABAC6922D7377058F01F91CF5188CAC8DAF",
+        "size_bytes": 5684
+      },
+      "src/env.py": {
+        "sha256": "E1828F03448431F0989F828136743BB5A999F92A2356E39FF8A1D6484EE54195",
+        "size_bytes": 19620
+      },
+      "src/run_unbroken.py": {
+        "sha256": "63991C9CA9AA6C11F10E2FADD8DF1BD234E803FA4D747BD47CA98CF532CDB0F1",
+        "size_bytes": 3832
+      },
+      "src/persistent_memory.py": {
+        "sha256": "FE98387F699F3BD9842D6DD831C84210ACDC587ECDB5D3141D0A0CE9BD597124",
+        "size_bytes": 2734
+      },
+      "src/living_eval.py": {
+        "sha256": "35F183494A228248C8729634BBE213DBFF5E752EC7708C6545CB7B73F41F53DD",
+        "size_bytes": 13955
+      },
+      "src/curriculum.py": {
+        "sha256": "8B780E839C90DF3746EECE2D75640C86EBB2E7708C2AB28A91F90E6D01EE6A9C",
+        "size_bytes": 3811
+      },
+      "src/continual_learning.py": {
+        "sha256": "D48D3B2E09FAC56896EEAFCC6F3AFB26420EAD7A920A36BFFAC73E4801AE6A44",
+        "size_bytes": 5497
+      },
+      "src/retention_eval.py": {
+        "sha256": "91ECD1536C3CDF5C5EF01874596904631D4789CC2BBF77B12907451B1E397A4E",
+        "size_bytes": 13644
+      },
+      "src/human_memory.py": {
+        "sha256": "F25FC79DBEC8FA7445DACFA03A16916990C865961609B6704ABBD2F70630BC30",
+        "size_bytes": 14861
+      },
+      "src/memory_replay.py": {
+        "sha256": "5CF8DD8D8AD98CF2DE9031849C0EBCAF5F6835AEFA10EAB4432C30B9AE325F9D",
+        "size_bytes": 1845
+      },
+      "src/memory_eval.py": {
+        "sha256": "1DD45666FAD55E4431AE2CE97B8DE850959574F7CEED07A20DFD6F7EAF2D53BE",
+        "size_bytes": 21206
+      },
+      "src/language_organ.py": {
+        "sha256": "B275BF03F6267159DBFFC26687103C79CAB6D6A8D16C16A2566CEA77BF5AC1E5",
+        "size_bytes": 10113
+      },
+      "src/dialogue_env.py": {
+        "sha256": "ACF5187DA20D0176F273D3F15E6AB03B600FDEBDE877A3A17A953624270BF68D",
+        "size_bytes": 15702
+      },
+      "src/dialogue_train.py": {
+        "sha256": "EC3D88E5082F0DC6961A69BB04A11DCD725F3DB57F7508F6962DFFCF38CAAE6A",
+        "size_bytes": 5155
+      },
+      "src/dialogue_eval.py": {
+        "sha256": "AA7405911A3F37C4D1C55E92AE6E0CD27B9F15DFD40A7EA6EE3D6120174AEDAB",
+        "size_bytes": 16911
+      },
+      "src/free_text_decoder.py": {
+        "sha256": "73988AFAEC73FA90E8DF3619CDEE14344E875502658656275AFA0875CE0E938C",
+        "size_bytes": 11439
+      },
+      "src/conversation_env.py": {
+        "sha256": "3A240BEC9EA82140DC2B23F0524C2F2494D83616FCEBC511870A3E266E87B7D2",
+        "size_bytes": 20506
+      },
+      "src/conversation_train.py": {
+        "sha256": "934CD27748EAB5FADA5F4C0199BB0DD41B8F7988430953E6E24D15A9B6AA2B4D",
+        "size_bytes": 6592
+      },
+      "src/conversation_eval.py": {
+        "sha256": "9451D7A1890AAAAB323B4CFA2B07D80F2CF5158E98755979DA0D669E487327A8",
+        "size_bytes": 21475
+      },
+      "src/explore_env.py": {
+        "sha256": "8EB3B9134B13807F6998257FD9CF0B96D3EAE43FB46DA6EA5AC3AF18231B129F",
+        "size_bytes": 16129
+      },
+      "src/intrinsic_motivation.py": {
+        "sha256": "E8592E448B964B7C9A2131E123DE973BEF6F98831456698AA9028EC8594733CD",
+        "size_bytes": 2766
+      },
+      "src/unified_policy.py": {
+        "sha256": "C3A4E518B1F38005842A8171794928284FEB78E478902577B34DC81C41A53E2A",
+        "size_bytes": 4554
+      },
+      "src/world_model.py": {
+        "sha256": "D3A3A32B48BD0ABA4050F643BF8AD690E577A4BB61FBD916097AA227D1665744",
+        "size_bytes": 8858
+      },
+      "src/explorer_train.py": {
+        "sha256": "668468F111307720B235FF42FD876A8C58066CDC62B9B206E1F42E0C0CF36B23",
+        "size_bytes": 9770
+      },
+      "src/explorer_eval.py": {
+        "sha256": "8A90FDDF4B72F362F857DA2FD0AFE5FDBD3903093E03BBEB69F844DE67241B0F",
+        "size_bytes": 18920
+      },
+      "src/head_collapse.py": {
+        "sha256": "B54334C4D272059C832AFBE31F02F115FA01FA7B02102EF1ECE183E2BABA54AE",
+        "size_bytes": 4685
+      },
+      "src/head_collapse_eval.py": {
+        "sha256": "6901DB34B1589A55C6B828C163C9F1EE8E998D08A99315528B8D0B7A93BD85D5",
+        "size_bytes": 20774
+      },
+      "src/arcagi3_adapter.py": {
+        "sha256": "8B4006FA6C9F0652D28505AFCAC15DA54087504E8183D112C8CD078F1FCDDE91",
+        "size_bytes": 33374
+      },
+      "src/arcagi3_baselines.py": {
+        "sha256": "73B3F5146F2BC6699CAA8B7D50AEDED3AE3A49AC64749FE16E15C15F806F978E",
+        "size_bytes": 7770
+      },
+      "src/arcagi3_trace.py": {
+        "sha256": "AB94B296D18E601C3EC1BE8E21F322A0645B4AC9E4F790F4449ED5DD26F14DF1",
+        "size_bytes": 3480
+      },
+      "src/arcagi3_eval.py": {
+        "sha256": "821FBAB4B0C387483AF9CC0A0AF93F1009CDB95D30E2D04C77711199F706D68F",
+        "size_bytes": 19669
+      },
+      "src/arcagi3_official.py": {
+        "sha256": "876006CB9615982F5D340BA04305D9AA0E718985C5B100D62A909C149650B0F1",
+        "size_bytes": 17746
+      },
+      "src/arcagi3_official_eval.py": {
+        "sha256": "1A77FA59C19DC1FEE13D14084735C8F539FAB6A6809845542BFE6206ED37DB28",
+        "size_bytes": 17363
+      },
+      "src/arcagi3_trace_analysis.py": {
+        "sha256": "17DF255687D21697FCD2531219EA055EF4BC2BD7F71B87213AD10EDFA1D19B09",
+        "size_bytes": 24070
+      },
+      "src/arcagi3_failure_taxonomy.py": {
+        "sha256": "1FE239A3F4962DA93954C2BEDC95FD0094FB74F9A8923F5C74672F1F803433B3",
+        "size_bytes": 9524
+      },
+      "src/arcagi3_diagnose.py": {
+        "sha256": "C89BBDA6EB6BADF77E3F8ADF0E6E957CE3B870338A333A5957163E63FE42BBC5",
+        "size_bytes": 30059
+      },
+      "src/external_registry.py": {
+        "sha256": "3EE5774FE296399E7723F3346CA4843B62244A5AEFC9C851244E5977940AE440",
+        "size_bytes": 5480
+      },
+      "src/external_eval.py": {
+        "sha256": "C73110F2242292090932936D8B3EC66EE4C2B1AC820B24B6B67D65E731417C1D",
+        "size_bytes": 31459
+      },
+      "src/generalization_audit.py": {
+        "sha256": "49B2CB4E2373594644E393E6EA0C46C0C7EA0D56B9DC8DB8076D00D0F736A2E6",
+        "size_bytes": 23540
+      },
+      "src/train.py": {
+        "sha256": "C571828637D7CB55A4110EE7EDCF32EAD4B4177B9173E021BA7EF151D0935373",
+        "size_bytes": 10867
+      },
+      "src/evaluate.py": {
+        "sha256": "5B2FAE47B0A39930715215457D700D1999B03E7225B53A62026DE7E9DFE8AD45",
+        "size_bytes": 5828
+      },
+      "src/metrics.py": {
+        "sha256": "4060284E09909EDE9B832E0EAB98FE560D493FB389104A81C5473B1A445E755B",
+        "size_bytes": 3429
+      },
+      "tests/test_dialogue_organ.py": {
+        "sha256": "3912E8E00CC0D267F63A6389C800F2223130F85324636D22E299E23F8CBEA1F4",
+        "size_bytes": 2913
+      },
+      "tests/test_grounded_conversation.py": {
+        "sha256": "939F63164D4EE7DE4B7E1D618797D3287898C14A10812D540601F3B70B8B527F",
+        "size_bytes": 2932
+      },
+      "tests/test_explorer_mindlike.py": {
+        "sha256": "6F1CB06A9521179DE7E79C1547E4B2918E4E64B08760BD66302A9BC17DCC2E4A",
+        "size_bytes": 3059
+      },
+      "tests/test_head_collapse.py": {
+        "sha256": "A9C3B958EAB0C606915B109E881111F2815A83BD22D619CE9A62D9EE1DA453B8",
+        "size_bytes": 2520
+      },
+      "tests/test_arcagi3_adapter.py": {
+        "sha256": "BD969AD738CA5D6AA70B755FD73FA60FF5A2C4C37D3B60C2AC566DDBA472BC73",
+        "size_bytes": 2024
+      },
+      "tests/test_arcagi3_diagnosis.py": {
+        "sha256": "4FDA10350732B9AEC13847A811349028F3D342F2557D5EB1F15BD679D5260371",
+        "size_bytes": 3778
+      },
+      "tests/test_external_generalization.py": {
+        "sha256": "195D4E4991970BBEF88E51B442FD8C2BC01A18A3421AB02704DCA72318AFAFD2",
+        "size_bytes": 3355
+      },
+      "README.md": {
+        "sha256": "0D96EEC67ADB0A0EE351DDE89DEFD7339C846B15A5DD652CCDE24A321A038DAD",
+        "size_bytes": 9974
+      },
+      "docs/living_system_report.json": {
+        "sha256": "90155A6701C66A50EEAC0720ED5FA2049AC8B622EECDB9539E6C303A0A741C8B",
+        "size_bytes": 2153
+      },
+      "docs/evidence_dossier.json": {
+        "sha256": "8021CC9CFE35128C76A8D1772C17B4621D92425FAA7C6F7E8D4A9E26161D3D06",
+        "size_bytes": 78295
+      },
+      "docs/dialogue_report.json": {
+        "sha256": "6E933275A0490D2AE0D27641682F6BA91C555F7C7840E76325967414054402E5",
+        "size_bytes": 12439
+      },
+      "docs/conversation_report.json": {
+        "sha256": "8F7FFC90407C0C61C71A79F954EDF1A906031D2616371FE48B9100FE2288C179",
+        "size_bytes": 15346
+      },
+      "docs/explorer_report.json": {
+        "sha256": "468FE75373322CF9C277204A4722E2A45EFD0FEA6FACF1639F86D9A330E4D818",
+        "size_bytes": 9128
+      },
+      "docs/audit_after_explorer.json": {
+        "sha256": "436950EFD99B41A96B4C52A9CFF63009251E12973F6030FBB107E8E8B6D98786",
+        "size_bytes": 53944
+      },
+      "docs/head_collapse_report.json": {
+        "sha256": "483BB0FF930F465258FE3BAE2510554D90E4DE62646D737B9A19AC2C0FE7A4FC",
+        "size_bytes": 23206
+      },
+      "docs/explorer_report_after_head_collapse.json": {
+        "sha256": "2D3AC69C2E905F53F5ED8B893CFEB6567DE47F785A8FCA3E342BCE60B5245235",
+        "size_bytes": 9826
+      },
+      "docs/audit_after_head_collapse.json": {
+        "sha256": "A624B99DBD2310DB820FCA415D166CF7A7A04F2A955CB0D62E0B928A008C1605",
+        "size_bytes": 56787
+      },
+      "docs/arcagi3_public_fixtures.json": {
+        "sha256": "CCFE0B033858DC51081BD927271E50DB395BF44A165B3490448ED5945C7784DE",
+        "size_bytes": 3193
+      },
+      "docs/arcagi3_report.json": {
+        "sha256": "90F5F0D234D7DBF4A940F7F727C64F34F22254AA6BA0A5FEC926CAB6ECE92FC2",
+        "size_bytes": 13388
+      },
+      "docs/arcagi3_official_games.json": {
+        "sha256": "D53306798076584294E15E310966625EA1A1DE29CFCFC1C19E854A7C5C5C352C",
+        "size_bytes": 7158
+      },
+      "docs/arcagi3_official_report.json": {
+        "sha256": "D7EE396BC14A17EAE7DD1054F70D754C1BD281B8349484192CC89FFCA1891BD7",
+        "size_bytes": 89527
+      },
+      "docs/arcagi3_official_cuda_report.json": {
+        "sha256": "DF5921FABE27E6CF5FBF072D608007EFE412304BF5DD6F3CE3A56738DB3DCD9D",
+        "size_bytes": 102937
+      },
+      "docs/arcagi3_failure_report.json": {
+        "sha256": "3B9AC146B3BF882757C5A9F24151586EDB019D0F85E652BA4BFEF2ACE81FC8F4",
+        "size_bytes": 425798
+      },
+      "docs/arcagi3_failure_report.md": {
+        "sha256": "B6327E0EAE0C366517F4620E6BA61C07D065C4B98BF17929CF065198E6615EAC",
+        "size_bytes": 9652
+      },
+      "docs/audit_after_arcagi3.json": {
+        "sha256": "7DB9886DE84BC176A666776658F8DA7BBBF1EE8C739C3098D48D9396E8E6818C",
+        "size_bytes": 59934
+      },
+      "docs/audit_after_arcagi3_diagnosis.json": {
+        "sha256": "A7439E4F2DEDE7D31D525EC0C6B7730BC01C246AA7E8F6898DCDA871640CCC30",
+        "size_bytes": 64457
+      },
+      "docs/external_generalization_report.json": {
+        "sha256": "34D5E34D0249DEDEA3AAA1A2E31DB33FCAA0CC1DBA70A8F77B30F40628E4C2AC",
+        "size_bytes": 252341
+      },
+      "docs/external_generalization_report.md": {
+        "sha256": "C7FC4D96CAF978DB928EC7EE52043BB41D69278F5EBF37A040A0933899DFC226",
+        "size_bytes": 10398
+      },
+      "docs/generalization_audit.json": {
+        "sha256": "61ACEC372BEFAAC614046756AAAE16F40BCC22E3C3690687930C76F3478BF5B0",
+        "size_bytes": 5808
+      },
+      "docs/audit_after_external_generalization.json": {
+        "sha256": "5B5F5E57FA7474A756FCD6050BFC6EFE6CEF987AC15D9694E63DBF0C0680DCAE",
+        "size_bytes": 68428
+      }
+    },
+    "after": {
+      "frozen/recurrent_latent_fast.pt": {
+        "sha256": "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD",
+        "size_bytes": 169185
+      },
+      "frozen/manifest.json": {
+        "sha256": "DC1B411C5B33A70DE352DC5D3789DB3CED4283A17D8E7926AB2B9BB7D8FEB1C2",
+        "size_bytes": 614
+      },
+      "src/device.py": {
+        "sha256": "39DE3FFE33C752376B510FE7511071457D443995A7AB0D3778C3F970972999EE",
+        "size_bytes": 1323
+      },
+      "src/model.py": {
+        "sha256": "CE2838225E6852E64CA22D5A934B8ABAC6922D7377058F01F91CF5188CAC8DAF",
+        "size_bytes": 5684
+      },
+      "src/env.py": {
+        "sha256": "E1828F03448431F0989F828136743BB5A999F92A2356E39FF8A1D6484EE54195",
+        "size_bytes": 19620
+      },
+      "src/run_unbroken.py": {
+        "sha256": "63991C9CA9AA6C11F10E2FADD8DF1BD234E803FA4D747BD47CA98CF532CDB0F1",
+        "size_bytes": 3832
+      },
+      "src/persistent_memory.py": {
+        "sha256": "FE98387F699F3BD9842D6DD831C84210ACDC587ECDB5D3141D0A0CE9BD597124",
+        "size_bytes": 2734
+      },
+      "src/living_eval.py": {
+        "sha256": "35F183494A228248C8729634BBE213DBFF5E752EC7708C6545CB7B73F41F53DD",
+        "size_bytes": 13955
+      },
+      "src/curriculum.py": {
+        "sha256": "8B780E839C90DF3746EECE2D75640C86EBB2E7708C2AB28A91F90E6D01EE6A9C",
+        "size_bytes": 3811
+      },
+      "src/continual_learning.py": {
+        "sha256": "D48D3B2E09FAC56896EEAFCC6F3AFB26420EAD7A920A36BFFAC73E4801AE6A44",
+        "size_bytes": 5497
+      },
+      "src/retention_eval.py": {
+        "sha256": "91ECD1536C3CDF5C5EF01874596904631D4789CC2BBF77B12907451B1E397A4E",
+        "size_bytes": 13644
+      },
+      "src/human_memory.py": {
+        "sha256": "F25FC79DBEC8FA7445DACFA03A16916990C865961609B6704ABBD2F70630BC30",
+        "size_bytes": 14861
+      },
+      "src/memory_replay.py": {
+        "sha256": "5CF8DD8D8AD98CF2DE9031849C0EBCAF5F6835AEFA10EAB4432C30B9AE325F9D",
+        "size_bytes": 1845
+      },
+      "src/memory_eval.py": {
+        "sha256": "1DD45666FAD55E4431AE2CE97B8DE850959574F7CEED07A20DFD6F7EAF2D53BE",
+        "size_bytes": 21206
+      },
+      "src/language_organ.py": {
+        "sha256": "B275BF03F6267159DBFFC26687103C79CAB6D6A8D16C16A2566CEA77BF5AC1E5",
+        "size_bytes": 10113
+      },
+      "src/dialogue_env.py": {
+        "sha256": "ACF5187DA20D0176F273D3F15E6AB03B600FDEBDE877A3A17A953624270BF68D",
+        "size_bytes": 15702
+      },
+      "src/dialogue_train.py": {
+        "sha256": "EC3D88E5082F0DC6961A69BB04A11DCD725F3DB57F7508F6962DFFCF38CAAE6A",
+        "size_bytes": 5155
+      },
+      "src/dialogue_eval.py": {
+        "sha256": "AA7405911A3F37C4D1C55E92AE6E0CD27B9F15DFD40A7EA6EE3D6120174AEDAB",
+        "size_bytes": 16911
+      },
+      "src/free_text_decoder.py": {
+        "sha256": "73988AFAEC73FA90E8DF3619CDEE14344E875502658656275AFA0875CE0E938C",
+        "size_bytes": 11439
+      },
+      "src/conversation_env.py": {
+        "sha256": "3A240BEC9EA82140DC2B23F0524C2F2494D83616FCEBC511870A3E266E87B7D2",
+        "size_bytes": 20506
+      },
+      "src/conversation_train.py": {
+        "sha256": "934CD27748EAB5FADA5F4C0199BB0DD41B8F7988430953E6E24D15A9B6AA2B4D",
+        "size_bytes": 6592
+      },
+      "src/conversation_eval.py": {
+        "sha256": "9451D7A1890AAAAB323B4CFA2B07D80F2CF5158E98755979DA0D669E487327A8",
+        "size_bytes": 21475
+      },
+      "src/explore_env.py": {
+        "sha256": "8EB3B9134B13807F6998257FD9CF0B96D3EAE43FB46DA6EA5AC3AF18231B129F",
+        "size_bytes": 16129
+      },
+      "src/intrinsic_motivation.py": {
+        "sha256": "E8592E448B964B7C9A2131E123DE973BEF6F98831456698AA9028EC8594733CD",
+        "size_bytes": 2766
+      },
+      "src/unified_policy.py": {
+        "sha256": "C3A4E518B1F38005842A8171794928284FEB78E478902577B34DC81C41A53E2A",
+        "size_bytes": 4554
+      },
+      "src/world_model.py": {
+        "sha256": "D3A3A32B48BD0ABA4050F643BF8AD690E577A4BB61FBD916097AA227D1665744",
+        "size_bytes": 8858
+      },
+      "src/explorer_train.py": {
+        "sha256": "668468F111307720B235FF42FD876A8C58066CDC62B9B206E1F42E0C0CF36B23",
+        "size_bytes": 9770
+      },
+      "src/explorer_eval.py": {
+        "sha256": "8A90FDDF4B72F362F857DA2FD0AFE5FDBD3903093E03BBEB69F844DE67241B0F",
+        "size_bytes": 18920
+      },
+      "src/head_collapse.py": {
+        "sha256": "B54334C4D272059C832AFBE31F02F115FA01FA7B02102EF1ECE183E2BABA54AE",
+        "size_bytes": 4685
+      },
+      "src/head_collapse_eval.py": {
+        "sha256": "6901DB34B1589A55C6B828C163C9F1EE8E998D08A99315528B8D0B7A93BD85D5",
+        "size_bytes": 20774
+      },
+      "src/arcagi3_adapter.py": {
+        "sha256": "8B4006FA6C9F0652D28505AFCAC15DA54087504E8183D112C8CD078F1FCDDE91",
+        "size_bytes": 33374
+      },
+      "src/arcagi3_baselines.py": {
+        "sha256": "73B3F5146F2BC6699CAA8B7D50AEDED3AE3A49AC64749FE16E15C15F806F978E",
+        "size_bytes": 7770
+      },
+      "src/arcagi3_trace.py": {
+        "sha256": "AB94B296D18E601C3EC1BE8E21F322A0645B4AC9E4F790F4449ED5DD26F14DF1",
+        "size_bytes": 3480
+      },
+      "src/arcagi3_eval.py": {
+        "sha256": "821FBAB4B0C387483AF9CC0A0AF93F1009CDB95D30E2D04C77711199F706D68F",
+        "size_bytes": 19669
+      },
+      "src/arcagi3_official.py": {
+        "sha256": "876006CB9615982F5D340BA04305D9AA0E718985C5B100D62A909C149650B0F1",
+        "size_bytes": 17746
+      },
+      "src/arcagi3_official_eval.py": {
+        "sha256": "1A77FA59C19DC1FEE13D14084735C8F539FAB6A6809845542BFE6206ED37DB28",
+        "size_bytes": 17363
+      },
+      "src/arcagi3_trace_analysis.py": {
+        "sha256": "17DF255687D21697FCD2531219EA055EF4BC2BD7F71B87213AD10EDFA1D19B09",
+        "size_bytes": 24070
+      },
+      "src/arcagi3_failure_taxonomy.py": {
+        "sha256": "1FE239A3F4962DA93954C2BEDC95FD0094FB74F9A8923F5C74672F1F803433B3",
+        "size_bytes": 9524
+      },
+      "src/arcagi3_diagnose.py": {
+        "sha256": "C89BBDA6EB6BADF77E3F8ADF0E6E957CE3B870338A333A5957163E63FE42BBC5",
+        "size_bytes": 30059
+      },
+      "src/external_registry.py": {
+        "sha256": "3EE5774FE296399E7723F3346CA4843B62244A5AEFC9C851244E5977940AE440",
+        "size_bytes": 5480
+      },
+      "src/external_eval.py": {
+        "sha256": "C73110F2242292090932936D8B3EC66EE4C2B1AC820B24B6B67D65E731417C1D",
+        "size_bytes": 31459
+      },
+      "src/generalization_audit.py": {
+        "sha256": "49B2CB4E2373594644E393E6EA0C46C0C7EA0D56B9DC8DB8076D00D0F736A2E6",
+        "size_bytes": 23540
+      },
+      "src/train.py": {
+        "sha256": "C571828637D7CB55A4110EE7EDCF32EAD4B4177B9173E021BA7EF151D0935373",
+        "size_bytes": 10867
+      },
+      "src/evaluate.py": {
+        "sha256": "5B2FAE47B0A39930715215457D700D1999B03E7225B53A62026DE7E9DFE8AD45",
+        "size_bytes": 5828
+      },
+      "src/metrics.py": {
+        "sha256": "4060284E09909EDE9B832E0EAB98FE560D493FB389104A81C5473B1A445E755B",
+        "size_bytes": 3429
+      },
+      "tests/test_dialogue_organ.py": {
+        "sha256": "3912E8E00CC0D267F63A6389C800F2223130F85324636D22E299E23F8CBEA1F4",
+        "size_bytes": 2913
+      },
+      "tests/test_grounded_conversation.py": {
+        "sha256": "939F63164D4EE7DE4B7E1D618797D3287898C14A10812D540601F3B70B8B527F",
+        "size_bytes": 2932
+      },
+      "tests/test_explorer_mindlike.py": {
+        "sha256": "6F1CB06A9521179DE7E79C1547E4B2918E4E64B08760BD66302A9BC17DCC2E4A",
+        "size_bytes": 3059
+      },
+      "tests/test_head_collapse.py": {
+        "sha256": "A9C3B958EAB0C606915B109E881111F2815A83BD22D619CE9A62D9EE1DA453B8",
+        "size_bytes": 2520
+      },
+      "tests/test_arcagi3_adapter.py": {
+        "sha256": "BD969AD738CA5D6AA70B755FD73FA60FF5A2C4C37D3B60C2AC566DDBA472BC73",
+        "size_bytes": 2024
+      },
+      "tests/test_arcagi3_diagnosis.py": {
+        "sha256": "4FDA10350732B9AEC13847A811349028F3D342F2557D5EB1F15BD679D5260371",
+        "size_bytes": 3778
+      },
+      "tests/test_external_generalization.py": {
+        "sha256": "195D4E4991970BBEF88E51B442FD8C2BC01A18A3421AB02704DCA72318AFAFD2",
+        "size_bytes": 3355
+      },
+      "README.md": {
+        "sha256": "0D96EEC67ADB0A0EE351DDE89DEFD7339C846B15A5DD652CCDE24A321A038DAD",
+        "size_bytes": 9974
+      },
+      "docs/living_system_report.json": {
+        "sha256": "90155A6701C66A50EEAC0720ED5FA2049AC8B622EECDB9539E6C303A0A741C8B",
+        "size_bytes": 2153
+      },
+      "docs/evidence_dossier.json": {
+        "sha256": "8021CC9CFE35128C76A8D1772C17B4621D92425FAA7C6F7E8D4A9E26161D3D06",
+        "size_bytes": 78295
+      },
+      "docs/dialogue_report.json": {
+        "sha256": "6E933275A0490D2AE0D27641682F6BA91C555F7C7840E76325967414054402E5",
+        "size_bytes": 12439
+      },
+      "docs/conversation_report.json": {
+        "sha256": "8F7FFC90407C0C61C71A79F954EDF1A906031D2616371FE48B9100FE2288C179",
+        "size_bytes": 15346
+      },
+      "docs/explorer_report.json": {
+        "sha256": "468FE75373322CF9C277204A4722E2A45EFD0FEA6FACF1639F86D9A330E4D818",
+        "size_bytes": 9128
+      },
+      "docs/audit_after_explorer.json": {
+        "sha256": "436950EFD99B41A96B4C52A9CFF63009251E12973F6030FBB107E8E8B6D98786",
+        "size_bytes": 53944
+      },
+      "docs/head_collapse_report.json": {
+        "sha256": "483BB0FF930F465258FE3BAE2510554D90E4DE62646D737B9A19AC2C0FE7A4FC",
+        "size_bytes": 23206
+      },
+      "docs/explorer_report_after_head_collapse.json": {
+        "sha256": "2D3AC69C2E905F53F5ED8B893CFEB6567DE47F785A8FCA3E342BCE60B5245235",
+        "size_bytes": 9826
+      },
+      "docs/audit_after_head_collapse.json": {
+        "sha256": "A624B99DBD2310DB820FCA415D166CF7A7A04F2A955CB0D62E0B928A008C1605",
+        "size_bytes": 56787
+      },
+      "docs/arcagi3_public_fixtures.json": {
+        "sha256": "CCFE0B033858DC51081BD927271E50DB395BF44A165B3490448ED5945C7784DE",
+        "size_bytes": 3193
+      },
+      "docs/arcagi3_report.json": {
+        "sha256": "90F5F0D234D7DBF4A940F7F727C64F34F22254AA6BA0A5FEC926CAB6ECE92FC2",
+        "size_bytes": 13388
+      },
+      "docs/arcagi3_official_games.json": {
+        "sha256": "D53306798076584294E15E310966625EA1A1DE29CFCFC1C19E854A7C5C5C352C",
+        "size_bytes": 7158
+      },
+      "docs/arcagi3_official_report.json": {
+        "sha256": "D7EE396BC14A17EAE7DD1054F70D754C1BD281B8349484192CC89FFCA1891BD7",
+        "size_bytes": 89527
+      },
+      "docs/arcagi3_official_cuda_report.json": {
+        "sha256": "DF5921FABE27E6CF5FBF072D608007EFE412304BF5DD6F3CE3A56738DB3DCD9D",
+        "size_bytes": 102937
+      },
+      "docs/arcagi3_failure_report.json": {
+        "sha256": "3B9AC146B3BF882757C5A9F24151586EDB019D0F85E652BA4BFEF2ACE81FC8F4",
+        "size_bytes": 425798
+      },
+      "docs/arcagi3_failure_report.md": {
+        "sha256": "B6327E0EAE0C366517F4620E6BA61C07D065C4B98BF17929CF065198E6615EAC",
+        "size_bytes": 9652
+      },
+      "docs/audit_after_arcagi3.json": {
+        "sha256": "7DB9886DE84BC176A666776658F8DA7BBBF1EE8C739C3098D48D9396E8E6818C",
+        "size_bytes": 59934
+      },
+      "docs/audit_after_arcagi3_diagnosis.json": {
+        "sha256": "A7439E4F2DEDE7D31D525EC0C6B7730BC01C246AA7E8F6898DCDA871640CCC30",
+        "size_bytes": 64457
+      },
+      "docs/external_generalization_report.json": {
+        "sha256": "34D5E34D0249DEDEA3AAA1A2E31DB33FCAA0CC1DBA70A8F77B30F40628E4C2AC",
+        "size_bytes": 252341
+      },
+      "docs/external_generalization_report.md": {
+        "sha256": "C7FC4D96CAF978DB928EC7EE52043BB41D69278F5EBF37A040A0933899DFC226",
+        "size_bytes": 10398
+      },
+      "docs/generalization_audit.json": {
+        "sha256": "61ACEC372BEFAAC614046756AAAE16F40BCC22E3C3690687930C76F3478BF5B0",
+        "size_bytes": 5808
+      },
+      "docs/audit_after_external_generalization.json": {
+        "sha256": "5B5F5E57FA7474A756FCD6050BFC6EFE6CEF987AC15D9694E63DBF0C0680DCAE",
+        "size_bytes": 68428
+      }
+    },
+    "manifest_before": {
+      "manifest": {
+        "checkpoint": "frozen/recurrent_latent_fast.pt",
+        "checkpoint_sha256": "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD",
+        "checkpoint_size_bytes": 169185,
+        "source_checkpoint": "runs/living_latest.pt",
+        "model_file": "src/model.py",
+        "model_sha256": "CE2838225E6852E64CA22D5A934B8ABAC6922D7377058F01F91CF5188CAC8DAF",
+        "status": "frozen_for_living_system_evaluation",
+        "notes": "Checkpoint was produced locally by the repository training path after adding persistent tensor memory, private internal tokens, richer body dynamics, idle anti-repetition, and curriculum-growth support."
+      },
+      "model_hash_matches": true,
+      "checkpoint_hash_matches": true,
+      "checkpoint_size_matches": true
+    },
+    "manifest_after": {
+      "manifest": {
+        "checkpoint": "frozen/recurrent_latent_fast.pt",
+        "checkpoint_sha256": "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD",
+        "checkpoint_size_bytes": 169185,
+        "source_checkpoint": "runs/living_latest.pt",
+        "model_file": "src/model.py",
+        "model_sha256": "CE2838225E6852E64CA22D5A934B8ABAC6922D7377058F01F91CF5188CAC8DAF",
+        "status": "frozen_for_living_system_evaluation",
+        "notes": "Checkpoint was produced locally by the repository training path after adding persistent tensor memory, private internal tokens, richer body dynamics, idle anti-repetition, and curriculum-growth support."
+      },
+      "model_hash_matches": true,
+      "checkpoint_hash_matches": true,
+      "checkpoint_size_matches": true
+    },
+    "frozen_unchanged": true
+  },
+  "leakage_scan": {
+    "passes": true,
+    "python_files_scanned": [
+      "src\\__init__.py",
+      "src\\adversarial.py",
+      "src\\arcagi3_adapter.py",
+      "src\\arcagi3_baselines.py",
+      "src\\arcagi3_diagnose.py",
+      "src\\arcagi3_eval.py",
+      "src\\arcagi3_failure_taxonomy.py",
+      "src\\arcagi3_official.py",
+      "src\\arcagi3_official_eval.py",
+      "src\\arcagi3_trace.py",
+      "src\\arcagi3_trace_analysis.py",
+      "src\\base_eval.py",
+      "src\\base_pretrain.py",
+      "src\\base_retrain_experiment.py",
+      "src\\base_world_model.py",
+      "src\\continual_learning.py",
+      "src\\conversation_env.py",
+      "src\\conversation_eval.py",
+      "src\\conversation_train.py",
+      "src\\curriculum.py",
+      "src\\device.py",
+      "src\\dialogue_env.py",
+      "src\\dialogue_eval.py",
+      "src\\dialogue_train.py",
+      "src\\env.py",
+      "src\\evaluate.py",
+      "src\\evidence_dossier.py",
+      "src\\explore_env.py",
+      "src\\explorer_eval.py",
+      "src\\explorer_train.py",
+      "src\\external_affordance.py",
+      "src\\external_collapse_experiment.py",
+      "src\\external_eval.py",
+      "src\\external_perception_experiment.py",
+      "src\\external_registry.py",
+      "src\\external_valence.py",
+      "src\\free_text_decoder.py",
+      "src\\generalization_audit.py",
+      "src\\head_collapse.py",
+      "src\\head_collapse_eval.py",
+      "src\\heldout_causal.py",
+      "src\\human_memory.py",
+      "src\\intrinsic_motivation.py",
+      "src\\language_organ.py",
+      "src\\living_eval.py",
+      "src\\memory_eval.py",
+      "src\\memory_replay.py",
+      "src\\metrics.py",
+      "src\\model.py",
+      "src\\perception_eval.py",
+      "src\\perception_train.py",
+      "src\\perceptual_affordance.py",
+      "src\\persistent_memory.py",
+      "src\\retention_eval.py",
+      "src\\run_unbroken.py",
+      "src\\trace_collect.py",
+      "src\\train.py",
+      "src\\unified_policy.py",
+      "src\\world_model.py",
+      "tests\\conftest.py",
+      "tests\\test_adversarial.py",
+      "tests\\test_arcagi3_adapter.py",
+      "tests\\test_arcagi3_diagnosis.py",
+      "tests\\test_architecture.py",
+      "tests\\test_audit_proof.py",
+      "tests\\test_device_placement.py",
+      "tests\\test_dialogue_organ.py",
+      "tests\\test_evidence_dossier.py",
+      "tests\\test_explorer_mindlike.py",
+      "tests\\test_external_base_training.py",
+      "tests\\test_external_collapse.py",
+      "tests\\test_external_generalization.py",
+      "tests\\test_frozen_artifacts.py",
+      "tests\\test_grounded_conversation.py",
+      "tests\\test_head_collapse.py",
+      "tests\\test_heldout_causal.py",
+      "tests\\test_human_memory.py",
+      "tests\\test_living_system.py",
+      "tests\\test_no_pretrained.py",
+      "tests\\test_perceptual_affordance.py",
+      "tests\\test_retention_fix.py",
+      "tests\\test_training_smoke.py",
+      "tests\\test_unbroken_runtime.py",
+      "audit\\__init__.py",
+      "audit\\independent_verify.py",
+      "audit\\leakage_scan.py",
+      "audit\\probe_examples.py"
+    ],
+    "findings": [],
+    "checks": {
+      "no_external_or_pretrained_imports": true,
+      "no_external_or_pretrained_text_patterns": true,
+      "no_unexpected_weight_files": true,
+      "runtime_not_prompt_loop": true
+    }
+  },
+  "living_rerun": {
+    "durable_restart": {
+      "restart_tick": 70.0,
+      "normal_final_memory_accuracy": 0.9375,
+      "memory_file_restart_final_memory_accuracy": 0.9375,
+      "zero_reset_final_memory_accuracy": 0.1796875,
+      "normal_final_object_pos_accuracy": 1.0,
+      "memory_file_restart_final_object_pos_accuracy": 1.0,
+      "zero_reset_final_object_pos_accuracy": 0.1875
+    },
+    "idle_mode": {
+      "idle_ticks": 96.0,
+      "final_memory_accuracy": 1.0,
+      "final_object_pos_accuracy": 1.0,
+      "endogenous_goal_action_accuracy": 1.0,
+      "public_language_repetition_ratio": 0.28159844875335693,
+      "private_token_repetition_ratio": 0.0,
+      "private_token_unique_count": 8.0,
+      "latent_active_fraction": 1.0,
+      "latent_effective_rank": 15.644668579101562,
+      "latent_max_quantized_fraction": 8.138020833333333e-05
+    },
+    "richer_dynamics": {
+      "failed_action_no_move": 1.0,
+      "failed_action_damage_delta": 0.04000000000000001,
+      "rest_healed_and_restored_energy": 1.0,
+      "forage_restored_energy_and_resource": 1.0,
+      "hazard_caused_damage": 1.0
+    },
+    "private_internal_language": {
+      "generated_private_unique_count": 17.0,
+      "generated_private_repetition_ratio": 0.27111488580703735,
+      "private_channel_action_shift_rate": 0.468052476644516,
+      "private_channel_language_shift_rate": 0.3676758110523224
+    },
+    "curriculum_growth": {
+      "concept_id": 1.0,
+      "steps": 80.0,
+      "accuracy_before": 0.0,
+      "accuracy_after": 1.0,
+      "accuracy_delta": 1.0,
+      "final_loss": 0.0,
+      "changes_weights": 0.0,
+      "changes_persistent_memory": 1.0
+    },
+    "verdict": {
+      "passes": true,
+      "checks": {
+        "memory_file_restart_memory_ge_0_85": true,
+        "memory_file_beats_zero_reset_by_0_40": true,
+        "idle_public_repetition_lt_0_40": true,
+        "idle_private_repetition_lt_0_40": true,
+        "idle_preserves_goal_memory": true,
+        "idle_endogenous_goal_action_ge_0_70": true,
+        "richer_dynamics_all_present": true,
+        "private_tokens_generated_and_used": true,
+        "curriculum_accuracy_after_ge_0_80": true,
+        "curriculum_improves_by_0_30": true
+      }
+    }
+  },
+  "living_report_comparison": {
+    "tolerance": 0.02,
+    "material_differences": [],
+    "verdict_matches": true,
+    "rows": [
+      {
+        "metric": "curriculum_growth.accuracy_after",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "curriculum_growth.accuracy_before",
+        "existing": 0.0,
+        "rerun": 0.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "curriculum_growth.accuracy_delta",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "curriculum_growth.changes_persistent_memory",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "curriculum_growth.changes_weights",
+        "existing": 0.0,
+        "rerun": 0.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "curriculum_growth.concept_id",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "curriculum_growth.final_loss",
+        "existing": 0.0,
+        "rerun": 0.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "curriculum_growth.steps",
+        "existing": 80.0,
+        "rerun": 80.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "durable_restart.memory_file_restart_final_memory_accuracy",
+        "existing": 0.9375,
+        "rerun": 0.9375,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "durable_restart.memory_file_restart_final_object_pos_accuracy",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "durable_restart.normal_final_memory_accuracy",
+        "existing": 0.9375,
+        "rerun": 0.9375,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "durable_restart.normal_final_object_pos_accuracy",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "durable_restart.restart_tick",
+        "existing": 70.0,
+        "rerun": 70.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "durable_restart.zero_reset_final_memory_accuracy",
+        "existing": 0.1796875,
+        "rerun": 0.1796875,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "durable_restart.zero_reset_final_object_pos_accuracy",
+        "existing": 0.1875,
+        "rerun": 0.1875,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "idle_mode.endogenous_goal_action_accuracy",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "idle_mode.final_memory_accuracy",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "idle_mode.final_object_pos_accuracy",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "idle_mode.idle_ticks",
+        "existing": 96.0,
+        "rerun": 96.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "idle_mode.latent_active_fraction",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "idle_mode.latent_effective_rank",
+        "existing": 15.644668579101562,
+        "rerun": 15.644668579101562,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "idle_mode.latent_max_quantized_fraction",
+        "existing": 8.138020833333333e-05,
+        "rerun": 8.138020833333333e-05,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "idle_mode.private_token_repetition_ratio",
+        "existing": 0.0,
+        "rerun": 0.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "idle_mode.private_token_unique_count",
+        "existing": 8.0,
+        "rerun": 8.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "idle_mode.public_language_repetition_ratio",
+        "existing": 0.28159844875335693,
+        "rerun": 0.28159844875335693,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "private_internal_language.generated_private_repetition_ratio",
+        "existing": 0.27111488580703735,
+        "rerun": 0.27111488580703735,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "private_internal_language.generated_private_unique_count",
+        "existing": 17.0,
+        "rerun": 17.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "private_internal_language.private_channel_action_shift_rate",
+        "existing": 0.468052476644516,
+        "rerun": 0.468052476644516,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "private_internal_language.private_channel_language_shift_rate",
+        "existing": 0.3676758110523224,
+        "rerun": 0.3676758110523224,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "richer_dynamics.failed_action_damage_delta",
+        "existing": 0.04000000000000001,
+        "rerun": 0.04000000000000001,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "richer_dynamics.failed_action_no_move",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "richer_dynamics.forage_restored_energy_and_resource",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "richer_dynamics.hazard_caused_damage",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "richer_dynamics.rest_healed_and_restored_energy",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "verdict.checks.curriculum_accuracy_after_ge_0_80",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "verdict.checks.curriculum_improves_by_0_30",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "verdict.checks.idle_endogenous_goal_action_ge_0_70",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "verdict.checks.idle_preserves_goal_memory",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "verdict.checks.idle_private_repetition_lt_0_40",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "verdict.checks.idle_public_repetition_lt_0_40",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "verdict.checks.memory_file_beats_zero_reset_by_0_40",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "verdict.checks.memory_file_restart_memory_ge_0_85",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "verdict.checks.private_tokens_generated_and_used",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "verdict.checks.richer_dynamics_all_present",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      },
+      {
+        "metric": "verdict.passes",
+        "existing": 1.0,
+        "rerun": 1.0,
+        "abs_diff": 0.0
+      }
+    ]
+  },
+  "durable_memory": {
+    "restart_tick": 70,
+    "normal_final_memory_accuracy": 0.9375,
+    "memory_file_restart_final_memory_accuracy": 0.9375,
+    "zero_reset_final_memory_accuracy": 0.1796875,
+    "normal_final_object_pos_accuracy": 1.0,
+    "memory_file_restart_final_object_pos_accuracy": 1.0,
+    "zero_reset_final_object_pos_accuracy": 0.1875,
+    "corrupt_memory_final_memory_accuracy": 0.25,
+    "corrupt_memory_final_object_pos_accuracy": 0.203125,
+    "checks": {
+      "memory_file_good": true,
+      "memory_beats_zero_reset": true,
+      "corrupt_degrades_memory": true
+    }
+  },
+  "idle_mode": {
+    "idle_ticks": 96.0,
+    "final_memory_accuracy": 1.0,
+    "final_object_pos_accuracy": 1.0,
+    "endogenous_goal_action_accuracy": 1.0,
+    "public_language_repetition_ratio": 0.28159844875335693,
+    "private_token_repetition_ratio": 0.0,
+    "private_token_unique_count": 8.0,
+    "latent_active_fraction": 1.0,
+    "latent_effective_rank": 15.644668579101562,
+    "latent_max_quantized_fraction": 8.138020833333333e-05
+  },
+  "idle_trajectory": [
+    {
+      "tick": 0,
+      "token": "OBSERVE_OBJECT",
+      "visible": true,
+      "private_in": 0,
+      "generated_private": 1,
+      "pred_action": "RIGHT",
+      "pred_language_token": 0,
+      "pred_memory_color": 0,
+      "target_memory_color": 0,
+      "pred_world_pos": 4,
+      "target_world_pos": 4,
+      "memory_pass": true,
+      "world_pos_pass": true
+    },
+    {
+      "tick": 3,
+      "token": "ASK_CURRENT_POS",
+      "visible": true,
+      "private_in": 1,
+      "generated_private": 11,
+      "pred_action": "STAY",
+      "pred_language_token": 18,
+      "pred_memory_color": 0,
+      "target_memory_color": 0,
+      "pred_world_pos": 4,
+      "target_world_pos": 4,
+      "memory_pass": true,
+      "world_pos_pass": true
+    },
+    {
+      "tick": 8,
+      "token": "TOLD_GOAL",
+      "visible": false,
+      "private_in": 1,
+      "generated_private": 1,
+      "pred_action": "LEFT",
+      "pred_language_token": 27,
+      "pred_memory_color": 0,
+      "target_memory_color": 0,
+      "pred_world_pos": 4,
+      "target_world_pos": 4,
+      "memory_pass": true,
+      "world_pos_pass": true
+    },
+    {
+      "tick": 16,
+      "token": "NONE",
+      "visible": false,
+      "private_in": 9,
+      "generated_private": 17,
+      "pred_action": "LEFT",
+      "pred_language_token": 35,
+      "pred_memory_color": 0,
+      "target_memory_color": 0,
+      "pred_world_pos": 4,
+      "target_world_pos": 4,
+      "memory_pass": true,
+      "world_pos_pass": true
+    },
+    {
+      "tick": 32,
+      "token": "NONE",
+      "visible": false,
+      "private_in": 14,
+      "generated_private": 15,
+      "pred_action": "LEFT",
+      "pred_language_token": 36,
+      "pred_memory_color": 0,
+      "target_memory_color": 0,
+      "pred_world_pos": 4,
+      "target_world_pos": 4,
+      "memory_pass": true,
+      "world_pos_pass": true
+    },
+    {
+      "tick": 64,
+      "token": "NONE",
+      "visible": false,
+      "private_in": 16,
+      "generated_private": 17,
+      "pred_action": "STAY",
+      "pred_language_token": 42,
+      "pred_memory_color": 0,
+      "target_memory_color": 0,
+      "pred_world_pos": 4,
+      "target_world_pos": 4,
+      "memory_pass": true,
+      "world_pos_pass": true
+    },
+    {
+      "tick": 95,
+      "token": "NONE",
+      "visible": false,
+      "private_in": 17,
+      "generated_private": 12,
+      "pred_action": "STAY",
+      "pred_language_token": 42,
+      "pred_memory_color": 0,
+      "target_memory_color": 0,
+      "pred_world_pos": 4,
+      "target_world_pos": 4,
+      "memory_pass": true,
+      "world_pos_pass": true
+    },
+    {
+      "tick": 111,
+      "token": "NONE",
+      "visible": false,
+      "private_in": 15,
+      "generated_private": 16,
+      "pred_action": "LEFT",
+      "pred_language_token": 42,
+      "pred_memory_color": 0,
+      "target_memory_color": 0,
+      "pred_world_pos": 4,
+      "target_world_pos": 4,
+      "memory_pass": true,
+      "world_pos_pass": true
+    }
+  ],
+  "private_token_causality": {
+    "generated_private_unique_count": 17.0,
+    "generated_private_repetition_ratio": 0.2708333432674408,
+    "private_channel_action_shift_rate": 0.4784458875656128,
+    "private_channel_language_shift_rate": 0.3680943250656128,
+    "random_private_action_shift_rate": 0.4700753688812256,
+    "random_private_language_shift_rate": 0.3766043782234192
+  },
+  "richer_dynamics": {
+    "failed_action_no_move": 1.0,
+    "failed_action_damage_delta": 0.04000000000000001,
+    "rest_healed_and_restored_energy": 1.0,
+    "forage_restored_energy_and_resource": 1.0,
+    "hazard_caused_damage": 1.0
+  },
+  "curriculum": {
+    "changed_parameter_tensors": 0,
+    "parameter_l2_total": 0.0,
+    "changes_weights": false,
+    "changes_persistent_memory": true,
+    "generated_private_curriculum_accuracy_before": 0.0,
+    "generated_private_curriculum_accuracy_after": 1.0,
+    "concept_memory_accuracy_before": 0.0,
+    "concept_memory_accuracy_after": 1.0,
+    "old_task_retention_before": {
+      "action_accuracy": 0.980859375,
+      "delayed_memory_accuracy": 1.0,
+      "object_color_accuracy": 1.0,
+      "object_pos_accuracy": 1.0,
+      "object_permanence_accuracy": 1.0,
+      "provenance_accuracy": 1.0,
+      "grounded_language_accuracy": 0.98828125,
+      "self_world_continuity_accuracy": 1.0,
+      "core_mean": 0.996142578125
+    },
+    "old_task_retention_after": {
+      "action_accuracy": 0.980859375,
+      "delayed_memory_accuracy": 1.0,
+      "object_color_accuracy": 1.0,
+      "object_pos_accuracy": 1.0,
+      "object_permanence_accuracy": 1.0,
+      "provenance_accuracy": 1.0,
+      "grounded_language_accuracy": 0.98828125,
+      "self_world_continuity_accuracy": 1.0,
+      "core_mean": 0.996142578125
+    },
+    "old_task_core_delta": 0.0,
+    "old_task_submetric_floor_checks": {
+      "action_accuracy": true,
+      "delayed_memory_accuracy": true,
+      "object_color_accuracy": true,
+      "object_pos_accuracy": true,
+      "object_permanence_accuracy": true,
+      "provenance_accuracy": true,
+      "grounded_language_accuracy": true,
+      "self_world_continuity_accuracy": true
+    },
+    "old_task_retention_passes": true
+  },
+  "anti_leakage": {
+    "scores": {
+      "normal_generated_private": {
+        "action_accuracy": 0.9695870535714286,
+        "delayed_memory_accuracy": 0.9973958333333334,
+        "object_color_accuracy": 0.9993489583333334,
+        "object_pos_accuracy": 1.0,
+        "object_permanence_accuracy": 0.9996744791666667,
+        "provenance_accuracy": 0.9229910969734192,
+        "grounded_language_accuracy": 0.9875,
+        "self_world_continuity_accuracy": 1.0,
+        "core_mean": 0.9845621776722726
+      },
+      "zero_z": {
+        "action_accuracy": 0.4476841517857143,
+        "delayed_memory_accuracy": 0.3142361111111111,
+        "object_color_accuracy": 0.29477719907407407,
+        "object_pos_accuracy": 0.2003761574074074,
+        "object_permanence_accuracy": 0.24757667824074076,
+        "provenance_accuracy": 0.6823381781578064,
+        "grounded_language_accuracy": 0.2953125,
+        "self_world_continuity_accuracy": 0.1953125,
+        "core_mean": 0.33470168447210674
+      },
+      "shuffled_z": {
+        "action_accuracy": 0.36000279017857145,
+        "delayed_memory_accuracy": 0.2608506944444444,
+        "object_color_accuracy": 0.25296585648148145,
+        "object_pos_accuracy": 0.1804832175925926,
+        "object_permanence_accuracy": 0.21672453703703703,
+        "provenance_accuracy": 0.9250837564468384,
+        "grounded_language_accuracy": 0.2518229166666667,
+        "self_world_continuity_accuracy": 0.20442708333333334,
+        "core_mean": 0.33154510652262065
+      },
+      "no_language": {
+        "action_accuracy": 0.42222377232142855,
+        "delayed_memory_accuracy": 0.3094618055555556,
+        "object_color_accuracy": 0.42397280092592593,
+        "object_pos_accuracy": 0.3122829861111111,
+        "object_permanence_accuracy": 0.3681278935185185,
+        "provenance_accuracy": 0.3316127359867096,
+        "grounded_language_accuracy": 0.0,
+        "self_world_continuity_accuracy": 0.1796875,
+        "core_mean": 0.2934211868024062
+      },
+      "no_private_token": {
+        "action_accuracy": 0.5396902901785714,
+        "delayed_memory_accuracy": 0.3823784722222222,
+        "object_color_accuracy": 0.40458622685185186,
+        "object_pos_accuracy": 0.37094907407407407,
+        "object_permanence_accuracy": 0.38776765046296297,
+        "provenance_accuracy": 0.9150391221046448,
+        "grounded_language_accuracy": 0.46588541666666666,
+        "self_world_continuity_accuracy": 0.98828125,
+        "core_mean": 0.5568221878201243
+      },
+      "random_private_token": {
+        "action_accuracy": 0.5086495535714286,
+        "delayed_memory_accuracy": 0.3450520833333333,
+        "object_color_accuracy": 0.4176070601851852,
+        "object_pos_accuracy": 0.31980613425925924,
+        "object_permanence_accuracy": 0.3687065972222222,
+        "provenance_accuracy": 0.9128767251968384,
+        "grounded_language_accuracy": 0.43020833333333336,
+        "self_world_continuity_accuracy": 0.8736979166666666,
+        "core_mean": 0.5220755504710334
+      }
+    },
+    "random_label_score": {
+      "action_accuracy": 0.20026506696428573,
+      "delayed_memory_accuracy": 0.2638888888888889,
+      "object_color_accuracy": 0.2468894675925926,
+      "object_pos_accuracy": 0.1953125,
+      "object_permanence_accuracy": 0.22110098379629628,
+      "provenance_accuracy": 0.250279039144516,
+      "grounded_language_accuracy": 0.029166666666666667,
+      "self_world_continuity_accuracy": 0.2109375,
+      "core_mean": 0.20223001413165576
+    },
+    "hidden_target_canary_max_abs_diff": 0.0,
+    "no_private_action_shift_rate": 0.488072007894516,
+    "no_private_language_shift_rate": 0.3657924234867096,
+    "checks": {
+      "hidden_target_canary_no_effect": true,
+      "random_labels_reduce_score": true,
+      "zero_z_degrades_core": true,
+      "shuffled_z_degrades_core": true,
+      "no_language_degrades_grounding": true,
+      "private_token_affects_outputs": true
+    }
+  },
+  "source_snippets": {
+    "model_step_update": {
+      "path": "src/model.py",
+      "start_line": 63,
+      "end_line": 74,
+      "text": "63:         target_device = next(self.parameters()).device if device is None else resolve_device(device)\n64:         return torch.zeros(batch_size, self.config.hidden_dim, device=target_device)\n65: \n66:     def step(\n67:         self, observation: Dict[str, torch.Tensor], z_prev: torch.Tensor\n68:     ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:\n69:         sensory = observation[\"sensory\"]\n70:         lang_in = observation[\"lang_in\"]\n71:         private_in = observation.get(\"private_in\")\n72:         if private_in is None:\n73:             private_in = torch.zeros_like(lang_in)\n74:         sensor_features = self.sensor_encoder(sensory)"
+    },
+    "runtime_z_loop": {
+      "path": "src/run_unbroken.py",
+      "start_line": 40,
+      "end_line": 60,
+      "text": "40: \n41:     with torch.no_grad():\n42:         for tick in range(max_ticks):\n43:             observation = world.observation(device=target_device, private_in=int(private_token.item()))\n44:             output, z = model.step(observation, z)\n45:             action = int(output[\"action_logits\"].argmax(dim=-1).item())\n46:             language_token = output[\"language_logits\"].argmax(dim=-1)\n47:             language = int(language_token.item())\n48:             private_token = output[\"private_logits\"].argmax(dim=-1)\n49:             latents.append(z.squeeze(0).detach())\n50:             language_tokens.append(language_token.squeeze(0).detach())\n51:             private_tokens.append(private_token.squeeze(0).detach())\n52:             if memory is not None:\n53:                 memory.update(z, private_token, tick + 1)\n54:             world.step(action)\n55:             if log_every > 0 and (tick + 1) % log_every == 0:\n56:                 print(\n57:                     json.dumps(\n58:                         {\n59:                             \"tick\": tick + 1,\n60:                             \"z_norm\": round(float(z.norm().item()), 6),"
+    },
+    "memory_load_save": {
+      "path": "src/persistent_memory.py",
+      "start_line": 30,
+      "end_line": 76,
+      "text": "30:         )\n31: \n32:     @classmethod\n33:     def load(\n34:         cls,\n35:         path: str | Path,\n36:         hidden_dim: int,\n37:         batch_size: int = 1,\n38:         device: DeviceLike = AUTO_DEVICE,\n39:     ) -> \"PersistentMemoryState\":\n40:         target_device = resolve_device(device)\n41:         path = Path(path)\n42:         if not path.exists():\n43:             return cls.fresh(hidden_dim, batch_size=batch_size, device=target_device)\n44:         payload = torch.load(path, map_location=target_device)\n45:         latent = payload[\"latent\"].to(target_device).float()\n46:         private_token = payload[\"private_token\"].to(target_device).long()\n47:         if latent.ndim == 1:\n48:             latent = latent.view(1, -1)\n49:         if private_token.ndim == 0:\n50:             private_token = private_token.view(1)\n51:         if latent.shape[-1] != hidden_dim:\n52:             raise ValueError(f\"memory latent width {latent.shape[-1]} does not match model hidden_dim {hidden_dim}\")\n53:         if latent.shape[0] != batch_size:\n54:             latent = latent[:1].repeat(batch_size, 1)\n55:         if private_token.shape[0] != batch_size:\n56:             private_token = private_token[:1].repeat(batch_size)\n57:         return cls(latent=latent, private_token=private_token, tick=int(payload.get(\"tick\", 0)))\n58: \n59:     def update(self, latent: torch.Tensor, private_token: torch.Tensor, tick: int) -> None:\n60:         target_device = self.latent.device\n61:         self.latent = latent.detach().to(target_device).clone()\n62:         self.private_token = private_token.detach().to(target_device).clone().long()\n63:         self.tick = int(tick)\n64: \n65:     def save(self, path: str | Path) -> None:\n66:         path = Path(path)\n67:         path.parent.mkdir(parents=True, exist_ok=True)\n68:         torch.save(\n69:             {\n70:                 \"latent\": self.latent.detach().cpu(),\n71:                 \"private_token\": self.private_token.detach().cpu(),\n72:                 \"tick\": self.tick,\n73:                 \"format\": \"persistent_differentiable_tensor_memory_v1\",\n74:             },\n75:             path,\n76:         )"
+    },
+    "model_input_construction": {
+      "path": "src/env.py",
+      "start_line": 410,
+      "end_line": 445,
+      "text": "410:         self.damage = float(0.10 * torch.rand(1, generator=self.generator, device=self.rng_device).item())\n411:         self.resource = float(0.20 + 0.55 * torch.rand(1, generator=self.generator, device=self.rng_device).item())\n412: \n413:     def observation(\n414:         self,\n415:         device: DeviceLike = AUTO_DEVICE,\n416:         private_in: int = PRIVATE_NONE,\n417:     ) -> Dict[str, torch.Tensor]:\n418:         target_device = resolve_device(device)\n419:         token = token_for_tick(self.local_tick)\n420:         visible = self.target_color if self.local_tick < 4 else NUM_COLORS\n421:         visible_pos = self.target_pos if self.local_tick < 4 else GRID_SIZE\n422:         current_pos = torch.tensor([self.current_pos], dtype=torch.long, device=target_device)\n423:         orientation = torch.tensor([self.orientation], dtype=torch.long, device=target_device)\n424:         energy = torch.tensor([self.energy], dtype=torch.float32, device=target_device)\n425:         fatigue = 1.0 - energy\n426:         damage = torch.tensor([self.damage], dtype=torch.float32, device=target_device)\n427:         resource = torch.tensor([self.resource], dtype=torch.float32, device=target_device)\n428:         visible_color = torch.tensor([visible], dtype=torch.long, device=target_device)\n429:         visible_object_pos = torch.tensor([visible_pos], dtype=torch.long, device=target_device)\n430:         sensory = build_sensory(\n431:             current_pos,\n432:             orientation,\n433:             energy,\n434:             fatigue,\n435:             damage,\n436:             resource,\n437:             visible_color,\n438:             visible_object_pos,\n439:         )\n440:         return {\n441:             \"sensory\": sensory,\n442:             \"lang_in\": torch.tensor([token], dtype=torch.long, device=target_device),\n443:             \"private_in\": torch.tensor([private_in], dtype=torch.long, device=target_device),\n444:         }\n445: "
+    },
+    "target_input_separation": {
+      "path": "src/env.py",
+      "start_line": 352,
+      "end_line": 378,
+      "text": "352:         resource = torch.clamp(resource + forage.float() * 0.090 - rest.float() * 0.006 - 0.004, 0.0, 1.0)\n353: \n354:     private_in[:, 1:] = private[:, :-1]\n355: \n356:     batch = {\n357:         \"sensory\": sensory,\n358:         \"lang_in\": lang_in,\n359:         \"private_in\": private_in,\n360:         \"action_target\": action_target,\n361:         \"language_target\": language,\n362:         \"private_target\": private,\n363:         \"provenance_target\": provenance,\n364:         \"world_color_target\": world_color,\n365:         \"world_pos_target\": world_pos,\n366:         \"memory_color_target\": memory_color,\n367:         \"self_start_target\": self_start,\n368:         \"action_mask\": action_mask,\n369:         \"delayed_memory_mask\": delayed_memory_mask,\n370:         \"object_mask\": object_mask,\n371:         \"grounded_language_mask\": grounded_language_mask,\n372:         \"self_mask\": self_mask,\n373:     }\n374:     return batch\n375: \n376: \n377: class TinyWorldRuntime:\n378:     def __init__(self, seed: int = 0, episode_len: int = 80) -> None:"
+    },
+    "private_token_generation_use": {
+      "path": "src/living_eval.py",
+      "start_line": 59,
+      "end_line": 81,
+      "text": "59:     outputs: List[Dict[str, torch.Tensor]] = []\n60:     latents: List[torch.Tensor] = []\n61:     private_tokens: List[torch.Tensor] = []\n62:     for tick in range(start_tick, end_tick):\n63:         output, z = model.step(\n64:             {\n65:                 \"sensory\": batch[\"sensory\"][:, tick],\n66:                 \"lang_in\": batch[\"lang_in\"][:, tick],\n67:                 \"private_in\": private_token,\n68:             },\n69:             z,\n70:         )\n71:         private_token = output[\"private_logits\"].argmax(dim=-1)\n72:         outputs.append(output)\n73:         latents.append(z)\n74:         private_tokens.append(private_token)\n75:     stacked = {key: torch.stack([item[key] for item in outputs], dim=1) for key in outputs[0]}\n76:     stacked[\"latents\"] = torch.stack(latents, dim=1)\n77:     stacked[\"generated_private\"] = torch.stack(private_tokens, dim=1)\n78:     return stacked\n79: \n80: \n81: def durable_restart_eval("
+    },
+    "curriculum_update": {
+      "path": "src/continual_learning.py",
+      "start_line": 43,
+      "end_line": 67,
+      "text": "43:             concept_values=payload[\"concept_values\"].to(target_device).long(),\n44:         )\n45: \n46:     def clone(self) -> \"PersistentConceptMemory\":\n47:         return PersistentConceptMemory(self.concept_ids.clone(), self.concept_values.clone())\n48: \n49:     def learn(self, concept_id: int, value: int | None = None) -> None:\n50:         cid = torch.tensor([int(concept_id)], dtype=torch.long, device=self.concept_ids.device)\n51:         val = torch.tensor([concept_value(concept_id) if value is None else int(value)], dtype=torch.long, device=self.concept_values.device)\n52:         if self.concept_ids.numel() == 0:\n53:             self.concept_ids = cid\n54:             self.concept_values = val\n55:             return\n56:         exists = self.concept_ids == int(concept_id)\n57:         if bool(exists.any().item()):\n58:             self.concept_values[exists] = val[0]\n59:         else:\n60:             self.concept_ids = torch.cat([self.concept_ids, cid], dim=0)\n61:             self.concept_values = torch.cat([self.concept_values, val], dim=0)\n62: \n63:     def predict(self, concept_ids: torch.Tensor) -> torch.Tensor:\n64:         ids = concept_ids.to(self.concept_ids.device).long()\n65:         pred = torch.full_like(ids, UNKNOWN_CONCEPT_VALUE)\n66:         if self.concept_ids.numel() == 0:\n67:             return pred"
+    },
+    "metric_computation": {
+      "path": "src/living_eval.py",
+      "start_line": 285,
+      "end_line": 315,
+      "text": "285: \n286: \n287: def living_verdict(report: Dict[str, object]) -> Dict[str, object]:\n288:     restart = report[\"durable_restart\"]  # type: ignore[assignment]\n289:     idle = report[\"idle_mode\"]  # type: ignore[assignment]\n290:     dynamics = report[\"richer_dynamics\"]  # type: ignore[assignment]\n291:     private = report[\"private_internal_language\"]  # type: ignore[assignment]\n292:     curriculum = report[\"curriculum_growth\"]  # type: ignore[assignment]\n293:     checks = {\n294:         \"memory_file_restart_memory_ge_0_85\": restart[\"memory_file_restart_final_memory_accuracy\"] >= 0.85,\n295:         \"memory_file_beats_zero_reset_by_0_40\": (\n296:             restart[\"memory_file_restart_final_memory_accuracy\"] - restart[\"zero_reset_final_memory_accuracy\"] >= 0.40\n297:         ),\n298:         \"idle_public_repetition_lt_0_40\": idle[\"public_language_repetition_ratio\"] < 0.40,\n299:         \"idle_private_repetition_lt_0_40\": idle[\"private_token_repetition_ratio\"] < 0.40,\n300:         \"idle_preserves_goal_memory\": idle[\"final_memory_accuracy\"] >= 0.85 and idle[\"final_object_pos_accuracy\"] >= 0.85,\n301:         \"idle_endogenous_goal_action_ge_0_70\": idle[\"endogenous_goal_action_accuracy\"] >= 0.70,\n302:         \"richer_dynamics_all_present\": all(value > 0.0 for value in dynamics.values()),\n303:         \"private_tokens_generated_and_used\": (\n304:             private[\"generated_private_unique_count\"] >= 3.0\n305:             and (\n306:                 private[\"private_channel_action_shift_rate\"] > 0.0\n307:                 or private[\"private_channel_language_shift_rate\"] > 0.0\n308:             )\n309:         ),\n310:         \"curriculum_accuracy_after_ge_0_80\": curriculum[\"accuracy_after\"] >= 0.80,\n311:         \"curriculum_improves_by_0_30\": curriculum[\"accuracy_delta\"] >= 0.30,\n312:     }\n313:     return {\"passes\": all(checks.values()), \"checks\": checks}\n314: \n315: "
+    },
+    "leakage_scan_logic": {
+      "path": "audit/leakage_scan.py",
+      "start_line": 124,
+      "end_line": 144,
+      "text": "124: \n125: \n126: def run_scan() -> dict[str, Any]:\n127:     python_files = _iter_python_files()\n128:     findings: list[dict[str, Any]] = []\n129:     for path in python_files:\n130:         findings.extend(_import_findings(path))\n131:         findings.extend(_text_findings(path))\n132:     findings.extend(_checkpoint_findings())\n133:     findings.extend(_prompt_loop_findings())\n134:     return {\n135:         \"passes\": len(findings) == 0,\n136:         \"python_files_scanned\": [str(path) for path in python_files],\n137:         \"findings\": findings,\n138:         \"checks\": {\n139:             \"no_external_or_pretrained_imports\": not any(item[\"kind\"] == \"forbidden_import\" for item in findings),\n140:             \"no_external_or_pretrained_text_patterns\": not any(item[\"kind\"] == \"external_pattern\" for item in findings),\n141:             \"no_unexpected_weight_files\": not any(item[\"kind\"] == \"unexpected_weight_file\" for item in findings),\n142:             \"runtime_not_prompt_loop\": not any(\"prompt\" in item[\"kind\"] for item in findings),\n143:         },\n144:     }"
+    }
+  },
+  "limitations": [],
+  "claim_table": [
+    {
+      "claim": "Frozen checkpoint and model match manifest before and after audit",
+      "status": "PASS",
+      "evidence": "SHA256 and size checks over frozen/recurrent_latent_fast.pt and src/model.py."
+    },
+    {
+      "claim": "No external or pretrained model/API path is present",
+      "status": "PASS",
+      "evidence": "AST import scan, text pattern scan, weight-file scan, and runtime prompt-loop scan."
+    },
+    {
+      "claim": "Living-system report metrics reproduce materially",
+      "status": "PASS",
+      "evidence": "Reran src.living_eval against the frozen checkpoint without overwriting the existing report."
+    },
+    {
+      "claim": "Durable tensor memory survives restart and corrupted memory degrades",
+      "status": "PASS",
+      "evidence": "Saved and reloaded latent/private tensor state, then compared against sample-shuffled corrupt memory."
+    },
+    {
+      "claim": "Idle low-input continuation preserves memory without repetition collapse",
+      "status": "PASS",
+      "evidence": "Reran idle eval and recorded one idle trajectory."
+    },
+    {
+      "claim": "Private internal tokens are generated and causally consumed",
+      "status": "PASS",
+      "evidence": "Generated private-token stream plus zero/random-private perturbation shifts."
+    },
+    {
+      "claim": "Richer body/world dynamics have consequences",
+      "status": "PASS",
+      "evidence": "Failed movement, rest, forage, and hazard probes."
+    },
+    {
+      "claim": "Curriculum growth changes weights or persistent memory and retains old task behavior",
+      "status": "PASS",
+      "evidence": "Compared pre/post curriculum state, concept recall accuracy, and old-task retention."
+    },
+    {
+      "claim": "Hidden targets and scoring data do not affect outputs",
+      "status": "PASS",
+      "evidence": "Randomized all target keys and added a hidden canary key while keeping observations fixed."
+    },
+    {
+      "claim": "Latent stream is tensor-to-tensor, not generated public text",
+      "status": "PASS",
+      "evidence": "Source snippets show z is carried through model.step and private token, not language output, is fed as the private channel."
+    }
+  ]
+}

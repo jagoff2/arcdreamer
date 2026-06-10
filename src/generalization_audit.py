@@ -25,9 +25,15 @@ AUDIT_PATHS = [
     "src/perception_train.py",
     "src/perception_eval.py",
     "src/external_perception_experiment.py",
+    "src/trace_collect.py",
+    "src/base_world_model.py",
+    "src/base_pretrain.py",
+    "src/base_eval.py",
+    "src/base_retrain_experiment.py",
     "tests/test_external_generalization.py",
     "tests/test_external_collapse.py",
     "tests/test_perceptual_affordance.py",
+    "tests/test_external_base_training.py",
     "docs/external_generalization_report.json",
     "docs/external_generalization_report.md",
     "docs/generalization_audit.json",
@@ -37,7 +43,14 @@ AUDIT_PATHS = [
     "docs/perceptual_affordance_report.json",
     "docs/perceptual_affordance_report.md",
     "docs/generalization_audit_after_perception.json",
+    "docs/external_base_report.json",
+    "docs/external_base_report.md",
+    "docs/generalization_audit_after_base_retrain.json",
+    "docs/audit_after_external_base.json",
     "frozen/recurrent_latent_fast.pt",
+    "frozen/external_base_v1.pt",
+    "frozen/external_base_manifest_v1.json",
+    "data/external_traces_manifest.json",
     "runs/explorer_tiny.pt",
 ]
 
@@ -59,6 +72,11 @@ def external_no_hack_scan(report: dict[str, Any]) -> dict[str, Any]:
         Path("src/perception_train.py"),
         Path("src/perception_eval.py"),
         Path("src/external_perception_experiment.py"),
+        Path("src/trace_collect.py"),
+        Path("src/base_world_model.py"),
+        Path("src/base_pretrain.py"),
+        Path("src/base_eval.py"),
+        Path("src/base_retrain_experiment.py"),
     ]
     forbidden_literals = [
         "hidden" + "_goal",
@@ -112,6 +130,11 @@ def no_text_as_state_check() -> dict[str, Any]:
             Path("src/perception_train.py"),
             Path("src/perception_eval.py"),
             Path("src/external_perception_experiment.py"),
+            Path("src/trace_collect.py"),
+            Path("src/base_world_model.py"),
+            Path("src/base_pretrain.py"),
+            Path("src/base_eval.py"),
+            Path("src/base_retrain_experiment.py"),
         ]
         if path.exists()
     )
@@ -319,6 +342,89 @@ def perception_report_checks(report_path: str | Path = "docs/perceptual_affordan
     }
 
 
+def external_base_report_checks(report_path: str | Path = "docs/external_base_report.json") -> dict[str, Any]:
+    path = Path(report_path)
+    if not path.exists():
+        return {"present": False, "passes": True}
+    report = load_json(path)
+    arms = {item.get("arm_id") for item in report.get("model_arms", [])}
+    suites = {item.get("suite_id") for item in report.get("suite_reports", [])}
+    baselines = {item.get("baseline") for item in report.get("baselines", [])}
+    ablations = {str(item.get("ablation", "")).replace("ablation_", "") for item in report.get("ablations", [])}
+    trace_paths = [Path(item) for item in report.get("trace_paths", [])]
+    missing = [str(item) for item in trace_paths if not item.exists()]
+    required_arc = report.get("required_arc_trace_paths", {})
+    gate = report.get("improvement_gate", {})
+    outcome = report.get("terminal_outcome")
+    cuda_available = bool(torch.cuda.is_available())
+    device_runtime = report.get("device_runtime", {})
+    suite_device_runtime = report.get("suite_device_runtime", {})
+    trace_manifest = report.get("trace_manifest", {})
+    frozen_manifest = report.get("frozen_manifest", {})
+    no_hack = report.get("no_hack_proof", {})
+    gate_consistent = (
+        (bool(gate.get("passes")) and outcome == "EXTERNAL BASE IMPROVEMENT FOUND")
+        or ((not bool(gate.get("passes"))) and outcome == "NO IMPROVEMENT FOUND")
+    )
+    required_arms = {
+        "old_base_unchanged",
+        "old_base_world_model",
+        "old_base_finetuned",
+        "from_scratch_external_base",
+        "null_training_control",
+    }
+    required_ablations = {"no_external_base", "no_world_model", "no_memory", "no_affordance"}
+    old_hash = "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD"
+    current_old_hash = collect_hashes(["frozen/recurrent_latent_fast.pt"])["frozen/recurrent_latent_fast.pt"].get("sha256")
+    checks = {
+        "external_base_report_present": True,
+        "external_base_outcome_valid": outcome in {"EXTERNAL BASE IMPROVEMENT FOUND", "NO IMPROVEMENT FOUND"},
+        "external_base_gate_consistent": gate_consistent,
+        "external_base_arms_complete": required_arms.issubset(arms),
+        "external_base_external_suites_complete": {"official_arcagi3", "gymnasium_classic_control", "gymnasium_toy_text"}.issubset(suites),
+        "external_base_baselines_complete": {
+            "random_legal",
+            "repeat_last_action",
+            "coverage_graph_exploration",
+            "novelty_first",
+            "greedy_observable_score_delta",
+            "oracle_free_observed_graph_bfs",
+        }.issubset(baselines),
+        "external_base_ablations_complete": required_ablations.issubset(ablations),
+        "external_base_traces_exist": bool(trace_paths) and not missing,
+        "external_base_required_arc_traces": int(required_arc.get("old_base_unchanged_count", 0)) == 25
+        and int(required_arc.get("selected_variant_count", 0)) == 25,
+        "external_base_trace_manifest_present": bool(trace_manifest)
+        and Path(str(report.get("frozen_manifest", {}).get("trace_manifest", "data/external_traces_manifest.json"))).exists(),
+        "external_base_trace_count_first_pass": int(trace_manifest.get("transition_count", 0)) >= 1_000_000,
+        "external_base_checkpoint_exists": Path(str(report.get("external_base_checkpoint", ""))).exists(),
+        "external_base_manifest_exists": Path(str(report.get("external_base_manifest", ""))).exists(),
+        "external_base_old_checkpoint_preserved": current_old_hash == old_hash
+        and frozen_manifest.get("old_recurrent_checkpoint_sha256") == old_hash,
+        "external_base_training_diagnostics_present": bool(report.get("training_losses")),
+        "external_base_negative_results_preserved": bool(report.get("negative_result_preservation")),
+        "external_base_no_hack_passes": bool(no_hack.get("passes")),
+        "external_base_no_external_judge": bool(no_hack.get("no_external_judge")),
+        "external_base_no_forced_cycle": bool(no_hack.get("no_forced_cycle")),
+        "external_base_no_public_text_as_state": bool(no_hack.get("no_public_text_as_state")),
+        "external_base_cuda_available_recorded": bool(device_runtime.get("torch_cuda_available")) == cuda_available,
+        "external_base_cuda_main_runtime": (not cuda_available) or str(device_runtime.get("resolved_device", "")).startswith("cuda"),
+        "external_base_cuda_suite_runtimes": (not cuda_available)
+        or (
+            {"official_arcagi3", "gymnasium_classic_control", "gymnasium_toy_text"}.issubset(suite_device_runtime)
+            and all(str(item.get("resolved_device", "")).startswith("cuda") for item in suite_device_runtime.values())
+        ),
+    }
+    return {
+        "present": True,
+        "passes": all(checks.values()),
+        "checks": checks,
+        "missing_traces": missing[:20],
+        "outcome": outcome,
+        "selected_variant": gate.get("selected_variant"),
+    }
+
+
 def build_audit(
     *,
     report_path: str | Path,
@@ -333,6 +439,7 @@ def build_audit(
     canary = hidden_target_canary()
     collapse = collapse_report_checks()
     perception = perception_report_checks()
+    external_base = external_base_report_checks()
     hashes = collect_hashes(AUDIT_PATHS + EXTERNAL_AUDITED_PATHS)
     frozen_ok = (
         hashes["frozen/recurrent_latent_fast.pt"].get("sha256") == "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD"
@@ -351,6 +458,8 @@ def build_audit(
         checks.update(collapse.get("checks", {}))
     if perception["present"]:
         checks.update(perception.get("checks", {}))
+    if external_base["present"]:
+        checks.update(external_base.get("checks", {}))
     audit = {
         "terminal_outcome": "EXTERNAL GENERALIZATION AUDIT PROVEN" if all(value is True or not isinstance(value, bool) for value in checks.values()) else "NOT PROVEN",
         "external_report": str(report_path),
@@ -362,6 +471,7 @@ def build_audit(
         "hidden_target_canary": canary,
         "collapse_report_checks": collapse,
         "perception_report_checks": perception,
+        "external_base_report_checks": external_base,
         "hashes": hashes,
         "limitations": [],
     }

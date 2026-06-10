@@ -1,0 +1,451 @@
+{
+  "terminal_outcome": "EXTERNAL GENERALIZATION AUDIT PROVEN",
+  "external_report": "docs/external_generalization_report.json",
+  "checks": {
+    "external_report_proven": true,
+    "leakage_scan_passes": true,
+    "external_no_hack_passes": true,
+    "no_text_as_state": true,
+    "hidden_target_canary_diff_zero": true,
+    "frozen_hash_recorded_and_unchanged": true,
+    "traceability_passes": true,
+    "claim_registry_complete": true,
+    "supported_claims_have_external_thresholds": true,
+    "no_dev_only_supported_claims": true,
+    "unsupported_claims_preserved": true,
+    "supported_claims": [],
+    "dev_only_supported_claims": [],
+    "collapse_report_present": true,
+    "collapse_outcome_valid": true,
+    "collapse_gate_consistent": true,
+    "collapse_variants_complete": true,
+    "collapse_external_suites_complete": true,
+    "collapse_baselines_complete": true,
+    "collapse_ablations_complete": true,
+    "collapse_traces_exist": true,
+    "collapse_required_arc_traces": true,
+    "collapse_no_hack_passes": true,
+    "collapse_no_external_judge": true,
+    "collapse_no_forced_cycle": true,
+    "collapse_cuda_available_recorded": true,
+    "collapse_cuda_main_runtime": true,
+    "collapse_cuda_suite_runtimes": true,
+    "perception_report_present": true,
+    "perception_outcome_valid": true,
+    "perception_gate_consistent": true,
+    "perception_variants_complete": true,
+    "perception_external_suites_complete": true,
+    "perception_baselines_complete": true,
+    "perception_ablations_present": true,
+    "perception_traces_exist": true,
+    "perception_required_arc_traces": true,
+    "perception_no_hack_passes": true,
+    "perception_no_external_judge": true,
+    "perception_no_forced_cycle": true,
+    "perception_cuda_available_recorded": true,
+    "perception_cuda_main_runtime": true,
+    "perception_cuda_suite_runtimes": true,
+    "perception_components_extracted": true,
+    "perception_action_effects_recorded": true,
+    "perception_selected_diagnostics_present": true,
+    "external_base_report_present": true,
+    "external_base_outcome_valid": true,
+    "external_base_gate_consistent": true,
+    "external_base_arms_complete": true,
+    "external_base_external_suites_complete": true,
+    "external_base_baselines_complete": true,
+    "external_base_ablations_complete": true,
+    "external_base_traces_exist": true,
+    "external_base_required_arc_traces": true,
+    "external_base_trace_manifest_present": true,
+    "external_base_trace_count_first_pass": true,
+    "external_base_checkpoint_exists": true,
+    "external_base_manifest_exists": true,
+    "external_base_old_checkpoint_preserved": true,
+    "external_base_training_diagnostics_present": true,
+    "external_base_negative_results_preserved": true,
+    "external_base_no_hack_passes": true,
+    "external_base_no_external_judge": true,
+    "external_base_no_forced_cycle": true,
+    "external_base_no_public_text_as_state": true,
+    "external_base_cuda_available_recorded": true,
+    "external_base_cuda_main_runtime": true,
+    "external_base_cuda_suite_runtimes": true
+  },
+  "leakage_scan": {
+    "passes": true,
+    "python_files_scanned": [
+      "src\\__init__.py",
+      "src\\adversarial.py",
+      "src\\arcagi3_adapter.py",
+      "src\\arcagi3_baselines.py",
+      "src\\arcagi3_diagnose.py",
+      "src\\arcagi3_eval.py",
+      "src\\arcagi3_failure_taxonomy.py",
+      "src\\arcagi3_official.py",
+      "src\\arcagi3_official_eval.py",
+      "src\\arcagi3_trace.py",
+      "src\\arcagi3_trace_analysis.py",
+      "src\\base_eval.py",
+      "src\\base_pretrain.py",
+      "src\\base_retrain_experiment.py",
+      "src\\base_world_model.py",
+      "src\\continual_learning.py",
+      "src\\conversation_env.py",
+      "src\\conversation_eval.py",
+      "src\\conversation_train.py",
+      "src\\curriculum.py",
+      "src\\device.py",
+      "src\\dialogue_env.py",
+      "src\\dialogue_eval.py",
+      "src\\dialogue_train.py",
+      "src\\env.py",
+      "src\\evaluate.py",
+      "src\\evidence_dossier.py",
+      "src\\explore_env.py",
+      "src\\explorer_eval.py",
+      "src\\explorer_train.py",
+      "src\\external_affordance.py",
+      "src\\external_collapse_experiment.py",
+      "src\\external_eval.py",
+      "src\\external_perception_experiment.py",
+      "src\\external_registry.py",
+      "src\\external_valence.py",
+      "src\\free_text_decoder.py",
+      "src\\generalization_audit.py",
+      "src\\head_collapse.py",
+      "src\\head_collapse_eval.py",
+      "src\\heldout_causal.py",
+      "src\\human_memory.py",
+      "src\\intrinsic_motivation.py",
+      "src\\language_organ.py",
+      "src\\living_eval.py",
+      "src\\memory_eval.py",
+      "src\\memory_replay.py",
+      "src\\metrics.py",
+      "src\\model.py",
+      "src\\perception_eval.py",
+      "src\\perception_train.py",
+      "src\\perceptual_affordance.py",
+      "src\\persistent_memory.py",
+      "src\\retention_eval.py",
+      "src\\run_unbroken.py",
+      "src\\trace_collect.py",
+      "src\\train.py",
+      "src\\unified_policy.py",
+      "src\\world_model.py",
+      "tests\\conftest.py",
+      "tests\\test_adversarial.py",
+      "tests\\test_arcagi3_adapter.py",
+      "tests\\test_arcagi3_diagnosis.py",
+      "tests\\test_architecture.py",
+      "tests\\test_audit_proof.py",
+      "tests\\test_device_placement.py",
+      "tests\\test_dialogue_organ.py",
+      "tests\\test_evidence_dossier.py",
+      "tests\\test_explorer_mindlike.py",
+      "tests\\test_external_base_training.py",
+      "tests\\test_external_collapse.py",
+      "tests\\test_external_generalization.py",
+      "tests\\test_frozen_artifacts.py",
+      "tests\\test_grounded_conversation.py",
+      "tests\\test_head_collapse.py",
+      "tests\\test_heldout_causal.py",
+      "tests\\test_human_memory.py",
+      "tests\\test_living_system.py",
+      "tests\\test_no_pretrained.py",
+      "tests\\test_perceptual_affordance.py",
+      "tests\\test_retention_fix.py",
+      "tests\\test_training_smoke.py",
+      "tests\\test_unbroken_runtime.py",
+      "audit\\__init__.py",
+      "audit\\independent_verify.py",
+      "audit\\leakage_scan.py",
+      "audit\\probe_examples.py"
+    ],
+    "findings": [],
+    "checks": {
+      "no_external_or_pretrained_imports": true,
+      "no_external_or_pretrained_text_patterns": true,
+      "no_unexpected_weight_files": true,
+      "runtime_not_prompt_loop": true
+    }
+  },
+  "external_no_hack_scan": {
+    "passes": true,
+    "findings": [],
+    "scanned": [
+      "src\\external_eval.py",
+      "src\\external_registry.py",
+      "src\\generalization_audit.py",
+      "src\\external_valence.py",
+      "src\\external_affordance.py",
+      "src\\external_collapse_experiment.py",
+      "src\\perceptual_affordance.py",
+      "src\\perception_train.py",
+      "src\\perception_eval.py",
+      "src\\external_perception_experiment.py",
+      "src\\trace_collect.py",
+      "src\\base_world_model.py",
+      "src\\base_pretrain.py",
+      "src\\base_eval.py",
+      "src\\base_retrain_experiment.py"
+    ],
+    "allowed_task_wrappers": [
+      "CartPole-v1",
+      "FrozenLake-v1"
+    ]
+  },
+  "no_text_as_state": {
+    "passes": true,
+    "findings": [],
+    "runtime_z_loop_present": true
+  },
+  "trace_checks": {
+    "trace_count": 175,
+    "missing_traces": [],
+    "sample_schema_failures": [],
+    "passes": true
+  },
+  "hidden_target_canary": {
+    "passes": true,
+    "hidden_target_canary_max_abs_diff": 0.0,
+    "source": "docs\\audit_after_arcagi3_diagnosis.json"
+  },
+  "collapse_report_checks": {
+    "present": true,
+    "passes": true,
+    "checks": {
+      "collapse_report_present": true,
+      "collapse_outcome_valid": true,
+      "collapse_gate_consistent": true,
+      "collapse_variants_complete": true,
+      "collapse_external_suites_complete": true,
+      "collapse_baselines_complete": true,
+      "collapse_ablations_complete": true,
+      "collapse_traces_exist": true,
+      "collapse_required_arc_traces": true,
+      "collapse_no_hack_passes": true,
+      "collapse_no_external_judge": true,
+      "collapse_no_forced_cycle": true,
+      "collapse_cuda_available_recorded": true,
+      "collapse_cuda_main_runtime": true,
+      "collapse_cuda_suite_runtimes": true
+    },
+    "missing_traces": [],
+    "outcome": "NO MINIMAL IMPROVEMENT FOUND",
+    "selected_variant": "valence_only"
+  },
+  "perception_report_checks": {
+    "present": true,
+    "passes": true,
+    "checks": {
+      "perception_report_present": true,
+      "perception_outcome_valid": true,
+      "perception_gate_consistent": true,
+      "perception_variants_complete": true,
+      "perception_external_suites_complete": true,
+      "perception_baselines_complete": true,
+      "perception_ablations_present": true,
+      "perception_traces_exist": true,
+      "perception_required_arc_traces": true,
+      "perception_no_hack_passes": true,
+      "perception_no_external_judge": true,
+      "perception_no_forced_cycle": true,
+      "perception_cuda_available_recorded": true,
+      "perception_cuda_main_runtime": true,
+      "perception_cuda_suite_runtimes": true,
+      "perception_components_extracted": true,
+      "perception_action_effects_recorded": true,
+      "perception_selected_diagnostics_present": true
+    },
+    "missing_traces": [],
+    "outcome": "NO IMPROVEMENT FOUND",
+    "selected_variant": "full_perceptual_affordance"
+  },
+  "external_base_report_checks": {
+    "present": true,
+    "passes": true,
+    "checks": {
+      "external_base_report_present": true,
+      "external_base_outcome_valid": true,
+      "external_base_gate_consistent": true,
+      "external_base_arms_complete": true,
+      "external_base_external_suites_complete": true,
+      "external_base_baselines_complete": true,
+      "external_base_ablations_complete": true,
+      "external_base_traces_exist": true,
+      "external_base_required_arc_traces": true,
+      "external_base_trace_manifest_present": true,
+      "external_base_trace_count_first_pass": true,
+      "external_base_checkpoint_exists": true,
+      "external_base_manifest_exists": true,
+      "external_base_old_checkpoint_preserved": true,
+      "external_base_training_diagnostics_present": true,
+      "external_base_negative_results_preserved": true,
+      "external_base_no_hack_passes": true,
+      "external_base_no_external_judge": true,
+      "external_base_no_forced_cycle": true,
+      "external_base_no_public_text_as_state": true,
+      "external_base_cuda_available_recorded": true,
+      "external_base_cuda_main_runtime": true,
+      "external_base_cuda_suite_runtimes": true
+    },
+    "missing_traces": [],
+    "outcome": "NO IMPROVEMENT FOUND",
+    "selected_variant": "old_base_finetuned"
+  },
+  "hashes": {
+    "src/external_registry.py": {
+      "sha256": "3EE5774FE296399E7723F3346CA4843B62244A5AEFC9C851244E5977940AE440",
+      "size_bytes": 5480
+    },
+    "src/external_eval.py": {
+      "sha256": "C73110F2242292090932936D8B3EC66EE4C2B1AC820B24B6B67D65E731417C1D",
+      "size_bytes": 31459
+    },
+    "src/generalization_audit.py": {
+      "sha256": "49B2CB4E2373594644E393E6EA0C46C0C7EA0D56B9DC8DB8076D00D0F736A2E6",
+      "size_bytes": 23540
+    },
+    "src/external_valence.py": {
+      "sha256": "2E76EC9EBC7B7ABFAC1210EDF401F19089C725D2FED004EF0E9896B476FF2112",
+      "size_bytes": 4402
+    },
+    "src/external_affordance.py": {
+      "sha256": "FF0D6601E14871C8CFF83532778EA02EB7F70860790C26E6FC4E9179B81C2D90",
+      "size_bytes": 2965
+    },
+    "src/external_collapse_experiment.py": {
+      "sha256": "2F337C8C4752C197B0EAFEF5ECA3AAE262503615344482F44B4CE7BBC544B467",
+      "size_bytes": 38074
+    },
+    "src/perceptual_affordance.py": {
+      "sha256": "03301FFFA98A0A61AD35ABE1CBD1942F9EF69C28EB1CEC79C94A4FDA85231DCB",
+      "size_bytes": 17949
+    },
+    "src/perception_train.py": {
+      "sha256": "F83D7777A709B236170EFB746B32A272A39403A7134A6A27286489E6F5BCA7A3",
+      "size_bytes": 1281
+    },
+    "src/perception_eval.py": {
+      "sha256": "68496BD1F08CEA153BBA44EAB9580BEC4CAA736F9A0EBC12DF5B76E6D1291722",
+      "size_bytes": 4849
+    },
+    "src/external_perception_experiment.py": {
+      "sha256": "DC9934289C1D41B0A2F759A672F507E1255D9750C5CBB3BCE9F929A2AD9701BB",
+      "size_bytes": 33021
+    },
+    "src/trace_collect.py": {
+      "sha256": "EC60056ABF5D7901CA08F3FC661031E1109744714B6F523D2209813FAC9BDCD8",
+      "size_bytes": 16211
+    },
+    "src/base_world_model.py": {
+      "sha256": "3B23273702D38A74B895931EA7ACACD160AEFE79E6DE31A0328706A6DC961FF4",
+      "size_bytes": 12240
+    },
+    "src/base_pretrain.py": {
+      "sha256": "0E690A0D01B898F150FD56BE8B160C7202A6A1168D28A270403B519412CC1587",
+      "size_bytes": 10820
+    },
+    "src/base_eval.py": {
+      "sha256": "87B356128894EE341CB5C1E9ECA488FEE77705640D0F3F3C4D9C75F3541039C6",
+      "size_bytes": 18569
+    },
+    "src/base_retrain_experiment.py": {
+      "sha256": "844AEE28ECBFAF2C1B2026C09F165F60AD37ED1A3481184882C86B72051A3A19",
+      "size_bytes": 24045
+    },
+    "tests/test_external_generalization.py": {
+      "sha256": "195D4E4991970BBEF88E51B442FD8C2BC01A18A3421AB02704DCA72318AFAFD2",
+      "size_bytes": 3355
+    },
+    "tests/test_external_collapse.py": {
+      "sha256": "2318A33FAAC180E5EC18798F587C819B765F0E90D9AD31A0281FE4FAE5D039B6",
+      "size_bytes": 4706
+    },
+    "tests/test_perceptual_affordance.py": {
+      "sha256": "1C5D932BA3E0A1048F181A98E756389315683FFC41F5E5E3736F8551DA8D8D94",
+      "size_bytes": 4649
+    },
+    "tests/test_external_base_training.py": {
+      "sha256": "58C672D8A3768C32C07C09E6650B179777E40DD1B962B8DA4E1B1DD8C2A80A8B",
+      "size_bytes": 5157
+    },
+    "docs/external_generalization_report.json": {
+      "sha256": "34D5E34D0249DEDEA3AAA1A2E31DB33FCAA0CC1DBA70A8F77B30F40628E4C2AC",
+      "size_bytes": 252341
+    },
+    "docs/external_generalization_report.md": {
+      "sha256": "C7FC4D96CAF978DB928EC7EE52043BB41D69278F5EBF37A040A0933899DFC226",
+      "size_bytes": 10398
+    },
+    "docs/generalization_audit.json": {
+      "sha256": "61ACEC372BEFAAC614046756AAAE16F40BCC22E3C3690687930C76F3478BF5B0",
+      "size_bytes": 5808
+    },
+    "docs/external_collapse_report.json": {
+      "sha256": "6CC4601A2533BF9BDCBCF45EEEACA9DD469A3505132A42918D4CB2296EC49DEF",
+      "size_bytes": 1775714
+    },
+    "docs/external_collapse_report.md": {
+      "sha256": "02F3321945E112BB29E19F7052E88689A2983B950F8FE3E755F16B8C9CAD04DA",
+      "size_bytes": 10815
+    },
+    "docs/generalization_audit_after_collapse.json": {
+      "sha256": "E824B88AC7853EACA7A1F5925A6793E080E8DD7B3043D1C2524D1DF0A6907AB3",
+      "size_bytes": 8712
+    },
+    "docs/perceptual_affordance_report.json": {
+      "sha256": "3C92C31DAE8ED3EDF941925DB1AE7B3AA6942220BE8132C7C69B93162FB42612",
+      "size_bytes": 2645953
+    },
+    "docs/perceptual_affordance_report.md": {
+      "sha256": "C17A218BB0F92B70572601EAFA6DABCC340FBACF64FDE32546EF1CBF7ABA3811",
+      "size_bytes": 10471
+    },
+    "docs/generalization_audit_after_perception.json": {
+      "sha256": "CCE614B3E683E0311FA89E558F4E198276B036E9DC74437D2D78C171A8E6E539",
+      "size_bytes": 12148
+    },
+    "docs/external_base_report.json": {
+      "sha256": "CEB588733BE30151C6205217486D273723211CB98FAE43C4B56AC33DA4FC6FD5",
+      "size_bytes": 1733012
+    },
+    "docs/external_base_report.md": {
+      "sha256": "20BFAC985A1BF150E7E33DA6E4E3518B3CA800D2E6BA0D919CFD36C20B8F1068",
+      "size_bytes": 6978
+    },
+    "docs/generalization_audit_after_base_retrain.json": {
+      "sha256": "491B35DD25FB4CA759FF2A1F132ADBF238E066885C46A53E9C6513A2100E7F22",
+      "size_bytes": 16990
+    },
+    "docs/audit_after_external_base.json": {
+      "sha256": "FBCA238E15D408CE8A6F2376BC0A23430E78676FFCACF32100C003625C243E82",
+      "size_bytes": 69015
+    },
+    "frozen/recurrent_latent_fast.pt": {
+      "sha256": "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD",
+      "size_bytes": 169185
+    },
+    "frozen/external_base_v1.pt": {
+      "sha256": "567C30E7F43876D0F31F8342D1D16A92161616F687E7D3115C3C5067CAE61F6D",
+      "size_bytes": 1638607
+    },
+    "frozen/external_base_manifest_v1.json": {
+      "sha256": "3FC335951AA5D76AC7D4B9F312CD80A5D3B66A7C0CEF0141190F02BA36E36231",
+      "size_bytes": 7346
+    },
+    "data/external_traces_manifest.json": {
+      "sha256": "59500B8A0041D47C70103E4E306C3597E97A2845A78418EBEE71C97873955993",
+      "size_bytes": 5537
+    },
+    "runs/explorer_tiny.pt": {
+      "sha256": "F0A2F8BE9F64B7928083E6EF59A5535998AF5E8465F4FDD3E3C1B7EDDB6727E9",
+      "size_bytes": 607937
+    }
+  },
+  "limitations": [
+    "No active capability claim is externally supported; this is acceptable discipline, not performance success."
+  ]
+}

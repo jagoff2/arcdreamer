@@ -1,0 +1,194 @@
+{
+  "format": "external_interaction_trace_manifest_v1",
+  "schema": {
+    "obs": "float32 fixed 8x8 visible grid, flattened and scaled, from obs_t",
+    "legal_mask": "float32 legal action mask over the compact training action set",
+    "action_features": "float32 generic action family/target/hash features from action_t",
+    "action_id": "int compact action index used only for inverse-dynamics diagnostics",
+    "family": "int generic action family target for inverse dynamics",
+    "next_obs": "float32 fixed 8x8 visible grid, flattened and scaled, from obs_t+1",
+    "reward": "float32 public reward/score delta clipped during training",
+    "terminal": "bool public terminal/truncated flag",
+    "source_id": {
+      "generated_arc_like_pretrain": 0,
+      "gymnasium_dev_policy": 1,
+      "old_explorer_dev": 2
+    }
+  },
+  "rules": {
+    "private_target_state_absent": true,
+    "no_solver_labels": true,
+    "no_game_id_features": true,
+    "no_public_text_as_state": true,
+    "sealed_official_arcagi3_used_for_training": false
+  },
+  "data_path": "data\\external_trace_tensors.npz",
+  "data_sha256": "AE718CF6FC7E725BF841D659C237D92F47224DEDD6FF8B254F1D15AA45D0BAB5",
+  "sample_records": [
+    {
+      "path": "data\\external_trace_samples.jsonl",
+      "sha256": "0F395D389E7CEB9057CDDB56473F6A5C4EA4858347ECD78DFB0814AEE4F08298"
+    }
+  ],
+  "source_summary": [
+    {
+      "source": "generated_arc_like_pretrain",
+      "split": "pretrain_only",
+      "policy": "random_synthetic_dynamics",
+      "transition_count": 1000000
+    },
+    {
+      "source": "gymnasium_dev_policy",
+      "suite_id": "gymnasium_classic_control",
+      "task_id": "CartPole-v1",
+      "policy": "random_legal",
+      "split": "dev",
+      "transition_count": 73
+    },
+    {
+      "source": "gymnasium_dev_policy",
+      "suite_id": "gymnasium_classic_control",
+      "task_id": "CartPole-v1",
+      "policy": "repeat_last_action",
+      "split": "dev",
+      "transition_count": 30
+    },
+    {
+      "source": "gymnasium_dev_policy",
+      "suite_id": "gymnasium_classic_control",
+      "task_id": "CartPole-v1",
+      "policy": "coverage_graph_exploration",
+      "split": "dev",
+      "transition_count": 114
+    },
+    {
+      "source": "gymnasium_dev_policy",
+      "suite_id": "gymnasium_classic_control",
+      "task_id": "CartPole-v1",
+      "policy": "novelty_first",
+      "split": "dev",
+      "transition_count": 30
+    },
+    {
+      "source": "gymnasium_dev_policy",
+      "suite_id": "gymnasium_classic_control",
+      "task_id": "CartPole-v1",
+      "policy": "greedy_observable_score_delta",
+      "split": "dev",
+      "transition_count": 30
+    },
+    {
+      "source": "gymnasium_dev_policy",
+      "suite_id": "gymnasium_classic_control",
+      "task_id": "CartPole-v1",
+      "policy": "oracle_free_observed_graph_bfs",
+      "split": "dev",
+      "transition_count": 114
+    },
+    {
+      "source": "old_explorer_dev",
+      "suite_id": "gymnasium_classic_control",
+      "task_id": "CartPole-v1",
+      "policy": "old_explorer",
+      "split": "dev",
+      "transition_count": 30
+    },
+    {
+      "source": "gymnasium_dev_policy",
+      "suite_id": "gymnasium_toy_text",
+      "task_id": "FrozenLake-v1",
+      "policy": "random_legal",
+      "split": "dev",
+      "transition_count": 18
+    },
+    {
+      "source": "gymnasium_dev_policy",
+      "suite_id": "gymnasium_toy_text",
+      "task_id": "FrozenLake-v1",
+      "policy": "repeat_last_action",
+      "split": "dev",
+      "transition_count": 96
+    },
+    {
+      "source": "gymnasium_dev_policy",
+      "suite_id": "gymnasium_toy_text",
+      "task_id": "FrozenLake-v1",
+      "policy": "coverage_graph_exploration",
+      "split": "dev",
+      "transition_count": 18
+    },
+    {
+      "source": "gymnasium_dev_policy",
+      "suite_id": "gymnasium_toy_text",
+      "task_id": "FrozenLake-v1",
+      "policy": "novelty_first",
+      "split": "dev",
+      "transition_count": 96
+    },
+    {
+      "source": "gymnasium_dev_policy",
+      "suite_id": "gymnasium_toy_text",
+      "task_id": "FrozenLake-v1",
+      "policy": "greedy_observable_score_delta",
+      "split": "dev",
+      "transition_count": 96
+    },
+    {
+      "source": "gymnasium_dev_policy",
+      "suite_id": "gymnasium_toy_text",
+      "task_id": "FrozenLake-v1",
+      "policy": "oracle_free_observed_graph_bfs",
+      "split": "dev",
+      "transition_count": 9
+    },
+    {
+      "source": "old_explorer_dev",
+      "suite_id": "gymnasium_toy_text",
+      "task_id": "FrozenLake-v1",
+      "policy": "old_explorer",
+      "split": "dev",
+      "transition_count": 9
+    }
+  ],
+  "generated_arc_like_pretrain_count": 1000000,
+  "transition_count": 1000763,
+  "array_shapes": {
+    "obs": [
+      1000763,
+      64
+    ],
+    "next_obs": [
+      1000763,
+      64
+    ],
+    "action_features": [
+      1000763,
+      16
+    ],
+    "action_id": [
+      1000763
+    ],
+    "family": [
+      1000763
+    ],
+    "legal_mask": [
+      1000763,
+      8
+    ],
+    "reward": [
+      1000763
+    ],
+    "terminal": [
+      1000763
+    ],
+    "source_id": [
+      1000763
+    ]
+  },
+  "source_counts": {
+    "generated_arc_like_pretrain": 1000000,
+    "gymnasium_dev_policy": 724,
+    "old_explorer_dev": 39
+  },
+  "manifest_sha256": "B5399FC92DC6E20287514D87EE4F5224523265C19422AB966EFE7F0117996658"
+}

@@ -1,0 +1,375 @@
+{
+  "metadata": {
+    "suite_id": "gymnasium_toy_text",
+    "task_id": "FrozenLake-v1",
+    "variant": "coverage_graph_exploration",
+    "split": "sealed_eval",
+    "seed": 101
+  },
+  "summary": {
+    "suite_id": "gymnasium_toy_text",
+    "task_id": "FrozenLake-v1",
+    "split": "sealed_eval",
+    "variant": "coverage_graph_exploration",
+    "seed": 101,
+    "score": 0.0,
+    "normalized_score": 0.0,
+    "solved": false,
+    "steps": 6,
+    "invalid_action_rate": 0.0,
+    "unique_states": 7,
+    "useful_events": 0,
+    "action_entropy": 1.9182958340544893,
+    "repeat_collapse": 0.3333333333333333,
+    "actions": [
+      "2",
+      "4",
+      "4",
+      "1",
+      "3",
+      "2"
+    ],
+    "controller_summary": {},
+    "scorecard": {}
+  },
+  "steps": [
+    {
+      "step": 0,
+      "obs": {
+        "task_id": "external/gymnasium_toy_text/FrozenLake-v1",
+        "episode_id": "external/gymnasium_toy_text/FrozenLake-v1/seed_101",
+        "step_index": 0,
+        "obs_hash": "8a008aed5cba6a52",
+        "grid_summary": {
+          "shape": [
+            4,
+            4
+          ],
+          "hash": "92af9fb968e7ccd3",
+          "counts": {
+            "0": 15,
+            "2": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_toy_text",
+          "task_id": "FrozenLake-v1",
+          "raw_observation": 0,
+          "score": 0.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "8c3fd92b00cf46ac",
+      "score_delta": 0.0,
+      "event_delta": [],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "no_external_reward"
+    },
+    {
+      "step": 1,
+      "obs": {
+        "task_id": "external/gymnasium_toy_text/FrozenLake-v1",
+        "episode_id": "external/gymnasium_toy_text/FrozenLake-v1/seed_101",
+        "step_index": 1,
+        "obs_hash": "8c3fd92b00cf46ac",
+        "grid_summary": {
+          "shape": [
+            4,
+            4
+          ],
+          "hash": "7ff3f1bf29a2be79",
+          "counts": {
+            "0": 15,
+            "2": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_toy_text",
+          "task_id": "FrozenLake-v1",
+          "raw_observation": 4,
+          "score": 0.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "chosen_action": "4",
+      "baseline_actions": {},
+      "next_obs_hash": "8a008aed5cba6a52",
+      "score_delta": 0.0,
+      "event_delta": [],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "no_external_reward"
+    },
+    {
+      "step": 2,
+      "obs": {
+        "task_id": "external/gymnasium_toy_text/FrozenLake-v1",
+        "episode_id": "external/gymnasium_toy_text/FrozenLake-v1/seed_101",
+        "step_index": 2,
+        "obs_hash": "8a008aed5cba6a52",
+        "grid_summary": {
+          "shape": [
+            4,
+            4
+          ],
+          "hash": "92af9fb968e7ccd3",
+          "counts": {
+            "0": 15,
+            "2": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_toy_text",
+          "task_id": "FrozenLake-v1",
+          "raw_observation": 0,
+          "score": 0.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "chosen_action": "4",
+      "baseline_actions": {},
+      "next_obs_hash": "8a008aed5cba6a52",
+      "score_delta": 0.0,
+      "event_delta": [],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "no_external_reward"
+    },
+    {
+      "step": 3,
+      "obs": {
+        "task_id": "external/gymnasium_toy_text/FrozenLake-v1",
+        "episode_id": "external/gymnasium_toy_text/FrozenLake-v1/seed_101",
+        "step_index": 3,
+        "obs_hash": "8a008aed5cba6a52",
+        "grid_summary": {
+          "shape": [
+            4,
+            4
+          ],
+          "hash": "92af9fb968e7ccd3",
+          "counts": {
+            "0": 15,
+            "2": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_toy_text",
+          "task_id": "FrozenLake-v1",
+          "raw_observation": 0,
+          "score": 0.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "chosen_action": "1",
+      "baseline_actions": {},
+      "next_obs_hash": "8a008aed5cba6a52",
+      "score_delta": 0.0,
+      "event_delta": [],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "no_external_reward"
+    },
+    {
+      "step": 4,
+      "obs": {
+        "task_id": "external/gymnasium_toy_text/FrozenLake-v1",
+        "episode_id": "external/gymnasium_toy_text/FrozenLake-v1/seed_101",
+        "step_index": 4,
+        "obs_hash": "8a008aed5cba6a52",
+        "grid_summary": {
+          "shape": [
+            4,
+            4
+          ],
+          "hash": "92af9fb968e7ccd3",
+          "counts": {
+            "0": 15,
+            "2": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_toy_text",
+          "task_id": "FrozenLake-v1",
+          "raw_observation": 0,
+          "score": 0.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "chosen_action": "3",
+      "baseline_actions": {},
+      "next_obs_hash": "cd7516f718c4f885",
+      "score_delta": 0.0,
+      "event_delta": [],
+      "terminal": false,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "no_external_reward"
+    },
+    {
+      "step": 5,
+      "obs": {
+        "task_id": "external/gymnasium_toy_text/FrozenLake-v1",
+        "episode_id": "external/gymnasium_toy_text/FrozenLake-v1/seed_101",
+        "step_index": 5,
+        "obs_hash": "cd7516f718c4f885",
+        "grid_summary": {
+          "shape": [
+            4,
+            4
+          ],
+          "hash": "b0a6711405e12a17",
+          "counts": {
+            "0": 15,
+            "2": 1
+          }
+        },
+        "available_actions": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "public_extras": {
+          "suite_id": "gymnasium_toy_text",
+          "task_id": "FrozenLake-v1",
+          "raw_observation": 1,
+          "score": 0.0,
+          "terminated": false,
+          "truncated": false
+        }
+      },
+      "legal_actions": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "chosen_action": "2",
+      "baseline_actions": {},
+      "next_obs_hash": "d2a99844ca1c0d54",
+      "score_delta": 0.0,
+      "event_delta": [
+        "terminated"
+      ],
+      "terminal": true,
+      "invalid_action": false,
+      "memory_drive_hypothesis": {
+        "memory_recall": {},
+        "drive": {},
+        "hypothesis_state": {},
+        "policy": {
+          "baseline": "coverage_graph_exploration"
+        }
+      },
+      "failure_class": "no_external_reward"
+    }
+  ]
+}

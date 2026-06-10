@@ -88,7 +88,7 @@ def _text_findings(path: Path) -> list[dict[str, Any]]:
 
 
 def _checkpoint_findings() -> list[dict[str, Any]]:
-    allowed = {Path("frozen/recurrent_latent_fast.pt")}
+    allowed = {Path("frozen/recurrent_latent_fast.pt"), Path("frozen/external_base_v1.pt")}
     ignored_parts = {".git", "__pycache__", ".pytest_cache", ".venv", "venv", "env", "runs"}
     suffixes = {".pt", ".pth", ".ckpt", ".safetensors", ".bin"}
     findings: list[dict[str, Any]] = []

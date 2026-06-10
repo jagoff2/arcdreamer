@@ -1,0 +1,181 @@
+{
+  "format": "external_base_manifest_v1",
+  "checkpoint": "frozen/external_base_v1.pt",
+  "old_recurrent_checkpoint": "frozen/recurrent_latent_fast.pt",
+  "old_recurrent_checkpoint_sha256": "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD",
+  "trace_manifest": "data/external_traces_manifest.json",
+  "trace_manifest_sha256": "59500B8A0041D47C70103E4E306C3597E97A2845A78418EBEE71C97873955993",
+  "trace_data_sha256": "AE718CF6FC7E725BF841D659C237D92F47224DEDD6FF8B254F1D15AA45D0BAB5",
+  "trace_transition_count": 1000763,
+  "source_counts": {
+    "generated_arc_like_pretrain": 1000000,
+    "gymnasium_dev_policy": 724,
+    "old_explorer_dev": 39
+  },
+  "model_arms": [
+    "old_base_unchanged",
+    "old_base_world_model",
+    "old_base_finetuned",
+    "from_scratch_external_base",
+    "null_training_control"
+  ],
+  "frozen_before_sealed_eval": true,
+  "no_sealed_official_training": true,
+  "training_objectives": [
+    "next observation/change prediction",
+    "reward/event/no-op prediction",
+    "inverse dynamics",
+    "action-affordance prediction",
+    "temporal object/region persistence",
+    "latent rollout consistency",
+    "memory improves delayed/partial prediction",
+    "intrinsic value from controllability, prediction improvement, progress, and no-op avoidance"
+  ],
+  "arm_metrics": {
+    "old_base_world_model": {
+      "arm": "old_base_world_model",
+      "seed": 7101,
+      "steps": 160,
+      "batch_size": 512,
+      "initial_losses": {
+        "next_observation": 0.28128722310066223,
+        "change_mask": 0.7597885131835938,
+        "reward_event_noop": 1.2349671125411987,
+        "inverse_dynamics": 1.8856112957000732,
+        "action_affordance": 0.26421016454696655,
+        "temporal_object_persistence": 0.008340238593518734,
+        "latent_rollout_consistency": 0.09464219957590103,
+        "memory_utility": 0.24312099814414978,
+        "total": 2.8560407161712646
+      },
+      "final_losses": {
+        "next_observation": 0.011285709217190742,
+        "change_mask": 0.0760512501001358,
+        "reward_event_noop": 0.1996389478445053,
+        "inverse_dynamics": 0.0030075907707214355,
+        "action_affordance": 0.001472358824685216,
+        "temporal_object_persistence": 0.005077450070530176,
+        "latent_rollout_consistency": 0.002937732031568885,
+        "memory_utility": 0.011329405009746552,
+        "total": 0.23358693718910217
+      },
+      "recent_total_loss_mean": 0.22548491656780242,
+      "loss_delta": 2.6224537789821625,
+      "training_losses_are_diagnostic_only": true,
+      "memory_utility": {
+        "with_memory_mse": 0.011329405009746552,
+        "without_memory_mse": 0.011329405009746552,
+        "memory_improves_delayed_partial_prediction": true
+      }
+    },
+    "old_base_finetuned": {
+      "arm": "old_base_finetuned",
+      "seed": 7102,
+      "steps": 160,
+      "batch_size": 512,
+      "initial_losses": {
+        "next_observation": 0.2531013786792755,
+        "change_mask": 0.7304574251174927,
+        "reward_event_noop": 1.0982393026351929,
+        "inverse_dynamics": 1.5661916732788086,
+        "action_affordance": 0.07615064829587936,
+        "temporal_object_persistence": 0.008800487965345383,
+        "latent_rollout_consistency": 0.11494278162717819,
+        "memory_utility": 0.2505204975605011,
+        "total": 2.465188980102539
+      },
+      "final_losses": {
+        "next_observation": 0.011429067701101303,
+        "change_mask": 0.07826262712478638,
+        "reward_event_noop": 0.18080617487430573,
+        "inverse_dynamics": 0.006134815979748964,
+        "action_affordance": 0.0012592123821377754,
+        "temporal_object_persistence": 0.01078314520418644,
+        "latent_rollout_consistency": 0.0053783017210662365,
+        "memory_utility": 0.011753133498132229,
+        "total": 0.22317616641521454
+      },
+      "recent_total_loss_mean": 0.24560054987668992,
+      "loss_delta": 2.2420128136873245,
+      "training_losses_are_diagnostic_only": true,
+      "memory_utility": {
+        "with_memory_mse": 0.011753133498132229,
+        "without_memory_mse": 0.011753133498132229,
+        "memory_improves_delayed_partial_prediction": true
+      }
+    },
+    "from_scratch_external_base": {
+      "arm": "from_scratch_external_base",
+      "seed": 7103,
+      "steps": 160,
+      "batch_size": 512,
+      "initial_losses": {
+        "next_observation": 0.28497689962387085,
+        "change_mask": 0.7479298114776611,
+        "reward_event_noop": 1.0059401988983154,
+        "inverse_dynamics": 1.726300835609436,
+        "action_affordance": 0.17355278134346008,
+        "temporal_object_persistence": 0.009451203979551792,
+        "latent_rollout_consistency": 0.11635987460613251,
+        "memory_utility": 0.2464599311351776,
+        "total": 2.5563242435455322
+      },
+      "final_losses": {
+        "next_observation": 0.01109814178198576,
+        "change_mask": 0.07471755146980286,
+        "reward_event_noop": 0.1793346107006073,
+        "inverse_dynamics": 0.0026566600427031517,
+        "action_affordance": 0.0011538845719769597,
+        "temporal_object_persistence": 0.007041333243250847,
+        "latent_rollout_consistency": 0.002978062257170677,
+        "memory_utility": 0.011155459098517895,
+        "total": 0.2162047177553177
+      },
+      "recent_total_loss_mean": 0.2292919337749481,
+      "loss_delta": 2.3401195257902145,
+      "training_losses_are_diagnostic_only": true,
+      "memory_utility": {
+        "with_memory_mse": 0.011155459098517895,
+        "without_memory_mse": 0.011155459098517895,
+        "memory_improves_delayed_partial_prediction": true
+      }
+    },
+    "null_training_control": {
+      "arm": "null_training_control",
+      "seed": 7104,
+      "steps": 160,
+      "batch_size": 512,
+      "initial_losses": {
+        "next_observation": 0.25100886821746826,
+        "change_mask": 0.7119352221488953,
+        "reward_event_noop": 1.0613316297531128,
+        "inverse_dynamics": 1.9433391094207764,
+        "action_affordance": 0.23264865577220917,
+        "temporal_object_persistence": 0.06186138838529587,
+        "latent_rollout_consistency": 0.1067967638373375,
+        "memory_utility": 0.24705737829208374,
+        "total": 2.672614097595215
+      },
+      "final_losses": {
+        "next_observation": 0.010949995368719101,
+        "change_mask": 0.20759367942810059,
+        "reward_event_noop": 0.12260744720697403,
+        "inverse_dynamics": 1.2079181671142578,
+        "action_affordance": 0.02905556932091713,
+        "temporal_object_persistence": 0.003291993634775281,
+        "latent_rollout_consistency": 0.00208047847263515,
+        "memory_utility": 0.011105585843324661,
+        "total": 0.7615793943405151
+      },
+      "recent_total_loss_mean": 0.7672932624816895,
+      "loss_delta": 1.9110347032546997,
+      "training_losses_are_diagnostic_only": true,
+      "memory_utility": {
+        "with_memory_mse": 0.011105585843324661,
+        "without_memory_mse": 0.011105585843324661,
+        "memory_improves_delayed_partial_prediction": true
+      }
+    }
+  },
+  "checkpoint_sha256": "567C30E7F43876D0F31F8342D1D16A92161616F687E7D3115C3C5067CAE61F6D"
+}
