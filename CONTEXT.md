@@ -3389,3 +3389,33 @@
   - None.
 - Exact next action:
   - Run `git add` and `git commit` as separate commands.
+
+## Step 0143 - Follow-up committed and final report summary inspected
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `git add CONTEXT.md src\external_registry.py src\external_eval.py tests\test_external_generalization.py docs\external_generalization_report.json docs\external_generalization_report.md docs\generalization_audit.json docs\audit_after_external_generalization.json docs\audit_after_external_generalization.md docs\external_traces`
+  - `git status --short`
+  - `git diff --cached --stat`
+  - `git commit -m "Add explicit external claim prediction field"`
+  - `git status --short --branch`
+  - `python -c "import json; r=json.load(open('docs/external_generalization_report.json')); ... final report summary ..."`
+  - `git rev-parse --short HEAD`
+- Observed results/errors:
+  - Follow-up commit succeeded as `91da0fc`.
+  - Worktree was clean immediately after that commit: `## main`.
+  - Final external report outcome: `EXTERNAL GENERALIZATION DISCIPLINE PROVEN`.
+  - Device evidence: exact command requested `auto` and resolved to `cuda`.
+  - External suites evaluated: `official_arcagi3`, `gymnasium_classic_control`, `gymnasium_toy_text`.
+  - Aggregate external scores:
+    - `official_arcagi3`: explorer `0.0`; best baseline `coverage_graph_exploration` score `0.004`.
+    - `gymnasium_classic_control`: explorer `0.11666666666666665`; best baseline `coverage_graph_exploration` score `0.48333333333333334`.
+    - `gymnasium_toy_text`: explorer `0.0`; best baseline `coverage_graph_exploration` score `0.0`.
+  - Unsupported claims remain: memory, exploration, dialogue, head_collapse, planner, curiosity, social_state.
+  - Trace count remains `175`.
+  - Claim prediction alias check passed.
+- Current blockers:
+  - None.
+- Exact next action:
+  - Commit this final context note and mark the external-generalization goal complete.
