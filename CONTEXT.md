@@ -2266,3 +2266,361 @@
   - Need amend this final context entry into the same commit and verify clean status.
 - Exact next action:
   - Stage `CONTEXT.md`, amend commit without changing message, then run final `git status --short` and `git rev-parse HEAD`.
+
+## Step 0084 - ARC official-diagnosis continuation intake
+
+- Files touched: `CONTEXT.MD`
+- Commands run:
+  - `Get-Content -Raw GOAL.MD`
+  - `Get-Content -Raw CONTEXT.MD`
+  - `Get-Content -Raw docs\arcagi3_report.json`
+  - `Get-Content -Raw docs\audit_after_arcagi3.json`
+  - `Get-Content -Raw docs\head_collapse_report.json`
+  - `git status --short --branch; git rev-parse HEAD; git log --oneline -5`
+- Observed results/errors:
+  - Active thread objective is now diagnosis-only for the official ARC-AGI-3 25-game zero-solve result.
+  - `GOAL.MD` remains the original recurrent-latent system source file; the active ARC diagnosis objective is layered on top by thread goal.
+  - `docs\arcagi3_report.json` is the older committed-fixture report and reports `ARC-AGI-3 ADAPTER PROVEN` on 4 public fixtures, not the official 25-game runtime.
+  - `docs\audit_after_arcagi3.json` reports `AUDIT PROVEN`.
+  - `docs\head_collapse_report.json` reports `HEAD-COLLAPSE PROVEN`.
+  - Git status was clean on branch `main`; HEAD was `9a1e4a52af0d3ded56238f2cbff5494effcdf5b0` (`Add official ARC-AGI-3 CUDA evaluation`).
+- Current objective:
+  - Diagnose why the unchanged ARC adapter/explorer got zero solves on 25 official ARC-AGI-3 games, without building a solver, tuning for score, adding game-specific scripts, weakening audits, or using hidden labels.
+- Plan:
+  - Refresh current official-runtime artifacts, hashes, and availability.
+  - Implement diagnosis-only trace/taxonomy/analysis modules and tests.
+  - Generate full official per-game traces, failure classifications, baseline comparisons, no-hack evidence, and reports.
+  - Run the required `pytest`, diagnosis, leakage scan, and independent verification commands.
+- Current blockers:
+  - Need inspect current official CUDA report, official trace availability, and existing official bridge code before editing.
+- Exact next action:
+  - Inspect current ARC official code/artifacts and append updated hashes/official availability to this context.
+
+## Step 0085 - Current official bridge and trace availability inspected
+
+- Files touched: `CONTEXT.MD`
+- Commands run:
+  - `Get-Content -Raw AGENTS.md`
+  - `rg --files src tests docs audit | rg "arcagi3|audit_after_arcagi3|head_collapse|failure"`
+  - `Get-Content -Raw src\arcagi3_official.py`
+  - `Get-Content -Raw src\arcagi3_official_eval.py`
+  - `.\.venv\Scripts\python.exe -c "import sys, importlib.util, torch; ..."`
+  - `Get-ChildItem -File docs\arcagi3_official_cuda_traces | Select-Object Name,Length | Format-Table -AutoSize`
+- Observed results/errors:
+  - `AGENTS.md` reinforces that `GOAL.md` is authoritative and that changes should be atomic and verified.
+  - Existing official bridge files are `src\arcagi3_official.py` and `src\arcagi3_official_eval.py`; diagnosis-specific files do not exist yet.
+  - Official runtime availability in `.venv`: Python `3.13.5`, `arc_agi=True`, `arcengine=True`, `torch 2.11.0+cu128`, CUDA available with two devices, device 0 `NVIDIA GeForce RTX 5060 Ti`.
+  - `docs\arcagi3_official_cuda_traces` already contains 25 official per-game explorer traces, one for each public official game.
+  - The official bridge maps public frame pixels and legal action IDs into the unchanged `ARCAGI3Adapter` contract; it records official scorecard summaries but does not yet perform the requested failure taxonomy, action audit, memory audit, planner audit, baseline trace excerpts, or diagnosis report.
+- Current blockers:
+  - Need inspect official report aggregates and trace schema before implementing diagnosis.
+- Exact next action:
+  - Summarize `docs\arcagi3_official_cuda_report.json`, inspect trace fields, then implement diagnosis modules.
+
+## Step 0086 - Official report summary and trace schema inspected
+
+- Files touched: `CONTEXT.MD`
+- Commands run:
+  - `.\.venv\Scripts\python.exe -c "import json; r=json.load(open('docs/arcagi3_official_cuda_report.json')); ..."`
+  - `Get-Content -Raw src\arcagi3_trace.py`
+  - `Get-Content -Raw src\arcagi3_adapter.py`
+  - `Get-Content -Raw src\arcagi3_baselines.py`
+  - `.\.venv\Scripts\python.exe -c "import json, pathlib; ... docs/arcagi3_official_cuda_traces/ar25-0c556536.official.normal.json ..."`
+  - `Get-FileHash -Algorithm SHA256 GOAL.MD,CONTEXT.MD,docs\arcagi3_official_cuda_report.json,docs\arcagi3_official_report.json,docs\arcagi3_report.json,docs\audit_after_arcagi3.json,docs\head_collapse_report.json,frozen\recurrent_latent_fast.pt,runs\explorer_tiny.pt,src\arcagi3_official.py,src\arcagi3_official_eval.py`
+- Observed results/errors:
+  - `docs\arcagi3_official_cuda_report.json` reports `ARC-AGI-3 OFFICIAL RUNTIME EVALUATED`, `game_count=25`, explorer solve rate `0.0`, mean normalized score `0.004`, best baseline `coverage_graph_exploration` mean normalized score `0.004`, and baseline margin `0.0`.
+  - Official limitations already recorded: unchanged adapter solved zero official games, did not beat best same-baseline aggregate, all baselines solved zero, and the bridge uses only public frames/legal action IDs.
+  - Existing trace schema includes `metadata`, `summary`, and `steps`; each step includes observation grid, legal actions, chosen action, next observation, event delta, score delta, score, normalized score, memory recall, drive, hypothesis state, and policy trace.
+  - Existing trace schema does not include baseline action snapshots per step, extracted object/entity features as a named audit object, adapter tensor summaries, no-op/action audit, failure class, memory corruption effects, or planner/goal/baseline explanations.
+  - Hashes captured:
+    - `GOAL.MD`: `7889C5DED870918F1FB4831236725FFE2325A43664837EE37A31FB07799DF246`
+    - `docs\arcagi3_official_cuda_report.json`: `DF5921FABE27E6CF5FBF072D608007EFE412304BF5DD6F3CE3A56738DB3DCD9D`
+    - `docs\arcagi3_official_report.json`: `D7EE396BC14A17EAE7DD1054F70D754C1BD281B8349484192CC89FFCA1891BD7`
+    - `docs\arcagi3_report.json`: `90F5F0D234D7DBF4A940F7F727C64F34F22254AA6BA0A5FEC926CAB6ECE92FC2`
+    - `docs\audit_after_arcagi3.json`: `7DB9886DE84BC176A666776658F8DA7BBBF1EE8C739C3098D48D9396E8E6818C`
+    - `docs\head_collapse_report.json`: `483BB0FF930F465258FE3BAE2510554D90E4DE62646D737B9A19AC2C0FE7A4FC`
+    - `frozen\recurrent_latent_fast.pt`: `D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD`
+    - `runs\explorer_tiny.pt`: `F0A2F8BE9F64B7928083E6EF59A5535998AF5E8465F4FDD3E3C1B7EDDB6727E9`
+    - `src\arcagi3_official.py`: `876006CB9615982F5D340BA04305D9AA0E718985C5B100D62A909C149650B0F1`
+    - `src\arcagi3_official_eval.py`: `1A77FA59C19DC1FEE13D14084735C8F539FAB6A6809845542BFE6206ED37DB28`
+- Current blockers:
+  - Need implement diagnosis files without changing official game data, scoring, or solver behavior.
+- Exact next action:
+  - Inspect audit scan coverage and then add diagnosis-only modules/tests/reports.
+
+## Step 0087 - Existing audit coverage inspected before diagnosis edits
+
+- Files touched: `CONTEXT.MD`
+- Commands run:
+  - `Get-Content -Raw audit\leakage_scan.py`
+  - `Get-Content -Raw audit\independent_verify.py`
+  - `Get-Content -Raw tests\test_arcagi3_adapter.py`
+  - `Get-Content -Raw .gitignore`
+  - `git status --short`
+- Observed results/errors:
+  - `audit\leakage_scan.py` scans `src`, `tests`, and `audit` for forbidden external/pretrained imports and prompt-loop patterns.
+  - `audit\independent_verify.py` audits existing ARC fixture proof files but does not yet list the new diagnosis modules/reports because they do not exist.
+  - Existing ARC tests cover fixtures, adapter tensorization, baselines/tracing, and old no-hack audit only.
+  - `.gitignore` ignores official trace directories, including `docs/arcagi3_official_traces/` and `docs/arcagi3_official_cuda_traces/`.
+  - Git status currently has only `CONTEXT.md` modified.
+- Current blockers:
+  - Need implement diagnosis code and then update independent audit file list so prior-property verification covers the new artifacts.
+- Exact next action:
+  - Add `src\arcagi3_trace_analysis.py`, `src\arcagi3_failure_taxonomy.py`, `src\arcagi3_diagnose.py`, focused tests, and diagnosis report generation.
+
+## Step 0088 - Existing official trace/report variants inspected
+
+- Files touched: `CONTEXT.MD`
+- Commands run:
+  - `if (Test-Path docs\arcagi3_official_traces) { Get-ChildItem -File docs\arcagi3_official_traces ... } else { 'MISSING' }`
+  - `.\.venv\Scripts\python.exe -c "import json; r=json.load(open('docs/arcagi3_official_cuda_report.json')); print(json.dumps(r.get('baselines'), indent=2)[:8000])"`
+  - `.\.venv\Scripts\python.exe -c "import json; r=json.load(open('docs/arcagi3_official_cuda_report.json')); ... per_game summary ..."`
+  - `.\.venv\Scripts\python.exe -c "import json, pathlib; ... docs/arcagi3_official_cuda_traces/bp35-0a0ad940.official.normal.json ..."`
+- Observed results/errors:
+  - `docs\arcagi3_official_traces` already exists with 25 per-game traces, separate from `docs\arcagi3_official_cuda_traces`.
+  - CUDA official baselines: all six solve rate `0.0`; best normalized score ties at `0.004` for coverage, novelty, greedy, and BFS-style policies.
+  - Per-game CUDA summary: only `lf52-271a04aa` reached any official progress (`levels_completed=1`, normalized `0.1`, useful events `2`); all other official games stayed at zero normalized score.
+  - Many explorer official games have action entropy `0.0` and repeat collapse `1.0`, indicating repeated single-action loops; high-entropy games still ended in `GAME_OVER` or no completion.
+  - Trace diagnostics show the adapter often sees dense visual `G`/`R` blobs, maps them to generic goal/resource features, selects a semantic action, and repeats a legal raw/click action without official-progress feedback.
+- Current blockers:
+  - Need code the analysis so this evidence becomes auditable, per-game, and generated by command.
+- Exact next action:
+  - Implement diagnosis modules and tests.
+
+## Step 0089 - Diagnosis command defaults checked
+
+- Files touched: `CONTEXT.MD`
+- Commands run:
+  - `Get-Content -Raw src\device.py`
+  - `.\.venv\Scripts\python.exe -c "import json; r=json.load(open('docs/arcagi3_official_report.json')); ..."`
+  - `Get-Content -Raw docs\arcagi3_official_games.json`
+- Observed results/errors:
+  - `src\device.py` resolves `AUTO_DEVICE` to CUDA when `torch.cuda.is_available()` is true, so `.venv` diagnosis tensor replay defaults to GPU without an explicit `--device cuda`.
+  - `docs\arcagi3_official_report.json` is the official trace-dir report for `docs\arcagi3_official_traces`: 25 games, explorer solve rate `0.0`, explorer mean normalized score `0.0`, best baseline `coverage_graph_exploration` mean normalized score `0.004`, baseline margin `-0.004`.
+  - `docs\arcagi3_official_games.json` lists the 25 official public games, tags, baseline action counts, and class names.
+  - The required diagnosis command path can analyze `docs\arcagi3_official_traces` and use the official CPU report as its default input, while still recording CUDA availability from the installed runtime.
+- Current blockers:
+  - Need implement diagnosis generation.
+- Exact next action:
+  - Apply code patch for diagnosis modules/tests and independent audit path coverage.
+
+## Step 0090 - Diagnosis modules and tests added
+
+- Files touched:
+  - `src/arcagi3_trace_analysis.py`
+  - `src/arcagi3_failure_taxonomy.py`
+  - `src/arcagi3_diagnose.py`
+  - `tests/test_arcagi3_diagnosis.py`
+  - `audit/independent_verify.py`
+  - `CONTEXT.MD`
+- Commands/actions run:
+  - Added trace enrichment for required per-step fields: observations present, legal actions, chosen action, baseline action snapshots, score/event deltas, terminal flag, invalid flag, unique state count, extracted object/entity features, adapter tensor summaries, memory/drive/hypothesis summaries, entropy, repeat, cycles, and first useful event.
+  - Added observation/action/memory/goal/planner audit summaries.
+  - Added failure taxonomy classes A through K with primary/secondary classification and diagnosis confidence.
+  - Added no-hack source audit for game-id literals, game-id control branches in adapter/baseline code, hidden-goal/source-label patterns, and copied replay paths.
+  - Added `src.arcagi3_diagnose` CLI for official failure report generation and Markdown rendering.
+  - Added diagnosis files/reports to `audit.independent_verify` audited path list and command manifest.
+  - Added focused unit tests for enrichment, taxonomy, no-hack audit, and trace write/read.
+- Current blockers:
+  - New code has not been compiled or tested yet.
+- Exact next action:
+  - Run `py_compile` on new/changed files and `pytest -q tests\test_arcagi3_diagnosis.py`.
+
+## Step 0091 - Focused diagnosis compile/tests passed and runtime probe patched
+
+- Files touched:
+  - `src/arcagi3_diagnose.py`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m py_compile src\arcagi3_trace_analysis.py src\arcagi3_failure_taxonomy.py src\arcagi3_diagnose.py tests\test_arcagi3_diagnosis.py audit\independent_verify.py`
+  - `pytest -q tests\test_arcagi3_diagnosis.py`
+- Observed results/errors:
+  - Compile passed.
+  - Focused diagnosis tests passed: `4 passed in 1.19s`.
+  - Patched `src\arcagi3_diagnose.py` so runtime status can detect the official ARC runtime installed in `.venv\Scripts\python.exe` even if the command is launched from the default Python 3.10 interpreter.
+- Current blockers:
+  - Need run the diagnosis command and inspect generated report.
+- Exact next action:
+  - Run `python -m src.arcagi3_diagnose --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --config official --json-output docs/arcagi3_failure_report.json --trace-dir docs/arcagi3_official_traces`.
+
+## Step 0092 - Diagnosis command generated failure report
+
+- Files touched:
+  - `src/arcagi3_trace_analysis.py`
+  - `src/arcagi3_failure_taxonomy.py`
+  - `src/arcagi3_diagnose.py`
+  - `docs/arcagi3_failure_report.json`
+  - `docs/arcagi3_failure_report.md`
+  - `docs/arcagi3_official_traces\*.json`
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m py_compile src\arcagi3_trace_analysis.py src\arcagi3_failure_taxonomy.py src\arcagi3_diagnose.py tests\test_arcagi3_diagnosis.py`
+  - `python -m src.arcagi3_diagnose --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --config official --json-output docs/arcagi3_failure_report.json --trace-dir docs/arcagi3_official_traces`
+  - `python -m py_compile src\arcagi3_failure_taxonomy.py src\arcagi3_diagnose.py`
+  - `python -m src.arcagi3_diagnose --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --config official --json-output docs/arcagi3_failure_report.json --trace-dir docs/arcagi3_official_traces`
+- Observed results/errors:
+  - First diagnosis run completed with `ARC FAILURE DIAGNOSIS PROVEN` but classified all 25 games as primary C because no-progress dominance was too broad.
+  - Patched taxonomy so primary C requires repeated/low-entropy collapse, and aggregate baseline margin no longer creates per-game K labels without per-game baseline scores.
+  - Corrected diagnosis run completed with `ARC FAILURE DIAGNOSIS PROVEN`.
+  - Requirements all true: 25/25 traces, 25/25 primary classes, 25/25 required trace fields, all baselines plus explorer in table, at least 5 representative excerpts, no-hack audit passes, prior properties pass.
+  - Failure taxonomy after correction:
+    - Primary C exploration stuck/cycle: 21 games.
+    - Primary F wrong/absent goal inference: 4 games.
+    - Secondary C: 4 games; secondary F: 19; secondary G: 21; secondary H: 19.
+  - Top bottlenecks: action repetition collapse in 21 games, pixel-proxy observation bottleneck in 23, no multi-step planner sequence in 21, useful events not converted to completion in 0 for the CPU official trace set.
+- Current blockers:
+  - Need run full `pytest -q`, leakage scan, and independent verification command.
+- Exact next action:
+  - Inspect the generated report briefly, then run full validation gates.
+
+## Step 0093 - Diagnosis report inspected before full validation
+
+- Files touched: `CONTEXT.MD`
+- Commands run:
+  - `python -c "import json; r=json.load(open('docs/arcagi3_failure_report.json')); ..."`
+  - `Get-Content -TotalCount 120 docs\arcagi3_failure_report.md`
+  - `Get-FileHash -Algorithm SHA256 src\arcagi3_diagnose.py,src\arcagi3_failure_taxonomy.py,src\arcagi3_trace_analysis.py,tests\test_arcagi3_diagnosis.py,docs\arcagi3_failure_report.json,docs\arcagi3_failure_report.md`
+  - `git status --short`
+- Observed results/errors:
+  - The Python one-liner inspection failed due PowerShell `ScriptBlock should only be specified as a value of the Command parameter` quoting, not due report contents.
+  - Markdown report inspection succeeded and shows `ARC FAILURE DIAGNOSIS PROVEN`.
+  - Aggregate table in Markdown includes explorer plus all six baselines.
+  - Per-game table contains 25 official games with primary/secondary classes, invalid action rates, entropy, repeat collapse, and confidence.
+  - No-hack audit passes in the report and prior properties pass.
+  - Report hashes:
+    - `src\arcagi3_diagnose.py`: `C89BBDA6EB6BADF77E3F8ADF0E6E957CE3B870338A333A5957163E63FE42BBC5`
+    - `src\arcagi3_failure_taxonomy.py`: `1FE239A3F4962DA93954C2BEDC95FD0094FB74F9A8923F5C74672F1F803433B3`
+    - `src\arcagi3_trace_analysis.py`: `17DF255687D21697FCD2531219EA055EF4BC2BD7F71B87213AD10EDFA1D19B09`
+    - `tests\test_arcagi3_diagnosis.py`: `4FDA10350732B9AEC13847A811349028F3D342F2557D5EB1F15BD679D5260371`
+    - `docs\arcagi3_failure_report.json`: `3B9AC146B3BF882757C5A9F24151586EDB019D0F85E652BA4BFEF2ACE81FC8F4`
+    - `docs\arcagi3_failure_report.md`: `B6327E0EAE0C366517F4620E6BA61C07D065C4B98BF17929CF065198E6615EAC`
+  - Git status shows modified `CONTEXT.md`, modified `audit/independent_verify.py`, and new diagnosis/report/test files. Official trace rewrites are ignored by `.gitignore`.
+- Current blockers:
+  - Required validation commands still need to pass.
+- Exact next action:
+  - Run `pytest -q` and `python -m audit.leakage_scan`.
+
+## Step 0094 - Full validation exposed virtualenv false positive and scan patch applied
+
+- Files touched:
+  - `audit/leakage_scan.py`
+  - `tests/test_no_pretrained.py`
+  - `CONTEXT.MD`
+- Commands run:
+  - `pytest -q`
+  - `python -m audit.leakage_scan`
+  - `Get-Content -Raw tests\test_no_pretrained.py`
+  - `rg -n "blocked_parts|ignored_parts|unexpected_weight|\.pth|safetensors" tests audit src`
+- Observed results/errors:
+  - `python -m audit.leakage_scan` failed because `_checkpoint_findings()` treated `.venv\Lib\site-packages\distutils-precedence.pth` as an unexpected weight file.
+  - `pytest -q` failed `4 failed, 49 passed`; all failures came from the same virtualenv `.pth` false positive:
+    - `tests/test_audit_proof.py::test_audit_leakage_scan_passes_static_checks`
+    - `tests/test_no_pretrained.py::test_no_downloaded_checkpoints_are_committed`
+    - `tests/test_human_memory.py::test_human_memory_smoke_report_passes`
+    - `tests/test_retention_fix.py::test_retention_fix_smoke_verdict_passes`
+  - Patched `audit/leakage_scan.py` and `tests/test_no_pretrained.py` to ignore local virtualenv folders `.venv`, `venv`, and `env` while preserving repository checkpoint detection.
+- Current blockers:
+  - Need rerun the affected tests, full pytest, leakage scan, and independent verification.
+- Exact next action:
+  - Rerun focused failing tests and `python -m audit.leakage_scan`.
+
+## Step 0095 - Focused validation and leakage scan pass
+
+- Files touched: `CONTEXT.MD`
+- Commands run:
+  - `pytest -q tests\test_audit_proof.py::test_audit_leakage_scan_passes_static_checks tests\test_no_pretrained.py::test_no_downloaded_checkpoints_are_committed tests\test_human_memory.py::test_human_memory_smoke_report_passes tests\test_retention_fix.py::test_retention_fix_smoke_verdict_passes`
+  - `python -m audit.leakage_scan`
+- Observed results/errors:
+  - Focused rerun passed: `4 passed in 10.81s`.
+  - Leakage scan passed with zero findings; checks for no external/pretrained imports, no external text patterns, no unexpected weight files, and no prompt loop are all true.
+- Current blockers:
+  - Need rerun full `pytest -q`, diagnosis command after scan changes, and independent verification.
+- Exact next action:
+  - Run full `pytest -q`.
+
+## Step 0096 - Full pytest passes
+
+- Files touched: `CONTEXT.MD`
+- Commands run:
+  - `pytest -q`
+- Observed results/errors:
+  - Full test suite passed: `53 passed in 51.13s`.
+- Current blockers:
+  - Required independent verification remains.
+- Exact next action:
+  - Run `python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_arcagi3_diagnosis.json`.
+
+## Step 0097 - Independent verification passes after diagnosis
+
+- Files touched:
+  - `docs/audit_after_arcagi3_diagnosis.json`
+  - `docs/audit_after_arcagi3_diagnosis.md`
+  - `runs/audit_curriculum.pt` (generated, ignored)
+  - `CONTEXT.MD`
+- Commands run:
+  - `python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_arcagi3_diagnosis.json`
+- Observed results/errors:
+  - Independent verifier completed successfully.
+  - Terminal outcome: `AUDIT PROVEN`.
+  - Limitations: `[]`.
+  - Durable restart memory `0.9375`; zero reset memory `0.1796875`.
+  - Idle memory/action/object-position checks passed; public language repetition `0.28159844875335693`; private repetition `0.0`.
+  - Richer dynamics, private-token causality, and curriculum growth checks passed.
+- Current blockers:
+  - Need final hash/diff/status inspection and atomic commit.
+- Exact next action:
+  - Inspect final reports, hashes, diffs, and git status.
+
+## Step 0098 - Final diagnosis artifacts inspected
+
+- Files touched: `CONTEXT.MD`
+- Commands run:
+  - `python -c "import json; r=json.load(open('docs/arcagi3_failure_report.json')); ..."`
+  - `python -c "import json; r=json.load(open('docs/audit_after_arcagi3_diagnosis.json')); ..."`
+  - `Get-FileHash -Algorithm SHA256 src\arcagi3_diagnose.py,src\arcagi3_failure_taxonomy.py,src\arcagi3_trace_analysis.py,tests\test_arcagi3_diagnosis.py,audit\leakage_scan.py,audit\independent_verify.py,tests\test_no_pretrained.py,docs\arcagi3_failure_report.json,docs\arcagi3_failure_report.md,docs\audit_after_arcagi3_diagnosis.json,frozen\recurrent_latent_fast.pt,runs\explorer_tiny.pt`
+  - `Get-ChildItem -File docs\arcagi3_official_traces | Measure-Object -Property Length -Sum | Select-Object Count,Sum`
+  - `git diff --stat`
+  - `git diff --check`
+  - `git status --short`
+- Observed results/errors:
+  - `docs\arcagi3_failure_report.json` reports `ARC FAILURE DIAGNOSIS PROVEN`.
+  - Requirements all true: 25/25 traces, 25/25 primary classes, required trace fields, baseline table, representative excerpts, no-hack, and prior properties.
+  - Failure taxonomy: primary C in 21 games, primary F in 4 games; secondary C in 4, F in 19, G in 21, H in 19.
+  - Top bottlenecks: action repetition collapse in 21 games; pixel-proxy observation bottleneck in 23; no multi-step planner sequence in 21; useful-event non-exploitation in 0 for the CPU official trace set.
+  - `docs\audit_after_arcagi3_diagnosis.json` reports `AUDIT PROVEN`, limitations `[]`, and `frozen_unchanged=True`.
+  - Hashes:
+    - `src\arcagi3_diagnose.py`: `C89BBDA6EB6BADF77E3F8ADF0E6E957CE3B870338A333A5957163E63FE42BBC5`
+    - `src\arcagi3_failure_taxonomy.py`: `1FE239A3F4962DA93954C2BEDC95FD0094FB74F9A8923F5C74672F1F803433B3`
+    - `src\arcagi3_trace_analysis.py`: `17DF255687D21697FCD2531219EA055EF4BC2BD7F71B87213AD10EDFA1D19B09`
+    - `tests\test_arcagi3_diagnosis.py`: `4FDA10350732B9AEC13847A811349028F3D342F2557D5EB1F15BD679D5260371`
+    - `audit\leakage_scan.py`: `F9DC2CBF82EFE4CE587142F40EE3A8DA0AA5EF83DA4FF251C9D5AB690CEB40BF`
+    - `audit\independent_verify.py`: `5788F066C3487B56FF65B0BB09A0754E1BF1054D4CC3FA4C29CFFD576D13E649`
+    - `tests\test_no_pretrained.py`: `E264A7BDCD7BA3B9BCE719A4815276C7D0FF8453B080F1F9A13D007DEEF5B9A8`
+    - `docs\arcagi3_failure_report.json`: `3B9AC146B3BF882757C5A9F24151586EDB019D0F85E652BA4BFEF2ACE81FC8F4`
+    - `docs\arcagi3_failure_report.md`: `B6327E0EAE0C366517F4620E6BA61C07D065C4B98BF17929CF065198E6615EAC`
+    - `docs\audit_after_arcagi3_diagnosis.json`: `A7439E4F2DEDE7D31D525EC0C6B7730BC01C246AA7E8F6898DCDA871640CCC30`
+    - `frozen\recurrent_latent_fast.pt`: `D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD`
+    - `runs\explorer_tiny.pt`: `F0A2F8BE9F64B7928083E6EF59A5535998AF5E8465F4FDD3E3C1B7EDDB6727E9`
+  - `docs\arcagi3_official_traces` contains 25 enriched trace files totaling `66702218` bytes; this directory remains ignored by `.gitignore`.
+  - `git diff --check` reported only expected Windows LF-to-CRLF warnings, no whitespace errors.
+- Current blockers:
+  - Commit pending.
+- Exact next action:
+  - Stage diagnosis source/tests/reports/audit updates/context and commit atomically.
+
+## Step 0099 - Diagnosis artifacts committed
+
+- Files touched: `CONTEXT.MD`
+- Commands run:
+  - `git add -- CONTEXT.MD audit/independent_verify.py audit/leakage_scan.py tests/test_no_pretrained.py src/arcagi3_diagnose.py src/arcagi3_failure_taxonomy.py src/arcagi3_trace_analysis.py tests/test_arcagi3_diagnosis.py docs/arcagi3_failure_report.json docs/arcagi3_failure_report.md docs/audit_after_arcagi3_diagnosis.json docs/audit_after_arcagi3_diagnosis.md; git diff --cached --stat`
+  - `git add -- CONTEXT.md; git diff --cached --stat; git status --short`
+  - `git commit -m "Add ARC-AGI-3 official failure diagnosis"`
+- Observed results/errors:
+  - First staging pass missed `CONTEXT.md` because Git tracks the lowercase path casing; staged it explicitly afterward.
+  - Commit created: `184c4ac Add ARC-AGI-3 official failure diagnosis`.
+  - Committed files: diagnosis source modules, diagnosis tests, failure report JSON/MD, post-diagnosis audit JSON/MD, independent verifier path coverage, leakage/virtualenv scan fix, no-pretrained virtualenv test fix, and context.
+  - The 25 enriched full official trace files remain in `docs\arcagi3_official_traces` as ignored generated artifacts, referenced by committed report paths.
+- Current blockers:
+  - Need amend this context entry into the same commit and verify clean status.
+- Exact next action:
+  - Stage `CONTEXT.md`, amend commit without changing message, then run final `git status --short --branch` and `git rev-parse HEAD`.

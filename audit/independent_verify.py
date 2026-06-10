@@ -90,6 +90,11 @@ AUDITED_PATHS = [
     "src/arcagi3_baselines.py",
     "src/arcagi3_trace.py",
     "src/arcagi3_eval.py",
+    "src/arcagi3_official.py",
+    "src/arcagi3_official_eval.py",
+    "src/arcagi3_trace_analysis.py",
+    "src/arcagi3_failure_taxonomy.py",
+    "src/arcagi3_diagnose.py",
     "src/train.py",
     "src/evaluate.py",
     "src/metrics.py",
@@ -98,6 +103,7 @@ AUDITED_PATHS = [
     "tests/test_explorer_mindlike.py",
     "tests/test_head_collapse.py",
     "tests/test_arcagi3_adapter.py",
+    "tests/test_arcagi3_diagnosis.py",
     "README.md",
     "docs/living_system_report.json",
     "docs/evidence_dossier.json",
@@ -110,6 +116,11 @@ AUDITED_PATHS = [
     "docs/audit_after_head_collapse.json",
     "docs/arcagi3_public_fixtures.json",
     "docs/arcagi3_report.json",
+    "docs/arcagi3_official_games.json",
+    "docs/arcagi3_official_report.json",
+    "docs/arcagi3_official_cuda_report.json",
+    "docs/arcagi3_failure_report.json",
+    "docs/arcagi3_failure_report.md",
     "docs/audit_after_arcagi3.json",
 ]
 
@@ -764,6 +775,13 @@ def run_audit(checkpoint: str | Path, config: str, json_output: str | Path, devi
             [
                 "python -m src.arcagi3_eval --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --config public --json-output docs/arcagi3_report.json --trace-dir docs/arcagi3_traces",
                 "python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_arcagi3.json",
+            ]
+        )
+    if Path("docs/arcagi3_failure_report.json").exists():
+        commands_required.extend(
+            [
+                "python -m src.arcagi3_diagnose --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --config official --json-output docs/arcagi3_failure_report.json --trace-dir docs/arcagi3_official_traces",
+                "python -m audit.independent_verify --checkpoint frozen/recurrent_latent_fast.pt --config fast --json-output docs/audit_after_arcagi3_diagnosis.json",
             ]
         )
 

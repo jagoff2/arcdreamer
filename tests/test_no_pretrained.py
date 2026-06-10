@@ -59,7 +59,7 @@ def test_source_imports_do_not_reference_pretrained_ecosystems() -> None:
 
 
 def test_no_downloaded_checkpoints_are_committed() -> None:
-    blocked_parts = {".git", "runs", "__pycache__", ".pytest_cache"}
+    blocked_parts = {".git", "runs", "__pycache__", ".pytest_cache", ".venv", "venv", "env"}
     allowed_local_checkpoints = {Path("frozen/recurrent_latent_fast.pt")}
     for path in Path(".").rglob("*"):
         if not path.is_file():
