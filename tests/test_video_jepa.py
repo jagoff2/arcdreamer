@@ -119,6 +119,56 @@ def _clear_non_relation_delta_memory(memory: JEPAAttemptMemory) -> None:
     memory.active_sequence_source = ""
 
 
+def _clear_non_sequence_candidate_memory(memory: JEPAAttemptMemory) -> None:
+    for entry in memory.entries:
+        entry.next_attempt_plan.clear()
+    memory.transition_counts.clear()
+    memory.transition_values.clear()
+    memory.transition_effects.clear()
+    memory.transition_failures.clear()
+    memory.transition_events.clear()
+    memory.state_seen_actions.clear()
+    memory.family_counts.clear()
+    memory.family_values.clear()
+    memory.region_values.clear()
+    memory.family_region_values.clear()
+    memory.color_values.clear()
+    memory.component_relation_values.clear()
+    memory.family_component_values.clear()
+    memory.component_goal_relations.clear()
+    memory.component_value_scores.clear()
+    memory.component_prediction_values.clear()
+    memory.component_prediction_goal_values.clear()
+    memory.family_component_prediction_values.clear()
+    memory.component_prediction_contradictions.clear()
+    memory.component_chain_counts.clear()
+    memory.component_chain_values.clear()
+    memory.component_chain_goal_values.clear()
+    memory.component_chain_failures.clear()
+    memory.component_chain_contradictions.clear()
+    memory.component_chain_expectations.clear()
+    memory.component_chain_edges_by_state.clear()
+    memory.component_goal_state_values.clear()
+    memory.component_relation_chain_counts.clear()
+    memory.component_relation_chain_values.clear()
+    memory.component_relation_chain_goal_values.clear()
+    memory.component_relation_chain_failures.clear()
+    memory.component_relation_chain_contradictions.clear()
+    memory.component_relation_chain_expectations.clear()
+    memory.component_relation_chain_edges_by_state.clear()
+    memory.component_relation_goal_state_values.clear()
+    memory.component_relation_delta_counts.clear()
+    memory.component_relation_delta_values.clear()
+    memory.component_relation_delta_goal_values.clear()
+    memory.component_relation_delta_failures.clear()
+    memory.component_relation_delta_contradictions.clear()
+    memory.component_relation_delta_tokens_by_scope.clear()
+    memory.active_sequence.clear()
+    memory.active_sequence_expectations.clear()
+    memory.sequence_cursor = 0
+    memory.active_sequence_source = ""
+
+
 def test_attempt_buffer_stores_full_attempt_timeline() -> None:
     buffer = AttemptBuffer(suite_id="suite", task_id="task", variant="v", split="dev", seed=1, attempt_index=2)
     before = _obs(0, 2, 2)
@@ -571,6 +621,104 @@ def test_component_relation_delta_contradiction_records_failed_postcondition() -
         test_observation,
         "click:44:44",
         ArcAGI3StepResult(test_observation, -0.001, False, False, {"events": ["no_effect"]}),
+    )
+    summary = memory.summary()["object_memory"]
+    assert summary["sequence_contradictions"] == 1
+    assert summary["component_relation_delta_contradictions"] >= 1
+    assert summary["active_sequence_remaining"] == 0
+
+
+def test_relation_delta_sequence_resolves_shifted_multistep_plan() -> None:
+    train_start_grid = np.zeros((8, 8), dtype=np.int64)
+    train_start_grid[2, 2] = 5
+    train_moved_grid = np.zeros((8, 8), dtype=np.int64)
+    train_moved_grid[2, 3] = 5
+    train_event_grid = np.zeros((8, 8), dtype=np.int64)
+    train_event_grid[2, 3] = 6
+    train_actions = ("click:28:20", "click:4:4", "wait")
+    buffer = AttemptBuffer(suite_id="suite", task_id="task", variant="v", split="dev", seed=19, attempt_index=1)
+    train_start = _obs_grid(0, train_start_grid, train_actions)
+    train_moved = _obs_grid(1, train_moved_grid, train_actions)
+    train_event = _obs_grid(2, train_event_grid, train_actions)
+    buffer.append_transition(
+        train_start,
+        "click:28:20",
+        ArcAGI3StepResult(train_moved, -0.001, False, False, {"events": ["move"]}),
+    )
+    buffer.append_transition(
+        train_moved,
+        "click:28:20",
+        ArcAGI3StepResult(train_event, 1.0, False, False, {"events": ["useful_click"]}),
+    )
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    entry = memory.ingest_attempt(buffer.to_record())
+    _clear_non_sequence_candidate_memory(memory)
+    memory.start_attempt()
+
+    shifted_start_grid = np.zeros((8, 8), dtype=np.int64)
+    shifted_start_grid[5, 5] = 5
+    shifted_moved_grid = np.zeros((8, 8), dtype=np.int64)
+    shifted_moved_grid[5, 6] = 5
+    shifted_actions = ("click:52:44", "click:4:4", "wait")
+    shifted_start = _obs_grid(0, shifted_start_grid, shifted_actions)
+    shifted_moved = _obs_grid(1, shifted_moved_grid, shifted_actions)
+    scores = memory.plan_scores_for_observation(shifted_start)
+    summary = memory.summary()["object_memory"]
+
+    assert entry.sequence_plan_summary["relation_delta_sequence_candidate_count"] >= 1
+    assert summary["active_sequence_source"] == "positive_public_relation_delta_sequence"
+    assert "relation_delta_sequence_planner" in memory.summary()["planner_chain"]
+    assert memory.sequence_plan_action(shifted_actions, observation=shifted_start) == "click:52:44"
+    assert scores["click:52:44"] > scores["click:4:4"]
+    assert scores["click:52:44"] > scores["wait"]
+    memory.observe_live_transition(
+        shifted_start,
+        "click:52:44",
+        ArcAGI3StepResult(shifted_moved, -0.001, False, False, {"events": ["move"]}),
+    )
+    assert memory.sequence_plan_action(shifted_actions, observation=shifted_moved) == "click:52:44"
+    moved_scores = memory.plan_scores_for_observation(shifted_moved)
+    assert moved_scores["click:52:44"] > moved_scores["wait"]
+
+
+def test_relation_delta_sequence_aborts_shifted_plan_on_delta_contradiction() -> None:
+    train_start_grid = np.zeros((8, 8), dtype=np.int64)
+    train_start_grid[2, 2] = 5
+    train_moved_grid = np.zeros((8, 8), dtype=np.int64)
+    train_moved_grid[2, 3] = 5
+    train_event_grid = np.zeros((8, 8), dtype=np.int64)
+    train_event_grid[2, 3] = 6
+    train_actions = ("click:28:20", "click:4:4", "wait")
+    buffer = AttemptBuffer(suite_id="suite", task_id="task", variant="v", split="dev", seed=20, attempt_index=1)
+    train_start = _obs_grid(0, train_start_grid, train_actions)
+    train_moved = _obs_grid(1, train_moved_grid, train_actions)
+    train_event = _obs_grid(2, train_event_grid, train_actions)
+    buffer.append_transition(
+        train_start,
+        "click:28:20",
+        ArcAGI3StepResult(train_moved, -0.001, False, False, {"events": ["move"]}),
+    )
+    buffer.append_transition(
+        train_moved,
+        "click:28:20",
+        ArcAGI3StepResult(train_event, 1.0, False, False, {"events": ["useful_click"]}),
+    )
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    memory.ingest_attempt(buffer.to_record())
+    _clear_non_sequence_candidate_memory(memory)
+    memory.start_attempt()
+
+    shifted_start_grid = np.zeros((8, 8), dtype=np.int64)
+    shifted_start_grid[5, 5] = 5
+    shifted_actions = ("click:52:44", "click:4:4", "wait")
+    shifted_start = _obs_grid(0, shifted_start_grid, shifted_actions)
+    scores = memory.plan_scores_for_observation(shifted_start)
+
+    assert scores["click:52:44"] > scores["wait"]
+    memory.observe_live_transition(
+        shifted_start,
+        "click:52:44",
+        ArcAGI3StepResult(shifted_start, -0.001, False, False, {"events": ["no_effect"]}),
     )
     summary = memory.summary()["object_memory"]
     assert summary["sequence_contradictions"] == 1

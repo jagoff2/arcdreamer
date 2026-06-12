@@ -329,14 +329,14 @@
     "aggregate_by_variant": {
       "attempt_memory_no_jepa": {
         "solve_rate": 0.0,
-        "mean_score": 0.0013333333333333335,
-        "mean_normalized_score": 0.0013333333333333335,
-        "mean_steps": 105.89333333333333,
+        "mean_score": 0.002666666666666667,
+        "mean_normalized_score": 0.002666666666666667,
+        "mean_steps": 108.05333333333333,
         "mean_invalid_action_rate": 0.0,
-        "mean_unique_states": 106.89333333333333,
-        "mean_useful_events": 0.013333333333333334,
-        "mean_action_entropy": 0.7881876150141232,
-        "mean_repeat_collapse": 0.850604711822685
+        "mean_unique_states": 109.05333333333333,
+        "mean_useful_events": 0.02666666666666667,
+        "mean_action_entropy": 0.7988738855485461,
+        "mean_repeat_collapse": 0.8454468253707098
       },
       "baseline_core": {
         "solve_rate": 0.0,
@@ -351,14 +351,14 @@
       },
       "jepa_plus_attempt_memory": {
         "solve_rate": 0.0,
-        "mean_score": 0.0013333333333333335,
-        "mean_normalized_score": 0.0013333333333333335,
-        "mean_steps": 105.89333333333333,
+        "mean_score": 0.004000000000000001,
+        "mean_normalized_score": 0.004000000000000001,
+        "mean_steps": 110.21333333333334,
         "mean_invalid_action_rate": 0.0,
-        "mean_unique_states": 106.89333333333333,
-        "mean_useful_events": 0.013333333333333334,
-        "mean_action_entropy": 0.7934992704028386,
-        "mean_repeat_collapse": 0.8493619977971841
+        "mean_unique_states": 111.21333333333334,
+        "mean_useful_events": 0.04,
+        "mean_action_entropy": 0.7870014974424213,
+        "mean_repeat_collapse": 0.8474902052213587
       },
       "jepa_pretrained_frozen_if_available": {
         "solve_rate": 0.0,
@@ -373,14 +373,14 @@
       },
       "jepa_random_init": {
         "solve_rate": 0.0,
-        "mean_score": 0.0013333333333333335,
-        "mean_normalized_score": 0.0013333333333333335,
-        "mean_steps": 105.89333333333333,
+        "mean_score": 0.004000000000000001,
+        "mean_normalized_score": 0.004000000000000001,
+        "mean_steps": 110.21333333333334,
         "mean_invalid_action_rate": 0.0,
-        "mean_unique_states": 106.89333333333333,
-        "mean_useful_events": 0.013333333333333334,
-        "mean_action_entropy": 0.7906583797177734,
-        "mean_repeat_collapse": 0.8504158302065857
+        "mean_unique_states": 111.21333333333334,
+        "mean_useful_events": 0.04,
+        "mean_action_entropy": 0.7923987136106394,
+        "mean_repeat_collapse": 0.8463359286668403
       },
       "jepa_trained_dev": {
         "solve_rate": 0.0,
@@ -423,14 +423,14 @@
         "variant": "attempt_memory_no_jepa",
         "attempt_index": 2,
         "solve_rate": 0.0,
-        "mean_score": 0.0,
-        "mean_normalized_score": 0.0,
-        "mean_steps": 103.92,
+        "mean_score": 0.004,
+        "mean_normalized_score": 0.004,
+        "mean_steps": 110.4,
         "mean_invalid_action_rate": 0.0,
-        "mean_unique_states": 104.92,
-        "mean_useful_events": 0.0,
-        "mean_action_entropy": 0.9125242253762862,
-        "mean_repeat_collapse": 0.8266725948141714
+        "mean_unique_states": 111.4,
+        "mean_useful_events": 0.04,
+        "mean_action_entropy": 0.9092009839308727,
+        "mean_repeat_collapse": 0.8290217098584192
       },
       {
         "variant": "attempt_memory_no_jepa",
@@ -442,8 +442,8 @@
         "mean_invalid_action_rate": 0.0,
         "mean_unique_states": 104.36,
         "mean_useful_events": 0.0,
-        "mean_action_entropy": 0.7032594359454073,
-        "mean_repeat_collapse": 0.8672200064732601
+        "mean_action_entropy": 0.7386414889940894,
+        "mean_repeat_collapse": 0.8493972320730865
       },
       {
         "variant": "baseline_core",
@@ -501,27 +501,27 @@
         "variant": "jepa_plus_attempt_memory",
         "attempt_index": 2,
         "solve_rate": 0.0,
-        "mean_score": 0.0,
-        "mean_normalized_score": 0.0,
-        "mean_steps": 103.92,
+        "mean_score": 0.004,
+        "mean_normalized_score": 0.004,
+        "mean_steps": 110.4,
         "mean_invalid_action_rate": 0.0,
-        "mean_unique_states": 104.92,
-        "mean_useful_events": 0.0,
-        "mean_action_entropy": 0.9206747911567998,
-        "mean_repeat_collapse": 0.8247975948141715
+        "mean_unique_states": 111.4,
+        "mean_useful_events": 0.04,
+        "mean_action_entropy": 0.9094204107398244,
+        "mean_repeat_collapse": 0.8290217098584192
       },
       {
         "variant": "jepa_plus_attempt_memory",
         "attempt_index": 3,
         "solve_rate": 0.0,
-        "mean_score": 0.0,
-        "mean_normalized_score": 0.0,
-        "mean_steps": 103.36,
+        "mean_score": 0.004,
+        "mean_normalized_score": 0.004,
+        "mean_steps": 109.84,
         "mean_invalid_action_rate": 0.0,
-        "mean_unique_states": 104.36,
-        "mean_useful_events": 0.0,
-        "mean_action_entropy": 0.7110438363310402,
-        "mean_repeat_collapse": 0.8653668643967575
+        "mean_unique_states": 110.84,
+        "mean_useful_events": 0.04,
+        "mean_action_entropy": 0.7028048978667634,
+        "mean_repeat_collapse": 0.8555273716250329
       },
       {
         "variant": "jepa_pretrained_frozen_if_available",
@@ -579,27 +579,27 @@
         "variant": "jepa_random_init",
         "attempt_index": 2,
         "solve_rate": 0.0,
-        "mean_score": 0.0,
-        "mean_normalized_score": 0.0,
-        "mean_steps": 103.92,
+        "mean_score": 0.004,
+        "mean_normalized_score": 0.004,
+        "mean_steps": 110.4,
         "mean_invalid_action_rate": 0.0,
-        "mean_unique_states": 104.92,
-        "mean_useful_events": 0.0,
-        "mean_action_entropy": 0.924967827993643,
-        "mean_repeat_collapse": 0.8250725948141715
+        "mean_unique_states": 111.4,
+        "mean_useful_events": 0.04,
+        "mean_action_entropy": 0.9094204107398244,
+        "mean_repeat_collapse": 0.8290217098584192
       },
       {
         "variant": "jepa_random_init",
         "attempt_index": 3,
         "solve_rate": 0.0,
-        "mean_score": 0.0,
-        "mean_normalized_score": 0.0,
-        "mean_steps": 103.36,
+        "mean_score": 0.004,
+        "mean_normalized_score": 0.004,
+        "mean_steps": 109.84,
         "mean_invalid_action_rate": 0.0,
-        "mean_unique_states": 104.36,
-        "mean_useful_events": 0.0,
-        "mean_action_entropy": 0.6982281274390012,
-        "mean_repeat_collapse": 0.868253361624962
+        "mean_unique_states": 110.84,
+        "mean_useful_events": 0.04,
+        "mean_action_entropy": 0.7189965463714177,
+        "mean_repeat_collapse": 0.8520645419614777
       },
       {
         "variant": "jepa_trained_dev",
@@ -1873,14 +1873,14 @@
   "ablations": {
     "attempt_memory_no_jepa": {
       "solve_rate": 0.0,
-      "mean_score": 0.0013333333333333335,
-      "mean_normalized_score": 0.0013333333333333335,
-      "mean_steps": 105.89333333333333,
+      "mean_score": 0.002666666666666667,
+      "mean_normalized_score": 0.002666666666666667,
+      "mean_steps": 108.05333333333333,
       "mean_invalid_action_rate": 0.0,
-      "mean_unique_states": 106.89333333333333,
-      "mean_useful_events": 0.013333333333333334,
-      "mean_action_entropy": 0.7881876150141232,
-      "mean_repeat_collapse": 0.850604711822685
+      "mean_unique_states": 109.05333333333333,
+      "mean_useful_events": 0.02666666666666667,
+      "mean_action_entropy": 0.7988738855485461,
+      "mean_repeat_collapse": 0.8454468253707098
     },
     "jepa_trained_dev": {
       "solve_rate": 0.0,
@@ -1895,14 +1895,14 @@
     },
     "jepa_random_init": {
       "solve_rate": 0.0,
-      "mean_score": 0.0013333333333333335,
-      "mean_normalized_score": 0.0013333333333333335,
-      "mean_steps": 105.89333333333333,
+      "mean_score": 0.004000000000000001,
+      "mean_normalized_score": 0.004000000000000001,
+      "mean_steps": 110.21333333333334,
       "mean_invalid_action_rate": 0.0,
-      "mean_unique_states": 106.89333333333333,
-      "mean_useful_events": 0.013333333333333334,
-      "mean_action_entropy": 0.7906583797177734,
-      "mean_repeat_collapse": 0.8504158302065857
+      "mean_unique_states": 111.21333333333334,
+      "mean_useful_events": 0.04,
+      "mean_action_entropy": 0.7923987136106394,
+      "mean_repeat_collapse": 0.8463359286668403
     },
     "null_control": {
       "solve_rate": 0.0,
@@ -1920,9 +1920,9 @@
   "gates": {
     "attempt_2_or_3_improves_over_attempt_1": false,
     "score_or_useful_gain_over_core": false,
-    "official_score_gain": 0.0,
-    "official_useful_event_gain": 0.0,
-    "repeat_collapse_drop_attempt_1_to_3": -0.007445330216133916,
+    "official_score_gain": 0.004,
+    "official_useful_event_gain": 0.04,
+    "repeat_collapse_drop_attempt_1_to_3": 0.002394162555590662,
     "repeat_collapse_drop_gate": false,
     "ablation_removes_improvement": false,
     "jepa_beats_null_on_dev": true,
@@ -2634,24 +2634,24 @@
       "size_bytes": 8184
     },
     "src/jepa_attempt_memory.py": {
-      "sha256": "85D333185EAE1D238DBE2FF85288A46DA458A2EF954E5D9215070EC478A7510C",
-      "size_bytes": 119176
+      "sha256": "B0EB12207B87015AFFE0A39C78F61BF7C4B29F01E442ABCF032507AE286872B5",
+      "size_bytes": 128011
     },
     "src/jepa_arc_eval.py": {
       "sha256": "0BBA29B725955CAEE6BFAA1EAC3E9D3573791DAB7713B5606AD52CD2A577430B",
       "size_bytes": 36648
     },
     "tests/test_video_jepa.py": {
-      "sha256": "1901DCBBE506E93B35617D68537354C664A7A4E8A1C3EF3D50EFB5D659373FFA",
-      "size_bytes": 31463
+      "sha256": "43591E8FEFDB0AB9CF3010A63496D0EDFF78E1C9C66B71871F31F2078F4C0132",
+      "size_bytes": 38224
     },
     "data/jepa_trace_manifest.json": {
       "sha256": "43B65F56306BB27F3AA435E3F2733BF6BCAED47ACECC38815510974298C48077",
       "size_bytes": 3535
     },
     "docs/jepa_attempt_report.json": {
-      "sha256": "80C167F43E083CC7AE8CD43699672E55310808384D7AA9E23C878A5C99C0AED8",
-      "size_bytes": 206502
+      "sha256": "395A7C8746B23F4A14F68B49C9E4E9A68A5D31A0151DBD343E39273C4EC4010F",
+      "size_bytes": 206831
     },
     "frozen/recurrent_latent_fast.pt": {
       "sha256": "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD",

@@ -419,7 +419,12 @@ class JEPAAttemptMemory:
             if first_action in scores:
                 scale = 0.30 if str(selected_plan.get("source", "")) == "component_relation_goal_chain" else 0.34
                 scores[first_action] += scale * min(max(float(selected_plan.get("value", 0.0)), 0.0), 1.5)
-        planned_action = self.sequence_plan_action(legal_actions)
+        planned_action = self.sequence_plan_action(
+            legal_actions,
+            observation=observation,
+            frame=frame,
+            components=components,
+        )
         if planned_action is not None:
             plan_support = self._sequence_plan_support(planned_action, frame, component_relations.get(planned_action))
             scores[planned_action] = scores.get(planned_action, 0.0) + (0.85 * plan_support)
@@ -477,6 +482,11 @@ class JEPAAttemptMemory:
             "component_relation_delta_contradictions": sum(self.component_relation_delta_contradictions.values()),
             "sequence_contradictions": self.sequence_contradictions,
             "sequence_candidate_count": len(self.sequence_candidates),
+            "relation_delta_sequence_candidate_count": sum(
+                1
+                for item in self.sequence_candidates
+                if str(item.get("source", "")) == "positive_public_relation_delta_sequence"
+            ),
             "active_sequence_length": len(self.active_sequence),
             "active_sequence_remaining": active_remaining,
             "active_sequence_source": self.active_sequence_source,
@@ -505,12 +515,35 @@ class JEPAAttemptMemory:
                 self.active_sequence_source = str(candidate.get("source", "prior_attempt_event_window"))
                 return
 
-    def sequence_plan_action(self, legal_actions: list[str] | tuple[str, ...]) -> str | None:
+    def sequence_plan_action(
+        self,
+        legal_actions: list[str] | tuple[str, ...],
+        observation: Any | None = None,
+        frame: np.ndarray | None = None,
+        components: list[_FrameComponent] | None = None,
+    ) -> str | None:
         if not self.active_sequence:
             return None
         legal = {str(action) for action in legal_actions}
+        if frame is None and observation is not None:
+            frame = _public_frame(observation)
+        if frame is not None and frame.size and components is None:
+            components = _frame_components(frame)
         while self.sequence_cursor < len(self.active_sequence):
             action = self.active_sequence[self.sequence_cursor]
+            expected = (
+                self.active_sequence_expectations[self.sequence_cursor]
+                if self.sequence_cursor < len(self.active_sequence_expectations)
+                else {}
+            )
+            resolved_action = _resolve_sequence_expected_action(
+                expected,
+                legal_actions,
+                frame,
+                components,
+            )
+            if resolved_action is not None:
+                return resolved_action
             if action in legal:
                 return action
             self.sequence_cursor += 1
@@ -526,15 +559,21 @@ class JEPAAttemptMemory:
         if not self.active_sequence or self.sequence_cursor >= len(self.active_sequence):
             return
         action = str(action)
-        expected_action = self.active_sequence[self.sequence_cursor]
-        if action != expected_action:
-            return
         expected = (
             self.active_sequence_expectations[self.sequence_cursor]
             if self.sequence_cursor < len(self.active_sequence_expectations)
             else {}
         )
         before = _public_frame(before_observation)
+        legal_actions = list(getattr(before_observation, "available_actions", ()))
+        expected_action = self.active_sequence[self.sequence_cursor]
+        resolved_expected_action = _resolve_sequence_expected_action(
+            expected,
+            legal_actions,
+            before,
+        )
+        if action != expected_action and (resolved_expected_action is None or action != resolved_expected_action):
+            return
         after = _public_frame(getattr(result, "observation", None))
         event_hit = bool(POSITIVE_EVENTS.intersection(getattr(result, "info", {}).get("events", []))) or float(
             getattr(result, "reward", 0.0)
@@ -557,7 +596,7 @@ class JEPAAttemptMemory:
                 self.sequence_cursor = 0
                 self.active_sequence_source = "aborted_by_public_component_contradiction"
                 return
-        self.advance_sequence(action)
+        self.sequence_cursor += 1
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -586,6 +625,7 @@ class JEPAAttemptMemory:
                 "component_transition_goal_chain_search",
                 "component_relation_goal_chain_search",
                 "component_relation_delta_event_miner",
+                "relation_delta_sequence_planner",
                 "targeted_next_attempt_experiment",
             ],
             "transition_graph": self.transition_graph_summary(),
@@ -862,7 +902,7 @@ class JEPAAttemptMemory:
         added = 0
         hypothesis_by_index = {int(item.get("step_index", -1)): item for item in hypotheses}
         component_by_index = {int(item.get("step_index", -1)): item for item in component_hypotheses}
-        existing = {tuple(str(action) for action in item.get("actions", [])) for item in self.sequence_candidates}
+        existing = {_sequence_candidate_key(item) for item in self.sequence_candidates}
         for event_index, outcome in enumerate(outcomes):
             if not outcome["event_hit"]:
                 continue
@@ -870,9 +910,6 @@ class JEPAAttemptMemory:
             window_steps = record.steps[start : event_index + 1]
             actions = [str(step.action) for step in window_steps]
             if not actions:
-                continue
-            key = tuple(actions)
-            if key in existing:
                 continue
             linked = [
                 hypothesis_by_index[index]
@@ -884,28 +921,55 @@ class JEPAAttemptMemory:
                 for index in range(start, event_index + 1)
                 if index in component_by_index and str(component_by_index[index].get("relation_key", ""))
             ]
-            component_expectations = [
-                _sequence_component_expectation(component_by_index.get(index, {})) for index in range(start, event_index + 1)
-            ]
+            component_expectations: list[dict[str, Any]] = []
+            action_templates: list[str] = []
+            relation_delta_step_count = 0
+            productive_delta_count = 0
+            for index in range(start, event_index + 1):
+                component_hypothesis = component_by_index.get(index, {})
+                if component_hypothesis and component_hypothesis.get("relation_delta_tokens"):
+                    expectation = _relation_delta_sequence_component_expectation(component_hypothesis)
+                    relation_delta_step_count += 1
+                    productive_delta_count += sum(
+                        1
+                        for token in expectation.get("relation_delta_tokens", [])
+                        if _relation_delta_token_is_productive(str(token))
+                    )
+                else:
+                    expectation = _sequence_component_expectation(component_hypothesis)
+                component_expectations.append(expectation)
+                action_template = str(expectation.get("action_template", ""))
+                action_templates.append(action_template or str(expectation.get("action", "")))
+            source = (
+                "positive_public_relation_delta_sequence"
+                if relation_delta_step_count > 0
+                else "positive_public_event_window"
+            )
             value = (
                 1.0
                 + max(float(record.steps[event_index].score_delta), 0.0)
                 + 0.08 * len(linked)
                 + 0.10 * len(linked_components)
+                + 0.06 * relation_delta_step_count
+                + 0.015 * min(float(productive_delta_count), 12.0)
             )
-            self.sequence_candidates.append(
-                {
-                    "source": "positive_public_event_window",
-                    "actions": actions,
-                    "value": float(value),
-                    "length": len(actions),
-                    "event_index": event_index,
-                    "linked_regions": [_hypothesis_region(item) for item in linked[:4]],
-                    "linked_mechanisms": [str(item.get("mechanism")) for item in linked[:4]],
-                    "linked_component_relations": [str(item.get("relation_key")) for item in linked_components[:6]],
-                    "component_expectations": component_expectations[: len(actions)],
-                }
-            )
+            candidate = {
+                "source": source,
+                "actions": actions,
+                "action_templates": action_templates[: len(actions)],
+                "value": float(value),
+                "length": len(actions),
+                "event_index": event_index,
+                "linked_regions": [_hypothesis_region(item) for item in linked[:4]],
+                "linked_mechanisms": [str(item.get("mechanism")) for item in linked[:4]],
+                "linked_component_relations": [str(item.get("relation_key")) for item in linked_components[:6]],
+                "relation_delta_steps": relation_delta_step_count,
+                "component_expectations": component_expectations[: len(actions)],
+            }
+            key = _sequence_candidate_key(candidate)
+            if key in existing:
+                continue
+            self.sequence_candidates.append(candidate)
             existing.add(key)
             added += 1
         self.sequence_candidates = sorted(
@@ -2019,6 +2083,22 @@ def _relation_delta_token_is_productive(token: str) -> bool:
     return "blocked_or_no_effect" not in delta and delta != "mechanism:stable"
 
 
+def _relation_delta_suffix(token: str) -> str:
+    return str(token).split("|", 1)[-1]
+
+
+def _relation_delta_tokens_overlap(expected_tokens: list[str], actual_tokens: list[str]) -> bool:
+    expected = {str(token) for token in expected_tokens if str(token)}
+    actual = {str(token) for token in actual_tokens if str(token)}
+    if expected & actual:
+        return True
+    expected_deltas = {_relation_delta_suffix(token) for token in expected if _relation_delta_token_is_productive(token)}
+    actual_deltas = {_relation_delta_suffix(token) for token in actual if _relation_delta_token_is_productive(token)}
+    expected_deltas.discard("")
+    actual_deltas.discard("")
+    return bool(expected_deltas & actual_deltas)
+
+
 def _movement_direction_token(delta: Any) -> str:
     if not isinstance(delta, (list, tuple)) or len(delta) < 2:
         return "unknown"
@@ -2059,6 +2139,62 @@ def _component_relation_delta_action_scopes(
         scopes[f"target_value:{target_value}"] = 0.44
         scopes[f"component_value:{target_value}"] = 0.38
     return scopes
+
+
+def _resolve_sequence_expected_action(
+    expected: dict[str, Any],
+    legal_actions: list[str] | tuple[str, ...],
+    frame: np.ndarray | None,
+    components: list[_FrameComponent] | None = None,
+) -> str | None:
+    legal = [str(action) for action in legal_actions]
+    if not legal or not expected or frame is None or not frame.size:
+        return None
+    if components is None:
+        components = _frame_components(frame)
+    action_template = str(expected.get("action_template", ""))
+    expected_tokens = [str(token) for token in list(expected.get("relation_delta_tokens", []))[:16] if str(token)]
+    expected_scopes = {_relation_delta_scope(token) for token in expected_tokens}
+    expected_scopes.discard("")
+    candidates: list[tuple[float, int, str]] = []
+    for index, action in enumerate(legal):
+        target_relation = _component_target_relation(frame, _action_target_cell(action, frame), components)
+        family = _action_family(action)
+        current_keys = {key for key, _ in _candidate_relation_keys(family, target_relation)}
+        current_general_keys = {_general_component_relation_key(key) for key in current_keys}
+        scopes = _component_relation_delta_action_scopes(action, family, target_relation)
+        score = 0.0
+        if action_template:
+            if action_template.startswith("action:"):
+                if action == action_template[len("action:") :]:
+                    score += 1.15
+                elif expected_tokens:
+                    score += 0.05
+            elif action_template.startswith("relation:"):
+                expected_relation = _general_component_relation_key(action_template[len("relation:") :])
+                if expected_relation in current_general_keys:
+                    score += 1.00
+            elif action == action_template:
+                score += 0.80
+        relation_key = _general_component_relation_key(str(expected.get("relation_key", "")))
+        fallback_relation = _general_component_relation_key(str(expected.get("fallback_relation", "")))
+        if relation_key and relation_key in current_general_keys:
+            score += 0.72
+        if fallback_relation and fallback_relation in current_general_keys:
+            score += 0.45
+        expected_value = int(expected.get("target_value", 0) or 0)
+        if expected_value and int(target_relation.get("value", 0) or 0) == expected_value:
+            score += 0.36
+        if expected_scopes:
+            scope_score = max((float(scopes.get(scope, 0.0)) for scope in expected_scopes), default=0.0)
+            score += 0.68 * scope_score
+        if score > 0.20:
+            candidates.append((score, -index, action))
+    if not candidates:
+        resolved = _resolve_component_relation_action_template(action_template, legal, frame, components)
+        return resolved
+    candidates.sort(reverse=True)
+    return candidates[0][2]
 
 
 def _component_relation_delta_tokens(hypothesis: dict[str, Any]) -> list[tuple[str, float]]:
@@ -2202,6 +2338,37 @@ def _relation_sequence_component_expectation(hypothesis: dict[str, Any]) -> dict
     }
 
 
+def _relation_delta_sequence_component_expectation(hypothesis: dict[str, Any]) -> dict[str, Any]:
+    if not hypothesis:
+        return {}
+    return {
+        "action": str(hypothesis.get("action", "")),
+        "action_template": _general_component_action_template(str(hypothesis.get("action_template", ""))),
+        "relation_key": _general_component_relation_key(str(hypothesis.get("relation_key", ""))),
+        "fallback_relation": _general_component_relation_key(str(hypothesis.get("fallback_relation", ""))),
+        "mechanism": str(hypothesis.get("mechanism", "")),
+        "target_value": int(hypothesis.get("target_value", 0) or hypothesis.get("component_value", 0) or 0),
+        "changed_expected": int(hypothesis.get("changed_pixels", 0)) > 0,
+        "relation_delta_tokens": [str(token) for token in list(hypothesis.get("relation_delta_tokens", []))[:16]],
+        "requires_relation_delta_match": True,
+    }
+
+
+def _sequence_candidate_key(candidate: dict[str, Any]) -> tuple[Any, ...]:
+    actions = tuple(str(action) for action in candidate.get("actions", []))
+    templates = tuple(str(template) for template in candidate.get("action_templates", []))
+    delta_suffixes: list[str] = []
+    for expectation in candidate.get("component_expectations", []) or []:
+        if not isinstance(expectation, dict):
+            continue
+        tokens = [str(token) for token in list(expectation.get("relation_delta_tokens", []))[:4]]
+        if tokens:
+            delta_suffixes.append(",".join(sorted({_relation_delta_suffix(token) for token in tokens})))
+        else:
+            delta_suffixes.append(str(expectation.get("mechanism", "")))
+    return (str(candidate.get("source", "")), actions, templates, tuple(delta_suffixes))
+
+
 def _component_expectation_matches(expected: dict[str, Any], actual: dict[str, Any] | None) -> bool:
     if not expected:
         return True
@@ -2225,6 +2392,12 @@ def _component_expectation_matches(expected: dict[str, Any], actual: dict[str, A
         return expected_relation_after == actual_relation_after
     if bool(expected.get("changed_expected", False)) and int(actual.get("changed_pixels", 0)) == 0:
         return False
+    expected_delta_tokens = [str(token) for token in list(expected.get("relation_delta_tokens", []))[:16]]
+    actual_delta_tokens = [str(token) for token in list(actual.get("relation_delta_tokens", []))[:16]]
+    if bool(expected.get("requires_relation_delta_match", False)):
+        return _relation_delta_tokens_overlap(expected_delta_tokens, actual_delta_tokens)
+    if expected_delta_tokens and actual_delta_tokens and _relation_delta_tokens_overlap(expected_delta_tokens, actual_delta_tokens):
+        return True
     expected_keys = {str(expected.get("relation_key", "")), str(expected.get("fallback_relation", ""))}
     expected_keys.discard("")
     if expected_keys and str(actual.get("relation_key", "")) in expected_keys:

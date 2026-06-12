@@ -5,10 +5,9 @@ Last updated: 2026-06-12.
 ## Ranked Experiments
 
 1. Ground sequence candidates in predicted public relation transitions.
-   - Current sequence candidates carry component expectations, but they still mostly replay prior positive-event windows.
-   - Add compact plan state with predicted next public component relation delta after each action, not only action replay.
-   - Prefer plans whose first predicted relation delta is reachable from the current public frame and abandon/replan when observed public changes contradict it.
-   - Avoid fixed schedules, forced entropy, game-specific branches, and hardcoded action strings beyond generic action-family parsing.
+   - Status: implemented and audited in the latest run.
+   - Focused tests show shifted multi-step relation-delta resolution and contradiction abort.
+   - Official runtime still reports `NO IMPROVEMENT FOUND`, `0/25` solved, and no attempt 2 or 3 score/useful-event improvement over attempt 1.
 
 2. Add relation-chain and relation-delta activation diagnostics.
    - Count how often relation-chain and relation-delta plans activate, resolve to legal actions, produce public changes, trigger useful events, and abort by contradiction.
@@ -25,6 +24,12 @@ Last updated: 2026-06-12.
    - Treat internal losses as diagnostics only; proof remains official public runtime.
 
 ## Attempted This Run
+
+Relation-delta-grounded sequence candidates:
+   - Promote positive public-event windows with component relation-delta expectations into relation-delta sequence candidates.
+   - Store generalized action templates, relation keys, fallback relations, target values, changed expectations, and relation-delta tokens per step.
+   - Resolve sequence steps to currently legal shifted actions from the public frame and abort on live public relation-delta contradiction.
+   - Result: implemented and audited, but official runtime remained `NO IMPROVEMENT FOUND`; attempts 2 and 3 matched attempt 1 at mean normalized score `0.004` and useful events `0.04`, not an improvement.
 
 Relation-level component goal chains:
    - Record public relation-state signatures before and after component transitions.
@@ -75,4 +80,4 @@ Transition-graph next-attempt planner:
 
 ## Immediate Next Step
 
-Implement experiment 1: ground sequence candidates in predicted public relation transitions, then rerun tests, official evaluation, audits, compaction, and docs. Do not use game IDs, game source, hidden labels, manual hints, or per-game branches.
+Implement experiment 2: add relation-chain, relation-delta, and relation-delta sequence activation diagnostics, then rerun tests, official evaluation, audits, compaction, and docs. Count activation, legal resolution, visible public change, useful event, contradiction abort, and stale-template penalties without using game IDs, game source, hidden labels, manual hints, or per-game branches.

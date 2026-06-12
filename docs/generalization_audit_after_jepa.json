@@ -511,8 +511,8 @@
       "size_bytes": 8184
     },
     "src/jepa_attempt_memory.py": {
-      "sha256": "85D333185EAE1D238DBE2FF85288A46DA458A2EF954E5D9215070EC478A7510C",
-      "size_bytes": 119176
+      "sha256": "B0EB12207B87015AFFE0A39C78F61BF7C4B29F01E442ABCF032507AE286872B5",
+      "size_bytes": 128011
     },
     "src/jepa_arc_eval.py": {
       "sha256": "0BBA29B725955CAEE6BFAA1EAC3E9D3573791DAB7713B5606AD52CD2A577430B",
@@ -539,8 +539,8 @@
       "size_bytes": 3901
     },
     "tests/test_video_jepa.py": {
-      "sha256": "1901DCBBE506E93B35617D68537354C664A7A4E8A1C3EF3D50EFB5D659373FFA",
-      "size_bytes": 31463
+      "sha256": "43591E8FEFDB0AB9CF3010A63496D0EDFF78E1C9C66B71871F31F2078F4C0132",
+      "size_bytes": 38224
     },
     "docs/external_generalization_report.json": {
       "sha256": "34D5E34D0249DEDEA3AAA1A2E31DB33FCAA0CC1DBA70A8F77B30F40628E4C2AC",
@@ -607,11 +607,11 @@
       "size_bytes": 21132
     },
     "docs/jepa_attempt_report.json": {
-      "sha256": "395A7C8746B23F4A14F68B49C9E4E9A68A5D31A0151DBD343E39273C4EC4010F",
-      "size_bytes": 206831
+      "sha256": "B396646147E4F6A3D73DFC597346382ABB27AC68A312CF7D1334F973380DD589",
+      "size_bytes": 206796
     },
     "docs/generalization_audit_after_jepa.json": {
-      "sha256": "D4C8E8EF49FE88A5910D4D026ECA5CD8A08E9C7C6BB68EE935461304FD1F2E2B",
+      "sha256": "8051622036CE724F15DDFAAC7BCC3587DFD2A18E23E4324B082EBFE2445EB1E4",
       "size_bytes": 25141
     },
     "frozen/recurrent_latent_fast.pt": {

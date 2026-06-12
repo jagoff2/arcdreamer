@@ -2,6 +2,14 @@
 
 Last updated: 2026-06-12.
 
+## Relation-Delta-Grounded Sequence Candidates
+
+- Rationale: previous sequence candidates replayed raw prior-event action windows. Relation-delta mechanism mining could generalize single-step movement or transform mechanics, but sequence replay did not resolve shifted legal actions from predicted public relation transitions.
+- Code touched: `src/jepa_attempt_memory.py`, `tests/test_video_jepa.py`.
+- Mechanism: build sequence candidates with generalized action templates, expected component relation keys, fallback relations, target values, changed expectations, and relation-delta tokens; prefer relation-delta sequence candidates when positive public-event windows contain productive component deltas; resolve each planned step against the current public frame and legal actions; advance the active cursor when the resolved public action satisfies the expected transition; abort and penalize stale candidates when live public relation-delta postconditions contradict.
+- Result: syntax check passed, focused JEPA tests passed, full tests passed before official evaluation, compact trace schema preserved the `relation_delta_sequence_planner` marker and `relation_delta_sequence_candidate_count`, generalization/leakage audits passed, and official runtime still reported `NO IMPROVEMENT FOUND`. Primary `jepa_plus_attempt_memory` stayed at `0/25` solved, mean normalized score `0.004000000000000001`, useful events `0.04`, invalid action rate `0.0`, repeat collapse `0.8474902052213587`.
+- Status: retained as a legal public-evidence substrate and shifted multi-step relation-delta generalization improvement in focused tests, not a performance success. Attempts 2 and 3 matched attempt 1 on score and useful events rather than improving over it, and the retained best official score remains `0.005` from `state_graph_affordance`.
+
 ## Relation-Level Component Goal Chains
 
 - Rationale: exact public component-state chains were legal but too sparse. The same component relation can recur at different coordinates, so exact cells should not be the only bridge between attempts.

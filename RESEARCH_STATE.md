@@ -16,7 +16,7 @@ Best retained official public result: `0/25` games solved, mean normalized score
 
 Evidence: `docs/arc_affordance_report.json`, selected variant `state_graph_affordance`, mean normalized score `0.005`, useful events `0.04`, invalid action rate `0.0`, repeat collapse `0.22784841859240573`. This did not pass its improvement gate.
 
-Latest recurrent/JEPA run: `docs/jepa_attempt_report.json`, primary variant `jepa_plus_attempt_memory`, `0/25` solved, mean normalized score `0.0013333333333333335`, useful events `0.013333333333333334`, invalid action rate `0.0`, repeat collapse `0.8493619977971841`. Outcome remains `NO IMPROVEMENT FOUND`.
+Latest recurrent/JEPA run: `docs/jepa_attempt_report.json`, primary variant `jepa_plus_attempt_memory`, `0/25` solved, mean normalized score `0.004000000000000001`, useful events `0.04`, invalid action rate `0.0`, repeat collapse `0.8474902052213587`. Outcome remains `NO IMPROVEMENT FOUND`.
 
 ## Current Architecture
 
@@ -27,21 +27,21 @@ Latest recurrent/JEPA run: `docs/jepa_attempt_report.json`, primary variant `jep
 - Attempt memory updates causal hypotheses and next-attempt action distributions without emitting text or direct action advice.
 - Transition-graph attempt memory keyed by public observation hash and action, with visible-effect, no-effect, and delayed-public-event credits.
 - Region/object causal memory built from public frame diffs, coarse click-to-region contact, changed colors, delayed region links, and compact prior-event sequence candidates.
-- Component-level public causal graph over connected components, component action contact relations, public component transforms, component-goal links, live component-grounded sequence contradiction checks, predicted component-transition scoring, exact public component-state transition-goal chain search, relation-level component goal-chain abstraction, and generic relation-delta mechanism mining from public score/event-linked component changes.
+- Component-level public causal graph over connected components, component action contact relations, public component transforms, component-goal links, live component-grounded sequence contradiction checks, predicted component-transition scoring, exact public component-state transition-goal chain search, relation-level component goal-chain abstraction, generic relation-delta mechanism mining from public score/event-linked component changes, and relation-delta-grounded sequence candidate resolution.
 
 ## Latest Change
 
-Implemented generic relation-delta event mechanism mining in `src/jepa_attempt_memory.py`.
+Implemented relation-delta-grounded sequence candidate planning in `src/jepa_attempt_memory.py`.
 
-The mechanism converts public component before/after hypotheses into generic scoped relation-delta tokens such as movement direction, value transform, appearance, disappearance, visual transform, and blocked/no-effect. Tokens are scoped by public action template, generalized relation key, action family, and component value, receive direct and delayed public-event credit, score current legal actions through public relation/template matches, and accumulate contradiction penalties from live public postcondition failures. It does not use game IDs, hidden labels, source inspection, fixed action schedules, text action advice, or external solvers.
+The mechanism promotes positive public-event windows into relation-delta sequence candidates when their component expectations contain generic public relation-delta tokens. Sequence steps now carry generalized action templates, relation keys, fallback relations, target values, and expected delta tokens. Planning resolves a learned sequence step to currently legal shifted actions when the current public frame matches the expected relation-delta scope, and live transition observation advances or aborts the sequence using public postcondition checks. It does not use game IDs, hidden labels, source inspection, fixed action schedules, text action advice, or external solvers.
 
 ## Active Hypothesis
 
-Relation-delta event mining is a legal causal substrate and can generalize a learned public component movement across shifted positions in focused tests, but official traces show it still does not infer the objective or produce later-attempt score/useful-event gains. The abstraction bridges exact coordinate and whole-state changes, but sparse positive events and weak goal inference remain dominant.
+Relation-delta-grounded sequence planning is a legal causal substrate and can resolve a learned two-step public relation-delta plan across shifted component positions in focused tests. Official traces still show no solved games and no attempt 2 or 3 improvement over attempt 1. The mechanism improves the representation of action sequences, but sparse positive events, weak objective inference, and weak activation diagnostics remain dominant.
 
 ## Current Bottleneck
 
-Official traces still show no solved games and negligible useful events. Attempt 2 reduced repeat collapse to `0.8247975948141715` and raised entropy to `0.9206747911567998`, but attempts 2 and 3 still had zero score and zero useful events. Attempt 3 repeat collapse worsened to `0.8653668643967575`. The strongest repeated pattern remains exploration stuck/cycle plus absent or wrong goal/mechanic inference.
+Official traces still show no solved games. The latest primary variant reached mean normalized score `0.004000000000000001` and useful events `0.04`, but this only matches the sparse attempt-1 signal and remains below the retained best `0.005`. Attempts 1, 2, and 3 all had mean normalized score `0.004` and useful events `0.04`, so later attempts did not improve. Attempt 2 reduced repeat collapse to `0.8290217098584192`, but attempt 3 remained high at `0.8555273716250329`. The strongest repeated pattern remains exploration stuck/cycle plus absent or wrong goal/mechanic inference.
 
 ## Completion Status
 
