@@ -4955,3 +4955,88 @@
   - Need rerun generalization audit after compaction and context update.
 - Exact next action:
   - Run `python -m src.generalization_audit --json-output docs/generalization_audit_after_jepa.json`.
+
+## Step 0180 - Attempt-memory outcome classifier repaired, official result still negative
+
+- Files touched:
+  - `src\jepa_attempt_memory.py`
+  - `tests\test_video_jepa.py`
+  - `docs\jepa_attempt_report.json`
+  - `docs\generalization_audit_after_jepa.json`
+  - `docs\jepa_attempt_traces\`
+  - `RESEARCH_STATE.md`
+  - `METHODS_ATTEMPTED.md`
+  - `ARC_RESULTS.md`
+  - `FAILURE_ANALYSIS.md`
+  - `TODO_NEXT.md`
+  - `CONTEXT.md`
+- Commands run:
+  - `Get-Content -Raw -LiteralPath GOAL.md`
+  - attempted reads of `RESEARCH_STATE.md`, `METHODS_ATTEMPTED.md`, `ARC_RESULTS.md`, `FAILURE_ANALYSIS.md`, `TODO_NEXT.md`, and `CONTEXT.md`
+  - `git status --short --branch`
+  - `rg --files`
+  - `Get-Content -Raw -LiteralPath newgoal.md`
+  - `Get-Content -Raw -LiteralPath src\jepa_attempt_memory.py`
+  - `Get-Content -Raw -LiteralPath src\jepa_arc_eval.py`
+  - `Get-Content -Raw -LiteralPath src\arcagi3_official.py`
+  - `Get-Content -Raw -LiteralPath src\arcagi3_baselines.py`
+  - `Get-Content -Raw -LiteralPath src\arcagi3_adapter.py`
+  - `Get-Content -Raw -LiteralPath src\base_eval.py`
+  - `Get-Content -Raw -LiteralPath src\attempt_buffer.py`
+  - `Get-Content -Raw -LiteralPath tests\test_video_jepa.py`
+  - `Get-Content -Raw -LiteralPath src\generalization_audit.py`
+  - `python -m py_compile src\jepa_attempt_memory.py src\jepa_arc_eval.py`
+  - `pytest -q tests\test_video_jepa.py`
+  - `pytest -q`
+  - `python -m src.jepa_arc_eval --config external --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --jepa-checkpoint runs/video_jepa.pt --json-output docs/jepa_attempt_report.json --trace-dir docs/jepa_attempt_traces --device cuda`
+  - `rg -n "Got anonymous API key|anonymous API key|<redacted-runtime-credential>" docs data src tests frozen CONTEXT.md -S`
+  - `Get-ChildItem docs\jepa_attempt_traces -Recurse -File | Measure-Object Length -Sum`
+  - one-off Python compaction over `docs\jepa_attempt_traces\*.json`
+  - `python -m src.generalization_audit --json-output docs/generalization_audit_after_jepa.json`
+  - `python -m audit.leakage_scan`
+  - final `pytest -q`
+  - `Get-FileHash -Algorithm SHA256 -LiteralPath @('src\jepa_attempt_memory.py','tests\test_video_jepa.py','docs\jepa_attempt_report.json','docs\generalization_audit_after_jepa.json','docs\jepa_attempt_traces\_official_jepa_worker_report.json')`
+- Observed results/errors:
+  - Root persistent ARC docs were missing except `CONTEXT.md`; created `RESEARCH_STATE.md`, `METHODS_ATTEMPTED.md`, `ARC_RESULTS.md`, `FAILURE_ANALYSIS.md`, and `TODO_NEXT.md`.
+  - `GOAL.md` still contains the older recurrent-latent toy objective; `newgoal.md` and active thread objective describe the ARC external-base/recurrent official-runtime work.
+  - Patched attempt memory so neutral visible-effect transitions are not marked failed just because they have a non-positive step cost.
+  - Added `effect_actions`, `repeated_actions`, `visible_effect_rate`, and `max_repeated_action_fraction` to attempt memory entries and causal hypotheses.
+  - Added tests for visible-effect versus failed-action separation and repeated no-effect action penalization.
+  - Focused JEPA tests after patch: `8 passed in 2.65s`.
+  - Full tests before official rerun: `89 passed in 52.45s`.
+  - Official/external JEPA rerun completed on CUDA and still reported `NO IMPROVEMENT FOUND`.
+  - Latest official JEPA primary result:
+    - `jepa_plus_attempt_memory`: solve `0.0`, score `0.0013333333333333335`, useful events `0.013333333333333334`, repeat collapse `0.8753405853487634`, invalid actions `0.0`.
+    - `official_score_gain`: `0.0`.
+    - `official_useful_event_gain`: `0.0`.
+    - `attempt_2_or_3_improves_over_attempt_1`: `false`.
+    - `repeat_collapse_drop_attempt_1_to_3`: `-0.044466188032200926`.
+    - `jepa_causal_substrate_chain`: `true`.
+    - `no_hack_passes`: `true`.
+  - Best retained official public result remains `0/25` solved and mean normalized score `0.005` from `docs\arc_affordance_report.json` variant `state_graph_affordance`; this is not a success claim.
+  - Runtime stdout included a fresh anonymous ARC credential string, but targeted grep found no persisted occurrence of the new credential in docs, data, source, tests, frozen artifacts, or context.
+  - JEPA trace compaction after rerun:
+    - compacted `651`
+    - skipped `1`
+    - bytes before `2205285267`
+    - bytes after `127131041`
+    - reduction `0.9423516572198639`
+  - Generalization audit after compaction: `EXTERNAL GENERALIZATION AUDIT PROVEN`.
+  - Leakage scan: `passes=true`, no findings.
+  - Final tests after reports/audits: `89 passed in 52.27s`.
+  - Artifact hashes:
+    - `src\jepa_attempt_memory.py`: `FFFFE092A5FEAF56303D17E75D5CCBE390CDB76DDF52EC4B052D2409B85AF1C4`
+    - `tests\test_video_jepa.py`: `978EF4F22C4A9C9010EFCF74BA1E747DBCF523925D9BCD4DD2459BDCD34C8385`
+    - `docs\jepa_attempt_report.json`: `3928452C28B72F1D9CFE59F94FB8B40F75C34BBA6097F827B0F2BA6202923654`
+    - `docs\generalization_audit_after_jepa.json`: `C0A8B4645603F9EF49CA1460A851663546A0A5CBF0D721EE0B1AD2B57EEED4A4`
+    - `docs\jepa_attempt_traces\_official_jepa_worker_report.json`: `89AE13B5CF85379FFC4E73E6BBC036160742CE4C1EA4627C6E4B3AD9371637AC`
+- GOAL.md requirement advanced:
+  - Fixed a causal accounting error in attempt memory.
+  - Preserved negative official evidence and updated persistent state docs.
+  - Verified tests, official runtime, leakage scan, and generalization audit after behavior change.
+- Current blockers:
+  - No Terminal Outcome A for the active ARC objective. Current official completion remains `0/25`; target is at least `20/25`.
+  - The patched JEPA attempt memory does not improve official score or useful events.
+  - Strongest remaining bottleneck is transition-graph planning and goal/mechanic inference from full attempts.
+- Exact next action:
+  - Implement a transition-graph next-attempt planner that uses public full-attempt transition evidence to choose targeted action-sequence experiments without fixed schedules, game-id branches, hidden labels, or per-game scripts.

@@ -86,6 +86,36 @@ def test_attempt_memory_bias_uses_prior_attempts_not_direct_jepa_action() -> Non
     ]
 
 
+def test_attempt_memory_separates_visible_effect_from_failed_action() -> None:
+    buffer = AttemptBuffer(suite_id="suite", task_id="task", variant="v", split="dev", seed=2, attempt_index=1)
+    before = _obs(0, 2, 2)
+    after = _obs(1, 3, 2)
+    buffer.append_transition(before, "down", ArcAGI3StepResult(after, -0.001, False, False, {"events": ["move"]}))
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    entry = memory.ingest_attempt(buffer.to_record())
+
+    assert "down" not in entry.failed_actions
+    assert entry.effect_actions["down"] == 1
+    assert entry.causal_hypotheses["no_effect_rate"] == 0.0
+    assert entry.causal_hypotheses["visible_effect_rate"] == 1.0
+    assert memory.score_action("down") > 0.0
+
+
+def test_attempt_memory_penalizes_repeated_no_effect_actions() -> None:
+    buffer = AttemptBuffer(suite_id="suite", task_id="task", variant="v", split="dev", seed=3, attempt_index=1)
+    for step in range(6):
+        before = _obs(step, 2, 2)
+        after = _obs(step + 1, 2, 2)
+        buffer.append_transition(before, "wait", ArcAGI3StepResult(after, -0.001, False, False, {"events": ["wait"]}))
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    entry = memory.ingest_attempt(buffer.to_record())
+
+    assert entry.failed_actions["wait"] == 6
+    assert entry.repeated_actions["wait"] == 1.0
+    assert entry.causal_hypotheses["no_effect_rate"] == 1.0
+    assert memory.score_action("wait") < memory.score_action("down")
+
+
 def test_jepa_temporal_representation_changes_next_attempt_distribution() -> None:
     records = synthetic_attempts(8, seed=50)
     model = VideoJEPA()

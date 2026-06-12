@@ -18,6 +18,8 @@ class AttemptMemoryEntry:
     attempt_index: int
     token_mean: list[float]
     failed_actions: dict[str, int]
+    effect_actions: dict[str, int]
+    repeated_actions: dict[str, float]
     event_candidates: dict[str, float]
     causal_hypotheses: dict[str, float]
     next_attempt_plan: dict[str, float]
@@ -40,18 +42,27 @@ class JEPAAttemptMemory:
 
     def ingest_attempt(self, record: AttemptRecord, model: VideoJEPA | None = None) -> AttemptMemoryEntry:
         failed: dict[str, int] = {}
+        effects: dict[str, int] = {}
         events: dict[str, float] = {}
+        action_counts: dict[str, int] = {}
         no_effect = 0
+        visible_effect = 0
         positive = 0
         for step in record.steps:
+            action = str(step.action)
+            action_counts[action] = action_counts.get(action, 0) + 1
             event_hit = bool(POSITIVE_EVENTS.intersection(step.event_delta)) or float(step.score_delta) > 0.0
             changed = step.obs_hash != step.next_obs_hash
+            no_effect_event = _is_no_effect_event(step.event_delta)
             if event_hit:
                 positive += 1
-                events[step.action] = events.get(step.action, 0.0) + max(1.0, float(step.score_delta))
-            elif not changed or float(step.score_delta) <= 0.0:
+                events[action] = events.get(action, 0.0) + max(1.0, float(step.score_delta))
+            elif not changed or no_effect_event:
                 no_effect += 1
-                failed[step.action] = failed.get(step.action, 0) + 1
+                failed[action] = failed.get(action, 0) + 1
+            elif changed:
+                visible_effect += 1
+                effects[action] = effects.get(action, 0) + 1
         token_mean: list[float] = []
         jepa_action_evidence: dict[str, dict[str, float]] = {}
         if model is not None and self.use_jepa_tokens and record.steps:
@@ -63,6 +74,11 @@ class JEPAAttemptMemory:
                 token_mean = [round(float(item), 6) for item in model.attempt_tokens(batch).detach().cpu().reshape(-1).tolist()[:24]]
                 jepa_action_evidence = _jepa_action_evidence(record, output)
         total = max(len(record.steps), 1)
+        repeated = {
+            action: float(count / total)
+            for action, count in sorted(action_counts.items())
+            if count >= max(4, int(0.35 * total)) and count / total > 0.35
+        }
         jepa_active = bool(jepa_action_evidence)
         effect_values = [item.get("effect", 0.0) for item in jepa_action_evidence.values()]
         surprise_values = [item.get("surprise", 0.0) for item in jepa_action_evidence.values()]
@@ -72,8 +88,10 @@ class JEPAAttemptMemory:
         surprise_span = (max(surprise_values) - min(surprise_values)) if surprise_values else 0.0
         causal = {
             "no_effect_rate": float(no_effect / total),
+            "visible_effect_rate": float(visible_effect / total),
             "positive_event_rate": float(positive / total),
             "terminal_seen": float(any(step.terminal for step in record.steps)),
+            "max_repeated_action_fraction": float(max(repeated.values(), default=0.0)),
             "jepa_token_norm": float(torch.tensor(token_mean).norm().item()) if token_mean else 0.0,
             "jepa_action_effect_mean": float(effect_mean),
             "jepa_action_effect_span": float(effect_span),
@@ -86,6 +104,12 @@ class JEPAAttemptMemory:
             next_plan[action] = next_plan.get(action, 0.0) + min(float(value), 3.0)
         for action, count in failed.items():
             next_plan[action] = next_plan.get(action, 0.0) - min(float(count), 4.0) * 0.25
+        for action, count in effects.items():
+            if action not in failed and action not in events:
+                next_plan[action] = next_plan.get(action, 0.0) + min(float(count), 4.0) * 0.05
+        if positive == 0:
+            for action, fraction in repeated.items():
+                next_plan[action] = next_plan.get(action, 0.0) - min(float(fraction), 1.0) * 0.45
         if jepa_active:
             for action, evidence in jepa_action_evidence.items():
                 effect_centered = float(evidence.get("effect", 0.0) - effect_mean)
@@ -102,6 +126,8 @@ class JEPAAttemptMemory:
             attempt_index=int(record.attempt_index),
             token_mean=token_mean,
             failed_actions=failed,
+            effect_actions=effects,
+            repeated_actions=repeated,
             event_candidates=events,
             causal_hypotheses=causal,
             next_attempt_plan=next_plan,
@@ -117,8 +143,8 @@ class JEPAAttemptMemory:
             return 0.0
         score = 0.0
         for entry in self.entries[-3:]:
-            score += 0.35 * float(entry.next_attempt_plan.get(action, 0.0))
-        return float(max(min(score, 0.35), -0.35))
+            score += 0.45 * float(entry.next_attempt_plan.get(action, 0.0))
+        return float(max(min(score, 0.55), -0.55))
 
     def plan_scores(self, legal_actions: tuple[str, ...] | list[str]) -> dict[str, float]:
         return {str(action): self.score_action(str(action)) for action in legal_actions}
@@ -177,6 +203,21 @@ def _jepa_action_evidence(record: AttemptRecord, output: dict[str, torch.Tensor]
         values["surprise"] = float(values["surprise"] / count)
         values["count"] = float(count)
     return evidence
+
+
+def _is_no_effect_event(events: list[str]) -> bool:
+    for event in events:
+        lowered = str(event).lower()
+        if (
+            "no_effect" in lowered
+            or "blocked" in lowered
+            or "invalid" in lowered
+            or "bad_click" in lowered
+            or "already_terminal" in lowered
+            or "runtime_no_response" in lowered
+        ):
+            return True
+    return False
 
 
 def _centered_distribution_delta(plan: dict[str, float]) -> dict[str, float]:
