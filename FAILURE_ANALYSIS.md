@@ -10,16 +10,18 @@ Best retained mean normalized score is `0.005`, far below the `>=80%` completion
 
 ## Latest JEPA Failure
 
-The strict outcome-classifier patch fixed a real causal-accounting bug, but the official runtime result stayed negative:
+The transition-graph planner added public state-action edge memory and delayed-event credit, but the official runtime result stayed negative:
 
 - `jepa_plus_attempt_memory` mean normalized score: `0.0013333333333333335`
 - useful events: `0.013333333333333334`
-- repeat collapse: `0.8753405853487634`
+- repeat collapse: `0.8752519080124866`
 - official score gain: `0.0`
 - useful-event gain: `0.0`
 - attempts 2 or 3 did not improve over attempt 1
 
-The patch slightly reduced the severity of repeat-collapse regression in the primary JEPA gate versus the previous report, from `-0.05311750710721985` to `-0.044466188032200926`, but this is not enough to count as an improvement.
+Primary attempt 1 had mean normalized score `0.004` and useful events `0.04`; attempts 2 and 3 both had score `0.0` and useful events `0.0`. The transition graph therefore did not produce the intended next-attempt improvement.
+
+The latest repeat-collapse regression gate is `-0.04420015602337091`, still failing the required repeat-collapse improvement threshold.
 
 ## Repeated Patterns
 
@@ -34,6 +36,7 @@ From `docs/arcagi3_failure_report.json`:
 Observed across latest JEPA traces:
 
 - attempt memory changes action distributions but does not make later attempts better;
+- the transition graph records public edge evidence but does not convert it into durable multi-step experiments;
 - positive events remain sparse and mostly isolated;
 - official variants often repeat actions or fail to transform public observations into multi-step plans;
 - no invalid-action issue is present, so the bottleneck is not action legality;
@@ -41,7 +44,7 @@ Observed across latest JEPA traces:
 
 ## Strongest Bottleneck
 
-The agent lacks a planner that converts full-attempt evidence into targeted next-attempt experiments over state transitions, delayed effects, object/contact changes, and goal hypotheses. Current memory can score actions, but it does not build a robust causal graph of action sequences and outcomes.
+The agent lacks object/region causal hypotheses and a compact sequence-level plan state. Current memory can record and score public state-action edges, but it still cannot identify which changed regions, contacts, pushes, toggles, spawns, removals, or delayed public effects should define the next multi-step experiment.
 
 ## Current Non-Blocker
 

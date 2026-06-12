@@ -116,6 +116,39 @@ def test_attempt_memory_penalizes_repeated_no_effect_actions() -> None:
     assert memory.score_action("wait") < memory.score_action("down")
 
 
+def test_transition_graph_planner_penalizes_public_no_effect_edge() -> None:
+    buffer = AttemptBuffer(suite_id="suite", task_id="task", variant="v", split="dev", seed=4, attempt_index=1)
+    before = _obs(0, 2, 2)
+    after = _obs(1, 2, 2)
+    buffer.append_transition(before, "wait", ArcAGI3StepResult(after, -0.001, False, False, {"events": ["no_effect"]}))
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    entry = memory.ingest_attempt(buffer.to_record())
+    scores = memory.plan_scores_for_observation(before)
+
+    assert entry.transition_graph_summary["observed_edges"] == 1
+    assert entry.transition_graph_summary["no_effect_edges"] == 1
+    assert memory.summary()["transition_graph"]["observed_states"] == 1
+    assert scores["wait"] < scores["down"]
+
+
+def test_transition_graph_planner_credits_delayed_public_event_predecessor() -> None:
+    buffer = AttemptBuffer(suite_id="suite", task_id="task", variant="v", split="dev", seed=5, attempt_index=1)
+    start = _obs(0, 2, 2)
+    moved = _obs(1, 3, 2)
+    after_event = _obs(2, 3, 2)
+    buffer.append_transition(start, "down", ArcAGI3StepResult(moved, -0.001, False, False, {"events": ["move"]}))
+    buffer.append_transition(moved, "up", ArcAGI3StepResult(after_event, 1.0, False, False, {"events": ["positive_reward"]}))
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    entry = memory.ingest_attempt(buffer.to_record())
+    scores = memory.plan_scores_for_observation(start)
+
+    assert entry.causal_hypotheses["transition_graph_delayed_credit_edges"] == 1.0
+    assert entry.transition_graph_summary["positive_edges"] == 1
+    assert entry.transition_graph_summary["effect_edges"] == 1
+    assert scores["down"] > scores["wait"]
+    assert scores["down"] > 0.0
+
+
 def test_jepa_temporal_representation_changes_next_attempt_distribution() -> None:
     records = synthetic_attempts(8, seed=50)
     model = VideoJEPA()

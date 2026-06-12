@@ -16,7 +16,7 @@ Best retained official public result: `0/25` games solved, mean normalized score
 
 Evidence: `docs/arc_affordance_report.json`, selected variant `state_graph_affordance`, mean normalized score `0.005`, useful events `0.04`, invalid action rate `0.0`, repeat collapse `0.22784841859240573`. This did not pass its improvement gate.
 
-Latest recurrent/JEPA run: `docs/jepa_attempt_report.json`, primary variant `jepa_plus_attempt_memory`, `0/25` solved, mean normalized score `0.0013333333333333335`, useful events `0.013333333333333334`, invalid action rate `0.0`, repeat collapse `0.8753405853487634`. Outcome remains `NO IMPROVEMENT FOUND`.
+Latest recurrent/JEPA run: `docs/jepa_attempt_report.json`, primary variant `jepa_plus_attempt_memory`, `0/25` solved, mean normalized score `0.0013333333333333335`, useful events `0.013333333333333334`, invalid action rate `0.0`, repeat collapse `0.8752519080124866`. Outcome remains `NO IMPROVEMENT FOUND`.
 
 ## Current Architecture
 
@@ -25,25 +25,23 @@ Latest recurrent/JEPA run: `docs/jepa_attempt_report.json`, primary variant `jep
 - Attempt buffer storing frame/action/legal-action/score/event/terminal traces.
 - Video-JEPA temporal encoder used as a causal perceptual substrate for attempt memory.
 - Attempt memory updates causal hypotheses and next-attempt action distributions without emitting text or direct action advice.
+- Transition-graph attempt memory keyed by public observation hash and action, with visible-effect, no-effect, and delayed-public-event credits.
 
 ## Latest Change
 
-Patched `src/jepa_attempt_memory.py` so neutral visible-effect transitions are not treated as failed actions merely because the official runtime gives a small step cost. The memory now separates:
+Implemented a transition-graph next-attempt planner in `src/jepa_attempt_memory.py` and wired it through `src/jepa_arc_eval.py`.
 
-- positive event actions;
-- strict no-effect or blocked actions;
-- visible-effect actions;
-- repeated actions after no-progress attempts.
+The planner records public `(observation_hash, action)` edges from prior attempts, tracks visible state changes, blocked/no-effect edges, positive public events, delayed credit for actions shortly before public events, and observation-specific next-action scores. It does not use game IDs, hidden labels, source inspection, fixed action schedules, or text action advice.
 
-Regression tests were added in `tests/test_video_jepa.py`.
+Regression tests were added in `tests/test_video_jepa.py` for public no-effect edge penalties and delayed public-event predecessor credit.
 
 ## Active Hypothesis
 
-The previous attempt-memory failure was partly caused by over-penalizing actions that changed public state without immediate reward. The patch improved the causal accounting but did not improve official outcomes. The remaining bottleneck is not just event classification; the agent lacks a strong next-attempt experiment planner that can form and test multi-step state-transition hypotheses from full attempts.
+The transition graph is a correct public-evidence substrate, but the current use is still too local and scalar. It can bias a current action by known state-action edge values, but it does not yet form robust object/region hypotheses or maintain a multi-step experiment plan across states.
 
 ## Current Bottleneck
 
-Official traces still show no solved games, negligible useful events, and high repeat collapse in recurrent/JEPA variants. The strongest repeated pattern is exploration stuck/cycle plus absent or wrong goal inference.
+Official traces still show no solved games, negligible useful events, and high repeat collapse in recurrent/JEPA variants. Attempt 1 of `jepa_plus_attempt_memory` found the only useful events in the latest run; attempts 2 and 3 regressed to zero score/useful events. The strongest repeated pattern remains exploration stuck/cycle plus absent or wrong goal inference.
 
 ## Completion Status
 

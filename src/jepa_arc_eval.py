@@ -121,8 +121,8 @@ class JEPAAugmentedController:
         memory_scores = {action: 0.0 for action in legal}
         memory_distribution = {action: 1.0 / max(len(legal), 1) for action in legal}
         if self.variant.use_memory and not self.variant.null_control:
-            memory_scores = self.memory.plan_scores(legal)
-            memory_distribution = self.memory.action_distribution(legal)
+            memory_scores = self.memory.plan_scores_for_observation(observation)
+            memory_distribution = self.memory.action_distribution_from_scores(memory_scores)
             for action in legal:
                 adjusted[action] += memory_scores[action]
         if self.variant.null_control or not self.variant.use_memory:
@@ -133,6 +133,7 @@ class JEPAAugmentedController:
         self.changed_actions += int(changed)
         self.frames += 1
         self.last_base_action = base_action
+        memory_summary = self.memory.summary()
         diagnostics["jepa_policy"] = {
             "variant": self.variant.variant_id,
             "base_core_action": base_action,
@@ -145,11 +146,16 @@ class JEPAAugmentedController:
             "jepa_direct_action": False,
             "emits_text": False,
             "causal_substrate": {
-                "active": bool(self.variant.use_memory and self.variant.use_jepa_tokens and self.memory.summary().get("causal_substrate_active")),
-                "chain": self.memory.summary().get("causal_chain", []),
+                "active": bool(self.variant.use_memory and self.variant.use_jepa_tokens and memory_summary.get("causal_substrate_active")),
+                "chain": memory_summary.get("causal_chain", []),
                 "changed_next_attempt_distribution": bool(
                     self.variant.use_memory and any(abs(value) > 1.0e-9 for value in memory_scores.values())
                 ),
+            },
+            "transition_graph_planner": {
+                "active": bool(self.variant.use_memory and memory_summary.get("transition_graph", {}).get("observed_edges", 0) > 0),
+                "summary": memory_summary.get("transition_graph", {}),
+                "chain": memory_summary.get("planner_chain", []),
             },
         }
         return chosen, diagnostics

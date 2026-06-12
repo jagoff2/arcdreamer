@@ -2,6 +2,14 @@
 
 Last updated: 2026-06-12.
 
+## Transition-Graph Next-Attempt Planner
+
+- Rationale: current attempt memory changed action distributions but did not convert prior attempts into targeted next-attempt experiments over state transitions and delayed effects.
+- Code touched: `src/jepa_attempt_memory.py`, `src/jepa_arc_eval.py`, `tests/test_video_jepa.py`.
+- Mechanism: build a public `(observation_hash, action)` transition graph from attempt traces; record visible-effect, no-effect, positive-event, and delayed-event-proximity credits; score next actions from the current public observation without game IDs, hidden labels, source inspection, fixed action schedules, text advice, or external solvers.
+- Result: focused tests passed, full tests passed, generalization/leakage audits passed, official runtime still reported `NO IMPROVEMENT FOUND`. Primary `jepa_plus_attempt_memory` stayed at `0/25` solved, mean normalized score `0.0013333333333333335`, useful events `0.013333333333333334`, invalid action rate `0.0`, repeat collapse `0.8752519080124866`.
+- Status: retained as a legal public-evidence substrate, not a performance success. The next bottleneck is object/region causal inference plus sequence-level plan state.
+
 ## Strict Attempt Outcome Classification
 
 - Rationale: JEPA attempt memory counted any non-positive transition as failed, including movement or other actions that visibly changed public state but had only the official step cost.
