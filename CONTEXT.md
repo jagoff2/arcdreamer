@@ -5330,3 +5330,107 @@
   - Strongest remaining capability bottleneck is predicted component-transition planning and generic mechanic/goal inference from public observations.
 - Exact next action:
   - Implement predicted component-transition planning from the existing component graph, cache component extraction for legal-action scoring, then rerun tests, official evaluation, audits, compaction, docs, and commit.
+
+## Step 0184 - Predicted component-transition planner implemented, official result still negative
+
+- Files touched:
+  - `src\jepa_attempt_memory.py`
+  - `tests\test_video_jepa.py`
+  - `docs\jepa_attempt_report.json`
+  - `docs\generalization_audit_after_jepa.json`
+  - `docs\jepa_attempt_traces\`
+  - `RESEARCH_STATE.md`
+  - `METHODS_ATTEMPTED.md`
+  - `ARC_RESULTS.md`
+  - `FAILURE_ANALYSIS.md`
+  - `TODO_NEXT.md`
+  - `CONTEXT.md`
+- Commands run:
+  - `Get-Content -Raw GOAL.md`
+  - `Get-Content -Raw RESEARCH_STATE.md`
+  - `Get-Content -Raw METHODS_ATTEMPTED.md`
+  - `Get-Content -Raw ARC_RESULTS.md`
+  - `Get-Content -Raw FAILURE_ANALYSIS.md`
+  - `Get-Content -Raw TODO_NEXT.md`
+  - `Get-Content -Tail 180 CONTEXT.md`
+  - `git status --short --branch`
+  - `rg` over `src\jepa_attempt_memory.py`, `src\jepa_arc_eval.py`, and `tests\test_video_jepa.py`
+  - `python -m py_compile src\jepa_attempt_memory.py src\jepa_arc_eval.py`
+  - `python -m py_compile src\jepa_attempt_memory.py src\jepa_arc_eval.py tests\test_video_jepa.py`
+  - `pytest -q tests\test_video_jepa.py`
+  - `pytest -q`
+  - `python -m src.jepa_arc_eval --config external --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --jepa-checkpoint runs/video_jepa.pt --json-output docs/jepa_attempt_report.json --trace-dir docs/jepa_attempt_traces --device cuda`
+  - parsed `docs\jepa_attempt_report.json` for primary aggregate, attempt table, and gates
+  - generic anonymous-credential phrase scan over `docs`, `data`, `src`, `tests`, `frozen`, and `CONTEXT.md`
+  - `Get-ChildItem docs\jepa_attempt_traces -Recurse -File | Measure-Object Length -Sum`
+  - one-off Python compaction over `docs\jepa_attempt_traces\*.json`
+  - compact trace schema check for `next_frame`, component hypotheses, component-transition prediction summaries, and planner-chain markers
+  - `python -m src.generalization_audit --json-output docs\generalization_audit_after_jepa.json`
+  - `python -m audit.leakage_scan`
+  - final `pytest -q`
+  - `Get-FileHash -Algorithm SHA256 -LiteralPath @('src\jepa_attempt_memory.py','src\jepa_arc_eval.py','tests\test_video_jepa.py','docs\jepa_attempt_report.json','docs\generalization_audit_after_jepa.json','docs\jepa_attempt_traces\_official_jepa_worker_report.json')`
+- Observed results/errors:
+  - Implemented predicted component-transition memory and scoring:
+    - stores relation-to-mechanism predictions for `component_movement`, `component_appearance`, `component_disappearance`, `component_color_transform`, `component_split_merge`, `component_visual_transform`, `blocked_or_no_effect`, and `stable`;
+    - tracks prediction counts, values, goal-linked values, family-backed values, and contradiction counts;
+    - scores legal actions by expected productive public component transitions, goal-linked prediction evidence, family prediction support, and stale-prediction penalties;
+    - penalizes the expected prediction key after live component-grounded sequence contradiction.
+  - Implemented component scoring cache:
+    - extracts connected components once per public observation in `plan_scores_for_observation()`;
+    - reuses component-target relations across legal actions for relation scoring, transition prediction scoring, and sequence-plan support.
+  - Added focused tests:
+    - transition-prediction scoring can prefer an action even after older relation/value bonuses are cleared;
+    - live contradictions increment component-transition contradiction accounting;
+    - component scoring extracts public components once per observation.
+  - Syntax checks: passed.
+  - Focused JEPA tests after patch: `18 passed in 2.57s`.
+  - Full tests before official rerun: `99 passed in 52.53s`.
+  - Official/external JEPA rerun completed on CUDA and still reported `NO IMPROVEMENT FOUND`.
+  - Latest official JEPA primary result:
+    - `jepa_plus_attempt_memory`: solve `0.0`, score `0.0013333333333333335`, useful events `0.013333333333333334`, repeat collapse `0.8283416385334161`, invalid actions `0.0`, action entropy `0.8398187752266103`.
+    - `official_score_gain`: `0.0`.
+    - `official_useful_event_gain`: `0.0`.
+    - `score_or_useful_gain_over_core`: `false`.
+    - `attempt_2_or_3_improves_over_attempt_1`: `false`.
+    - `repeat_collapse_drop_attempt_1_to_3`: `0.0013723367224568461`.
+    - `repeat_collapse_drop_gate`: `false`.
+    - `ablation_removes_improvement`: `false`.
+    - `jepa_beats_null_on_dev`: `true`.
+    - `jepa_causal_substrate_chain`: `true`.
+    - `non_arc_drop_within_limit`: `true`.
+    - `hidden_target_canary_diff_zero`: `true`.
+    - `jepa_emits_no_text`: `true`.
+    - `no_hack_passes`: `true`.
+  - Primary attempt table:
+    - attempt 1: mean normalized score `0.004`, useful events `0.04`, repeat collapse `0.8579215341806236`, action entropy `0.7487791837206761`;
+    - attempt 2: mean normalized score `0.0`, useful events `0.0`, repeat collapse `0.7705541839614582`, action entropy `1.146861043117688`;
+    - attempt 3: mean normalized score `0.0`, useful events `0.0`, repeat collapse `0.8565491974581667`, action entropy `0.6238160988414669`.
+  - Best retained official public result remains `0/25` solved and mean normalized score `0.005` from `docs\arc_affordance_report.json` variant `state_graph_affordance`; this is not a success claim.
+  - Runtime stdout included a fresh anonymous ARC credential string. The generic phrase scan returned no matches. The credential value was not persisted in repository artifacts.
+  - JEPA trace compaction after rerun:
+    - compacted `651`
+    - skipped `1`
+    - bytes before `2372838066`
+    - bytes after `247849378`
+    - reduction `0.895547285105`
+  - Compact trace schema preserves `frame`, `next_frame`, legal actions, score/event deltas, terminal flags, compact JEPA policy diagnostics, transition-graph summaries, object causal hypotheses, component causal hypotheses, component-transition prediction summaries, object/component memory summaries, and sequence plan summaries.
+  - Generalization audit after compaction: `EXTERNAL GENERALIZATION AUDIT PROVEN`.
+  - Leakage scan: `passes=true`, no findings.
+  - Final tests after reports/audits: `99 passed in 54.98s`.
+  - Artifact hashes:
+    - `src\jepa_attempt_memory.py`: `9FFE00781F0FA592394D510F6F722082CD34AE6686A256A479B22C7CA11D5F6A`
+    - `src\jepa_arc_eval.py`: `0BBA29B725955CAEE6BFAA1EAC3E9D3573791DAB7713B5606AD52CD2A577430B`
+    - `tests\test_video_jepa.py`: `A9788C91EA1ACEA3690EA98DF6F7E937DC93BC4473C5AD5D18D962D66D112193`
+    - `docs\jepa_attempt_report.json`: `D129BACCE1322729E51675300E32860FEF87125F3B0EEEFA14DFF4D12BF99E87`
+    - `docs\generalization_audit_after_jepa.json`: `7F1F124BD5F6DED5596CED4C0C54C90EEEA1440EAB6E01930E00DB5FC3F5C916`
+    - `docs\jepa_attempt_traces\_official_jepa_worker_report.json`: `51C8C7637893710D28A16E91F7FD7C8DDF7DEE128A70C79DCADEF655924D0339`
+- Active ARC objective advanced:
+  - Implemented the documented predicted component-transition planning experiment and scoring cache.
+  - Preserved no-hack constraints and verified with official runtime, audit, leakage scan, trace compaction, and tests.
+  - Preserved negative evidence and updated persistent state docs.
+- Current blockers:
+  - No completion for the active ARC objective. Current official completion remains `0/25`; target is at least `20/25`.
+  - The predicted component-transition planner reduces repeat collapse but does not improve attempts 2 or 3 over attempt 1 on score or useful events.
+  - Strongest remaining capability bottleneck is generic transition-goal chain search and mechanic/goal inference from public component transitions.
+- Exact next action:
+  - Implement generic transition-goal chain search over the predicted component-transition graph, with public-state preconditions/postconditions and re-planning after contradiction, then rerun tests, official evaluation, audits, compaction, docs, and commit.

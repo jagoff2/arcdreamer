@@ -2,6 +2,14 @@
 
 Last updated: 2026-06-12.
 
+## Predicted Component-Transition Planning and Scoring Cache
+
+- Rationale: the component graph stored public component relations and sequence expectations, but legal action scoring still mostly rewarded historical relation/contact values. It did not explicitly score expected next component mechanisms, and component extraction was recomputed during per-action scoring.
+- Code touched: `src/jepa_attempt_memory.py`, `tests/test_video_jepa.py`.
+- Mechanism: record component relation-to-mechanism predictions for movement, appearance, disappearance, color/shape transform, split/merge, visual transform, stable, and blocked/no-effect outcomes; score legal actions by expected productive public component transitions, goal-linked transition evidence, family-backed transition evidence, and contradiction penalties; penalize stale predicted transitions after live sequence contradictions; cache connected components once per observation and reuse component-target relations across legal actions.
+- Result: syntax check passed, focused JEPA tests passed, full tests passed before and after official evaluation, generalization/leakage audits passed, trace schema remained valid after compaction, official runtime still reported `NO IMPROVEMENT FOUND`. Primary `jepa_plus_attempt_memory` stayed at `0/25` solved, mean normalized score `0.0013333333333333335`, useful events `0.013333333333333334`, invalid action rate `0.0`, repeat collapse `0.8283416385334161`.
+- Status: retained as a legal public-evidence substrate and runtime-efficiency fix, not a performance success. Attempt 2 repeat collapse improved to `0.7705541839614582`, but no later-attempt score/useful-event improvement occurred.
+
 ## Component-Level Public Causal Graph and Grounded Sequence Check
 
 - Rationale: coarse region/object memory could detect changed cells and replay prior public-event windows, but it could not distinguish component movement, component contact, stale sequence hypotheses, or specific public component transitions.

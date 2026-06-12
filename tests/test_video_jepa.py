@@ -8,6 +8,7 @@ import torch
 
 from src.arcagi3_adapter import ArcAGI3Observation, ArcAGI3StepResult
 from src.attempt_buffer import AttemptBuffer, tensors_from_attempts
+import src.jepa_attempt_memory as jepa_attempt_memory
 from src.jepa_attempt_memory import JEPAAttemptMemory
 from src.jepa_train import synthetic_attempts, train_jepa
 from src.video_jepa import VideoJEPA, jepa_loss, null_future_loss
@@ -251,6 +252,37 @@ def test_component_relation_memory_scores_component_clicks() -> None:
     assert scores["click:20:20"] > scores["wait"]
 
 
+def test_component_transition_prediction_scores_expected_public_transform() -> None:
+    before_grid = np.zeros((8, 8), dtype=np.int64)
+    before_grid[2, 2:4] = 5
+    after_grid = np.zeros((8, 8), dtype=np.int64)
+    after_grid[2, 2:4] = 6
+    actions = ("click:20:20", "click:56:56", "wait")
+    buffer = AttemptBuffer(suite_id="suite", task_id="task", variant="v", split="dev", seed=12, attempt_index=1)
+    before = _obs_grid(0, before_grid, actions)
+    after = _obs_grid(1, after_grid, actions)
+    buffer.append_transition(before, "click:20:20", ArcAGI3StepResult(after, 1.0, False, False, {"events": ["useful_click"]}))
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    entry = memory.ingest_attempt(buffer.to_record())
+
+    for prior_entry in memory.entries:
+        prior_entry.next_attempt_plan.clear()
+    memory.region_values.clear()
+    memory.family_region_values.clear()
+    memory.color_values.clear()
+    memory.component_relation_values.clear()
+    memory.family_component_values.clear()
+    memory.component_goal_relations.clear()
+    memory.component_value_scores.clear()
+    scores = memory.plan_scores_for_observation(before)
+
+    assert entry.causal_hypotheses["component_transition_prediction_count"] >= 1.0
+    assert memory.summary()["object_memory"]["component_transition_prediction_count"] >= 1
+    assert "predicted_component_transition_planner" in memory.summary()["planner_chain"]
+    assert scores["click:20:20"] > scores["click:56:56"]
+    assert scores["click:20:20"] > scores["wait"]
+
+
 def test_component_grounded_sequence_aborts_on_public_contradiction() -> None:
     before_grid = np.zeros((8, 8), dtype=np.int64)
     before_grid[2, 2] = 5
@@ -274,7 +306,29 @@ def test_component_grounded_sequence_aborts_on_public_contradiction() -> None:
     )
     summary = memory.summary()["object_memory"]
     assert summary["sequence_contradictions"] == 1
+    assert summary["component_transition_contradictions"] >= 1
     assert summary["active_sequence_remaining"] == 0
+
+
+def test_component_scoring_caches_public_components_per_observation(monkeypatch) -> None:
+    grid = np.zeros((8, 8), dtype=np.int64)
+    grid[1, 1] = 2
+    grid[5, 5] = 3
+    actions = ("click:8:8", "click:16:16", "click:40:40", "click:56:56", "wait")
+    observation = _obs_grid(0, grid, actions)
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    original = jepa_attempt_memory._frame_components
+    calls = {"count": 0}
+
+    def counted_components(frame: np.ndarray):
+        calls["count"] += 1
+        return original(frame)
+
+    monkeypatch.setattr(jepa_attempt_memory, "_frame_components", counted_components)
+    scores = memory.plan_scores_for_observation(observation)
+
+    assert set(scores) == set(actions)
+    assert calls["count"] == 1
 
 
 def test_jepa_temporal_representation_changes_next_attempt_distribution() -> None:

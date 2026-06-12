@@ -13,6 +13,26 @@ from .video_jepa import VideoJEPA
 
 POSITIVE_EVENTS = {"positive_reward", "resource_collected", "level_completed", "goal_reached", "goal_clicked", "useful_click"}
 
+PREDICTIVE_COMPONENT_MECHANISMS = (
+    "component_movement",
+    "component_appearance",
+    "component_disappearance",
+    "component_color_transform",
+    "component_split_merge",
+    "component_visual_transform",
+    "blocked_or_no_effect",
+    "stable",
+)
+PRODUCTIVE_COMPONENT_MECHANISMS = {
+    "component_movement",
+    "component_appearance",
+    "component_disappearance",
+    "component_color_transform",
+    "component_split_merge",
+    "component_visual_transform",
+}
+NON_PRODUCTIVE_COMPONENT_MECHANISMS = {"blocked_or_no_effect", "stable"}
+
 
 @dataclass
 class AttemptMemoryEntry:
@@ -64,6 +84,12 @@ class JEPAAttemptMemory:
         self.component_value_counts: dict[int, int] = {}
         self.component_value_scores: dict[int, float] = {}
         self.component_goal_relations: dict[str, float] = {}
+        self.component_prediction_counts: dict[str, int] = {}
+        self.component_prediction_values: dict[str, float] = {}
+        self.component_prediction_goal_values: dict[str, float] = {}
+        self.component_prediction_contradictions: dict[str, int] = {}
+        self.family_component_prediction_counts: dict[tuple[str, str], int] = {}
+        self.family_component_prediction_values: dict[tuple[str, str], float] = {}
         self.sequence_contradictions = 0
         self.sequence_candidates: list[dict[str, Any]] = []
         self.active_sequence: list[str] = []
@@ -96,6 +122,12 @@ class JEPAAttemptMemory:
         self.component_value_counts.clear()
         self.component_value_scores.clear()
         self.component_goal_relations.clear()
+        self.component_prediction_counts.clear()
+        self.component_prediction_values.clear()
+        self.component_prediction_goal_values.clear()
+        self.component_prediction_contradictions.clear()
+        self.family_component_prediction_counts.clear()
+        self.family_component_prediction_values.clear()
         self.sequence_contradictions = 0
         self.sequence_candidates.clear()
         self.active_sequence.clear()
@@ -217,6 +249,8 @@ class JEPAAttemptMemory:
                 "component_relation_count": float(object_summary["component_relation_count"]),
                 "component_goal_relation_count": float(object_summary["component_goal_relation_count"]),
                 "component_delayed_relation_links": float(delayed_component_links),
+                "component_transition_prediction_count": float(object_summary["component_transition_prediction_count"]),
+                "component_transition_contradictions": float(object_summary["component_transition_contradictions"]),
                 "sequence_contradictions": float(object_summary["sequence_contradictions"]),
                 "sequence_candidates_added": float(sequence_candidates_added),
                 "sequence_candidate_count": float(object_summary["sequence_candidate_count"]),
@@ -271,6 +305,15 @@ class JEPAAttemptMemory:
             return {}
         obs_key = _observation_key(observation)
         frame = _public_frame(observation)
+        component_relations: dict[str, dict[str, Any]] = {}
+        if frame is not None and frame.size:
+            components = _frame_components(frame)
+            for action in legal_actions:
+                component_relations[action] = _component_target_relation(
+                    frame,
+                    _action_target_cell(action, frame),
+                    components,
+                )
         scores = self.plan_scores(legal_actions)
         seen_here = self.state_seen_actions.get(obs_key, set()) if obs_key else set()
         stuck = self._recent_stuck()
@@ -293,10 +336,12 @@ class JEPAAttemptMemory:
                 if obs_key and seen_here and action not in seen_here:
                     scores[action] += 0.08
             scores[action] += self._object_region_score(action, frame)
-            scores[action] += self._component_relation_score(action, frame)
+            target_relation = component_relations.get(action)
+            scores[action] += self._component_relation_score(action, frame, target_relation)
+            scores[action] += self._component_transition_prediction_score(action, frame, target_relation)
         planned_action = self.sequence_plan_action(legal_actions)
         if planned_action is not None:
-            plan_support = self._sequence_plan_support(planned_action, frame)
+            plan_support = self._sequence_plan_support(planned_action, frame, component_relations.get(planned_action))
             scores[planned_action] = scores.get(planned_action, 0.0) + (0.85 * plan_support)
         return {action: float(max(min(score, 0.75), -0.75)) for action, score in scores.items()}
 
@@ -336,6 +381,8 @@ class JEPAAttemptMemory:
             "component_goal_relation_count": len(self.component_goal_relations),
             "component_failures": sum(1 for value in self.component_relation_failures.values() if value > 0),
             "component_values_seen": len(self.component_value_counts),
+            "component_transition_prediction_count": len(self.component_prediction_counts),
+            "component_transition_contradictions": sum(self.component_prediction_contradictions.values()),
             "sequence_contradictions": self.sequence_contradictions,
             "sequence_candidate_count": len(self.sequence_candidates),
             "active_sequence_length": len(self.active_sequence),
@@ -412,6 +459,7 @@ class JEPAAttemptMemory:
             )
             if not _component_expectation_matches(expected, actual) and not event_hit:
                 self.sequence_contradictions += 1
+                self._penalize_component_prediction(expected)
                 self.active_sequence = []
                 self.active_sequence_expectations = []
                 self.sequence_cursor = 0
@@ -442,6 +490,7 @@ class JEPAAttemptMemory:
                 "delayed_public_event_credit",
                 "prior_event_sequence_candidate",
                 "component_grounded_sequence_check",
+                "predicted_component_transition_planner",
                 "targeted_next_attempt_experiment",
             ],
             "transition_graph": self.transition_graph_summary(),
@@ -534,6 +583,31 @@ class JEPAAttemptMemory:
             if value_id:
                 self.component_value_counts[value_id] = self.component_value_counts.get(value_id, 0) + 1
                 self.component_value_scores[value_id] = self.component_value_scores.get(value_id, 0.0) + value
+            mechanism = str(hypothesis.get("mechanism", ""))
+            fallback_relation = str(hypothesis.get("fallback_relation", ""))
+            prediction_relations = [(relation_key, 1.0)]
+            if fallback_relation and fallback_relation != relation_key:
+                prediction_relations.append((fallback_relation, 0.55))
+            for prediction_relation, weight in prediction_relations:
+                prediction_key = _component_prediction_key(prediction_relation, mechanism)
+                weighted_value = value * weight
+                self.component_prediction_counts[prediction_key] = (
+                    self.component_prediction_counts.get(prediction_key, 0) + 1
+                )
+                self.component_prediction_values[prediction_key] = (
+                    self.component_prediction_values.get(prediction_key, 0.0) + weighted_value
+                )
+                family_prediction_key = (family, prediction_key)
+                self.family_component_prediction_counts[family_prediction_key] = (
+                    self.family_component_prediction_counts.get(family_prediction_key, 0) + 1
+                )
+                self.family_component_prediction_values[family_prediction_key] = (
+                    self.family_component_prediction_values.get(family_prediction_key, 0.0) + weighted_value
+                )
+                if bool(hypothesis.get("event_linked")) or index in delayed_credit_by_index:
+                    self.component_prediction_goal_values[prediction_key] = (
+                        self.component_prediction_goal_values.get(prediction_key, 0.0) + max(weighted_value, 0.1 * weight)
+                    )
             if str(hypothesis.get("mechanism")) == "blocked_or_no_effect":
                 self.component_relation_failures[relation_key] = self.component_relation_failures.get(relation_key, 0) + 1
             if bool(hypothesis.get("event_linked")) or index in delayed_credit_by_index:
@@ -637,12 +711,20 @@ class JEPAAttemptMemory:
                         score += 0.10 * (self.color_values.get(color, 0.0) / max(color_count, 1))
         return float(max(min(score, 0.35), -0.35))
 
-    def _component_relation_score(self, action: str, frame: np.ndarray | None) -> float:
-        if frame is None or not frame.size:
+    def _component_relation_score(
+        self,
+        action: str,
+        frame: np.ndarray | None,
+        target_relation: dict[str, Any] | None = None,
+    ) -> float:
+        if target_relation is None and (frame is None or not frame.size):
             return 0.0
         family = _action_family(action)
-        target = _action_target_cell(action, frame)
-        target_relation = _component_target_relation(frame, target)
+        if target_relation is None and frame is not None:
+            target = _action_target_cell(action, frame)
+            target_relation = _component_target_relation(frame, target)
+        if target_relation is None:
+            return 0.0
         relation_keys = _candidate_relation_keys(family, target_relation)
         score = 0.0
         for relation_key, weight in relation_keys:
@@ -665,14 +747,67 @@ class JEPAAttemptMemory:
             score += 0.05
         return float(max(min(score, 0.45), -0.45))
 
-    def _sequence_plan_support(self, action: str, frame: np.ndarray | None) -> float:
+    def _component_transition_prediction_score(
+        self,
+        action: str,
+        frame: np.ndarray | None,
+        target_relation: dict[str, Any] | None = None,
+    ) -> float:
+        if target_relation is None and (frame is None or not frame.size):
+            return 0.0
+        family = _action_family(action)
+        if target_relation is None and frame is not None:
+            target_relation = _component_target_relation(frame, _action_target_cell(action, frame))
+        if target_relation is None:
+            return 0.0
+        productive_score = 0.0
+        nonproductive_penalty = 0.0
+        for relation_key, relation_weight in _candidate_relation_keys(family, target_relation):
+            for mechanism in PREDICTIVE_COMPONENT_MECHANISMS:
+                prediction_key = _component_prediction_key(relation_key, mechanism)
+                count = self.component_prediction_counts.get(prediction_key, 0)
+                if not count:
+                    continue
+                mean_value = self.component_prediction_values.get(prediction_key, 0.0) / max(count, 1)
+                confidence = min(1.0, math.log1p(float(count)) / math.log(5.0))
+                contradictions = float(self.component_prediction_contradictions.get(prediction_key, 0))
+                contradiction_rate = contradictions / max(float(count) + contradictions, 1.0)
+                goal_value = self.component_prediction_goal_values.get(prediction_key, 0.0) / max(count, 1)
+                family_key = (family, prediction_key)
+                family_count = self.family_component_prediction_counts.get(family_key, 0)
+                family_mean = (
+                    self.family_component_prediction_values.get(family_key, 0.0) / max(family_count, 1)
+                    if family_count
+                    else 0.0
+                )
+                weighted_confidence = relation_weight * confidence * max(0.0, 1.0 - contradiction_rate)
+                if mechanism in PRODUCTIVE_COMPONENT_MECHANISMS:
+                    candidate_score = weighted_confidence * (
+                        0.22 * max(mean_value, 0.0)
+                        + 0.16 * max(goal_value, 0.0)
+                        + 0.08 * max(family_mean, 0.0)
+                    )
+                    productive_score = max(productive_score, candidate_score)
+                elif mechanism in NON_PRODUCTIVE_COMPONENT_MECHANISMS:
+                    penalty_mean = max(-mean_value, 0.0) + 0.18 * max(1.0 - max(mean_value, 0.0), 0.0)
+                    nonproductive_penalty += relation_weight * confidence * penalty_mean * 0.20
+        score = productive_score - min(nonproductive_penalty, 0.28)
+        return float(max(min(score, 0.38), -0.32))
+
+    def _sequence_plan_support(
+        self,
+        action: str,
+        frame: np.ndarray | None,
+        target_relation: dict[str, Any] | None = None,
+    ) -> float:
         if not self.active_sequence_expectations or self.sequence_cursor >= len(self.active_sequence_expectations):
             return 1.0
         expected = self.active_sequence_expectations[self.sequence_cursor]
         relation_key = str(expected.get("relation_key", ""))
         if not relation_key or frame is None or not frame.size:
             return 1.0
-        target_relation = _component_target_relation(frame, _action_target_cell(action, frame))
+        if target_relation is None:
+            target_relation = _component_target_relation(frame, _action_target_cell(action, frame))
         current_keys = {key for key, _ in _candidate_relation_keys(_action_family(action), target_relation)}
         if relation_key in current_keys or str(expected.get("fallback_relation", "")) in current_keys:
             return 1.0
@@ -680,6 +815,19 @@ class JEPAAttemptMemory:
         if expected_value and target_relation.get("value") == expected_value:
             return 0.85
         return 0.35
+
+    def _penalize_component_prediction(self, expected: dict[str, Any]) -> None:
+        mechanism = str(expected.get("mechanism", ""))
+        if not mechanism:
+            return
+        relation_keys = [str(expected.get("relation_key", "")), str(expected.get("fallback_relation", ""))]
+        for relation_key in relation_keys:
+            if not relation_key:
+                continue
+            prediction_key = _component_prediction_key(relation_key, mechanism)
+            self.component_prediction_contradictions[prediction_key] = (
+                self.component_prediction_contradictions.get(prediction_key, 0) + 1
+            )
 
     def _recent_stuck(self) -> bool:
         if not self.entries:
@@ -865,15 +1013,15 @@ def _component_hypothesis_from_frames(
     if before.size == 0 or after.size == 0:
         return None
     family = _action_family(action)
+    before_components = _frame_components(before)
+    after_components = _frame_components(after)
     target = _action_target_cell(action, before)
-    target_relation = _component_target_relation(before, target)
+    target_relation = _component_target_relation(before, target, before_components)
     relation_keys = _candidate_relation_keys(family, target_relation)
     relation_key = relation_keys[0][0] if relation_keys else f"{family}:no_target"
     fallback_relation = relation_keys[1][0] if len(relation_keys) > 1 else relation_key
     changed_mask = before != after
     changed_pixels = int(np.count_nonzero(changed_mask))
-    before_components = _frame_components(before)
-    after_components = _frame_components(after)
     matches = _match_components(before_components, after_components)
     matched_before = set(matches)
     matched_after = set(matches.values())
@@ -1070,8 +1218,12 @@ def _action_target_cell(action: str, frame: np.ndarray) -> tuple[int, int] | Non
     return _click_cell(action, frame.shape)
 
 
-def _component_target_relation(frame: np.ndarray, target: tuple[int, int] | None) -> dict[str, Any]:
-    components = _frame_components(frame)
+def _component_target_relation(
+    frame: np.ndarray,
+    target: tuple[int, int] | None,
+    components: list[_FrameComponent] | None = None,
+) -> dict[str, Any]:
+    components = _frame_components(frame) if components is None else components
     if target is None:
         return {"kind": "no_target", "value": 0, "area_bucket": 0, "component_count": len(components)}
     y, x = target
@@ -1142,6 +1294,10 @@ def _candidate_relation_keys(family: str, relation: dict[str, Any]) -> list[tupl
     keys.append((f"{family}:{kind}", 0.45))
     keys.append((f"*:{kind}", 0.28))
     return keys
+
+
+def _component_prediction_key(relation_key: str, mechanism: str) -> str:
+    return f"{str(relation_key)}=>{str(mechanism)}"
 
 
 def _component_hypothesis_value(hypothesis: dict[str, Any]) -> float:
