@@ -93,6 +93,7 @@ class JEPAAugmentedController:
         self.changed_actions = 0
         self.frames = 0
         self.last_base_action: str | None = None
+        self.last_observation: Any | None = None
 
     @property
     def name(self) -> str:
@@ -104,6 +105,7 @@ class JEPAAugmentedController:
         self.changed_actions = 0
         self.frames = 0
         self.last_base_action = None
+        self.last_observation = None
 
     def reset_attempt(self, seed: int) -> None:
         self.base.reset(seed)
@@ -131,11 +133,11 @@ class JEPAAugmentedController:
             chosen = base_action
         else:
             chosen = max(legal, key=lambda action: (adjusted.get(action, -1.0e9), -legal.index(action)))
-            self.memory.advance_sequence(chosen)
         changed = chosen != base_action
         self.changed_actions += int(changed)
         self.frames += 1
         self.last_base_action = base_action
+        self.last_observation = observation
         memory_summary = self.memory.summary()
         diagnostics["jepa_policy"] = {
             "variant": self.variant.variant_id,
@@ -165,6 +167,8 @@ class JEPAAugmentedController:
 
     def observe_transition(self, action: str, result: Any) -> None:
         self.base.observe_transition(action, result)
+        if self.variant.use_memory and not self.variant.null_control and self.last_observation is not None:
+            self.memory.observe_live_transition(self.last_observation, action, result)
 
     def finish_attempt(self, record: AttemptRecord) -> None:
         if self.variant.use_memory:

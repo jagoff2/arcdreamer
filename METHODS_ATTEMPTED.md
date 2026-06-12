@@ -2,6 +2,14 @@
 
 Last updated: 2026-06-12.
 
+## Component-Level Public Causal Graph and Grounded Sequence Check
+
+- Rationale: coarse region/object memory could detect changed cells and replay prior public-event windows, but it could not distinguish component movement, component contact, stale sequence hypotheses, or specific public component transitions.
+- Code touched: `src/jepa_attempt_memory.py`, `src/jepa_arc_eval.py`, `tests/test_video_jepa.py`.
+- Mechanism: extract connected components from public pre-action and post-action frames; infer movement, appearance, disappearance, color/shape transforms, and blocked/no-effect transitions; link action target cells and action families to component relations; record component-goal links and delayed public-event credit; attach expected component transitions to sequence candidates; abort active sequence replay when live public frame diffs contradict the expected component change.
+- Result: syntax check passed, focused JEPA tests passed, full tests passed before and after audit/compaction, generalization/leakage audits passed, official runtime still reported `NO IMPROVEMENT FOUND`. Primary `jepa_plus_attempt_memory` stayed at `0/25` solved, mean normalized score `0.0013333333333333335`, useful events `0.013333333333333334`, invalid action rate `0.0`, repeat collapse `0.8470217966721809`.
+- Status: retained as a legal public-evidence substrate, not a performance success. Attempt 2 reduced repeat collapse to `0.7991510418849557`, but no later-attempt score/useful-event improvement occurred.
+
 ## Region/Object Causal Hypotheses and Sequence Candidate Planner
 
 - Rationale: transition-graph memory was public and causal, but too local. It scored individual state-action edges without identifying changed objects/regions or preserving a compact multi-step experiment across attempts.

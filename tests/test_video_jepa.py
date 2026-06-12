@@ -212,6 +212,71 @@ def test_sequence_plan_replays_prior_public_event_window_when_legal() -> None:
     assert second_scores["up"] > second_scores["wait"]
 
 
+def test_component_causal_graph_detects_public_component_movement() -> None:
+    before_grid = np.zeros((8, 8), dtype=np.int64)
+    before_grid[2, 2:4] = 4
+    after_grid = np.zeros((8, 8), dtype=np.int64)
+    after_grid[2, 3:5] = 4
+    buffer = AttemptBuffer(suite_id="suite", task_id="task", variant="v", split="dev", seed=9, attempt_index=1)
+    before = _obs_grid(0, before_grid, ("right", "left", "wait"))
+    after = _obs_grid(1, after_grid, ("right", "left", "wait"))
+    buffer.append_transition(before, "right", ArcAGI3StepResult(after, -0.001, False, False, {"events": ["move"]}))
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    entry = memory.ingest_attempt(buffer.to_record())
+
+    assert entry.component_causal_hypotheses
+    assert entry.component_causal_hypotheses[0]["mechanism"] == "component_movement"
+    assert entry.component_causal_hypotheses[0]["moved_components"][0]["value"] == 4
+    assert entry.causal_hypotheses["component_relation_count"] >= 1.0
+    assert memory.summary()["object_memory"]["component_values_seen"] == 1
+
+
+def test_component_relation_memory_scores_component_clicks() -> None:
+    before_grid = np.zeros((8, 8), dtype=np.int64)
+    before_grid[2, 2:4] = 5
+    after_grid = before_grid.copy()
+    after_grid[3, 2:4] = 6
+    actions = ("click:20:20", "click:56:56", "wait")
+    buffer = AttemptBuffer(suite_id="suite", task_id="task", variant="v", split="dev", seed=10, attempt_index=1)
+    before = _obs_grid(0, before_grid, actions)
+    after = _obs_grid(1, after_grid, actions)
+    buffer.append_transition(before, "click:20:20", ArcAGI3StepResult(after, 1.0, False, False, {"events": ["useful_click"]}))
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    entry = memory.ingest_attempt(buffer.to_record())
+    scores = memory.plan_scores_for_observation(before)
+
+    assert entry.component_causal_hypotheses[0]["target_relation"]["kind"] == "on_component"
+    assert entry.causal_hypotheses["component_goal_relation_count"] >= 1.0
+    assert scores["click:20:20"] > scores["click:56:56"]
+    assert scores["click:20:20"] > scores["wait"]
+
+
+def test_component_grounded_sequence_aborts_on_public_contradiction() -> None:
+    before_grid = np.zeros((8, 8), dtype=np.int64)
+    before_grid[2, 2] = 5
+    event_grid = before_grid.copy()
+    event_grid[2, 3] = 6
+    actions = ("click:20:20", "click:56:56", "wait")
+    buffer = AttemptBuffer(suite_id="suite", task_id="task", variant="v", split="dev", seed=11, attempt_index=1)
+    before = _obs_grid(0, before_grid, actions)
+    event_after = _obs_grid(1, event_grid, actions)
+    buffer.append_transition(before, "click:20:20", ArcAGI3StepResult(event_after, 1.0, False, False, {"events": ["useful_click"]}))
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    memory.ingest_attempt(buffer.to_record())
+    memory.start_attempt()
+
+    assert memory.sequence_plan_action(actions) == "click:20:20"
+    no_change = _obs_grid(1, before_grid.copy(), actions)
+    memory.observe_live_transition(
+        before,
+        "click:20:20",
+        ArcAGI3StepResult(no_change, -0.001, False, False, {"events": ["no_effect"]}),
+    )
+    summary = memory.summary()["object_memory"]
+    assert summary["sequence_contradictions"] == 1
+    assert summary["active_sequence_remaining"] == 0
+
+
 def test_jepa_temporal_representation_changes_next_attempt_distribution() -> None:
     records = synthetic_attempts(8, seed=50)
     model = VideoJEPA()

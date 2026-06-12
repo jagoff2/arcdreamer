@@ -5228,3 +5228,105 @@
   - Strongest remaining bottleneck is component-level mechanic/goal inference and sequence grounding from public observations.
 - Exact next action:
   - Implement component-level public causal graphs from frame diffs and feed supported component hypotheses into sequence-level plans with contradiction handling.
+
+## Step 0183 - Component-level public causal graph implemented, official result still negative
+
+- Files touched:
+  - `src\jepa_attempt_memory.py`
+  - `src\jepa_arc_eval.py`
+  - `tests\test_video_jepa.py`
+  - `docs\jepa_attempt_report.json`
+  - `docs\generalization_audit_after_jepa.json`
+  - `docs\jepa_attempt_traces\`
+  - `RESEARCH_STATE.md`
+  - `METHODS_ATTEMPTED.md`
+  - `ARC_RESULTS.md`
+  - `FAILURE_ANALYSIS.md`
+  - `TODO_NEXT.md`
+  - `CONTEXT.md`
+- Commands run:
+  - `Get-Content -Raw GOAL.md`
+  - `Get-Content -Raw RESEARCH_STATE.md`
+  - `Get-Content -Raw METHODS_ATTEMPTED.md`
+  - `Get-Content -Raw ARC_RESULTS.md`
+  - `Get-Content -Raw FAILURE_ANALYSIS.md`
+  - `Get-Content -Raw TODO_NEXT.md`
+  - `Get-Content -Raw CONTEXT.md`
+  - `python -m py_compile src\jepa_attempt_memory.py src\jepa_arc_eval.py`
+  - `pytest -q tests\test_video_jepa.py`
+  - `pytest -q`
+  - `python -m src.jepa_arc_eval --config external --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --jepa-checkpoint runs/video_jepa.pt --json-output docs/jepa_attempt_report.json --trace-dir docs/jepa_attempt_traces --device cuda`
+  - generic anonymous-credential phrase scan over `docs`, `data`, `src`, `tests`, `frozen`, and `CONTEXT.md`
+  - one-off exact-token scan over repository artifacts and `CONTEXT.md` without printing the token value
+  - `Get-ChildItem docs\jepa_attempt_traces -Recurse -File | Measure-Object Length -Sum`
+  - one-off Python compaction over `docs\jepa_attempt_traces\*.json`
+  - compact trace schema check for `next_frame`, component hypotheses, component summaries, and planner-chain markers
+  - `python -m src.generalization_audit --json-output docs/generalization_audit_after_jepa.json`
+  - `python -m audit.leakage_scan`
+  - final `pytest -q`
+  - `Get-FileHash -Algorithm SHA256 -LiteralPath @('src\jepa_attempt_memory.py','src\jepa_arc_eval.py','tests\test_video_jepa.py','docs\jepa_attempt_report.json','docs\generalization_audit_after_jepa.json','docs\jepa_attempt_traces\_official_jepa_worker_report.json')`
+- Observed results/errors:
+  - Implemented component-level public causal memory:
+    - extracts public connected components from pre-action and post-action frames;
+    - detects component movement, appearance, disappearance, color/shape transforms, and blocked/no-effect transitions;
+    - tracks component-target relations, component-family values, component-goal links, delayed public-event component links, component failures, and component value scores;
+    - records component causal hypotheses in compact attempt memory entries and exposes component summaries in object memory summaries.
+  - Wired live component-grounded sequence checks:
+    - sequence candidates now carry linked component relations and expected component changes;
+    - `JEPAAugmentedController` preserves the last public observation and calls `observe_live_transition()` after each action;
+    - active sequence replay aborts when the observed public component transition contradicts the expected component change.
+  - Fixed an overgeneralization in background click relation keys by including precise clicked cell relations for background targets.
+  - Added focused tests for public component movement detection, component click scoring, and sequence abort on public contradiction.
+  - Syntax check: passed.
+  - Focused JEPA tests after patch: `16 passed in 2.50s`.
+  - Full tests before official rerun: `97 passed in 54.66s`.
+  - Official/external JEPA rerun completed on CUDA and still reported `NO IMPROVEMENT FOUND`.
+  - Latest official JEPA primary result:
+    - `jepa_plus_attempt_memory`: solve `0.0`, score `0.0013333333333333335`, useful events `0.013333333333333334`, repeat collapse `0.8470217966721809`, invalid actions `0.0`.
+    - `official_score_gain`: `0.0`.
+    - `official_useful_event_gain`: `0.0`.
+    - `score_or_useful_gain_over_core`: `false`.
+    - `attempt_2_or_3_improves_over_attempt_1`: `false`.
+    - `repeat_collapse_drop_attempt_1_to_3`: `-0.02607127977033996`.
+    - `repeat_collapse_drop_gate`: `false`.
+    - `ablation_removes_improvement`: `false`.
+    - `jepa_beats_null_on_dev`: `true`.
+    - `jepa_causal_substrate_chain`: `true`.
+    - `non_arc_drop_within_limit`: `true`.
+    - `hidden_target_canary_diff_zero`: `true`.
+    - `jepa_emits_no_text`: `true`.
+    - `no_hack_passes`: `true`.
+  - Primary attempt table:
+    - attempt 1: mean normalized score `0.004`, useful events `0.04`, repeat collapse `0.8579215341806236`, action entropy `0.7487791837206761`;
+    - attempt 2: mean normalized score `0.0`, useful events `0.0`, repeat collapse `0.7991510418849557`, action entropy `1.0152907719333566`;
+    - attempt 3: mean normalized score `0.0`, useful events `0.0`, repeat collapse `0.8839928139509635`, action entropy `0.53837363482775`.
+  - Best retained official public result remains `0/25` solved and mean normalized score `0.005` from `docs\arc_affordance_report.json` variant `state_graph_affordance`; this is not a success claim.
+  - Runtime stdout included a fresh anonymous ARC credential string. The generic phrase scan returned no matches, and the one-off exact-token scan returned `hits=0`. The credential value was not persisted.
+  - JEPA trace compaction after rerun:
+    - compacted `651`
+    - skipped `1`
+    - bytes before `2368977159`
+    - bytes after `264835587`
+    - reduction `0.888206779034`
+  - Compact trace schema preserves `frame`, `next_frame`, legal actions, score/event deltas, terminal flags, compact JEPA policy diagnostics, transition-graph summaries, object causal hypotheses, component causal hypotheses, object/component memory summaries, and sequence plan summaries.
+  - Generalization audit after compaction: `EXTERNAL GENERALIZATION AUDIT PROVEN`.
+  - Leakage scan: `passes=true`, no findings.
+  - Final tests after reports/audits: `97 passed in 54.84s`.
+  - Artifact hashes:
+    - `src\jepa_attempt_memory.py`: `3321CE66FD323CBA16A53E225B3A02F8E185BE634220699EB752FE4F12046F80`
+    - `src\jepa_arc_eval.py`: `0BBA29B725955CAEE6BFAA1EAC3E9D3573791DAB7713B5606AD52CD2A577430B`
+    - `tests\test_video_jepa.py`: `8BB30E2A9AE2D98C74AB7850A2BD2192C10D613BF353E1B3D40A98B64F41544C`
+    - `docs\jepa_attempt_report.json`: `2D4A9DC42443F900581C8E0CE2B9C07F53BB11F830327EFFC9CC07BEBEA5ED57`
+    - `docs\generalization_audit_after_jepa.json`: `46ED10EE8D9F369FB12A27F61B1A2CD7B5557C4EBEC3259E8A295DC6ED58C928`
+    - `docs\jepa_attempt_traces\_official_jepa_worker_report.json`: `9F7EFADDEA9C59DE0FD2EE657759BE879684166BB94F563095E574636E45F222`
+- Active ARC objective advanced:
+  - Implemented the documented component-level public causal graph experiment with live contradiction handling.
+  - Preserved no-hack constraints and verified with official runtime, audit, leakage scan, trace compaction, and tests.
+  - Preserved negative evidence and updated persistent state docs.
+- Current blockers:
+  - No Terminal Outcome A for the active ARC objective. Current official completion remains `0/25`; target is at least `20/25`.
+  - The component-level causal planner does not improve attempts 2 or 3 over attempt 1 on score or useful events.
+  - Component extraction inside per-action scoring is slow and should be cached before heavier official runs.
+  - Strongest remaining capability bottleneck is predicted component-transition planning and generic mechanic/goal inference from public observations.
+- Exact next action:
+  - Implement predicted component-transition planning from the existing component graph, cache component extraction for legal-action scoring, then rerun tests, official evaluation, audits, compaction, docs, and commit.

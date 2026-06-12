@@ -26,6 +26,7 @@ class AttemptMemoryEntry:
     next_attempt_plan: dict[str, float]
     transition_graph_summary: dict[str, Any] = field(default_factory=dict)
     object_causal_hypotheses: list[dict[str, Any]] = field(default_factory=list)
+    component_causal_hypotheses: list[dict[str, Any]] = field(default_factory=list)
     sequence_plan_summary: dict[str, Any] = field(default_factory=dict)
     jepa_action_evidence: dict[str, dict[str, float]] = field(default_factory=dict)
     action_distribution_delta: dict[str, float] = field(default_factory=dict)
@@ -55,8 +56,18 @@ class JEPAAttemptMemory:
         self.family_region_values: dict[tuple[str, int, int], float] = {}
         self.color_counts: dict[int, int] = {}
         self.color_values: dict[int, float] = {}
+        self.component_relation_counts: dict[str, int] = {}
+        self.component_relation_values: dict[str, float] = {}
+        self.component_relation_failures: dict[str, int] = {}
+        self.family_component_counts: dict[tuple[str, str], int] = {}
+        self.family_component_values: dict[tuple[str, str], float] = {}
+        self.component_value_counts: dict[int, int] = {}
+        self.component_value_scores: dict[int, float] = {}
+        self.component_goal_relations: dict[str, float] = {}
+        self.sequence_contradictions = 0
         self.sequence_candidates: list[dict[str, Any]] = []
         self.active_sequence: list[str] = []
+        self.active_sequence_expectations: list[dict[str, Any]] = []
         self.sequence_cursor = 0
         self.active_sequence_source = ""
 
@@ -77,8 +88,18 @@ class JEPAAttemptMemory:
         self.family_region_values.clear()
         self.color_counts.clear()
         self.color_values.clear()
+        self.component_relation_counts.clear()
+        self.component_relation_values.clear()
+        self.component_relation_failures.clear()
+        self.family_component_counts.clear()
+        self.family_component_values.clear()
+        self.component_value_counts.clear()
+        self.component_value_scores.clear()
+        self.component_goal_relations.clear()
+        self.sequence_contradictions = 0
         self.sequence_candidates.clear()
         self.active_sequence.clear()
+        self.active_sequence_expectations.clear()
         self.sequence_cursor = 0
         self.active_sequence_source = ""
 
@@ -125,6 +146,7 @@ class JEPAAttemptMemory:
                 visible_effect += 1
                 effects[action] = effects.get(action, 0) + 1
         object_hypotheses = _object_hypotheses_from_record(record, transition_outcomes)
+        component_hypotheses = _component_hypotheses_from_record(record, transition_outcomes)
         token_mean: list[float] = []
         jepa_action_evidence: dict[str, dict[str, float]] = {}
         if model is not None and self.use_jepa_tokens and record.steps:
@@ -174,7 +196,13 @@ class JEPAAttemptMemory:
                 next_plan[action] = next_plan.get(action, 0.0) - min(float(fraction), 1.0) * 0.45
         delayed_credit_edges = self._update_transition_graph(transition_outcomes)
         delayed_region_links = self._update_object_memory(object_hypotheses, transition_outcomes)
-        sequence_candidates_added = self._update_sequence_candidates(record, transition_outcomes, object_hypotheses)
+        delayed_component_links = self._update_component_memory(component_hypotheses, transition_outcomes)
+        sequence_candidates_added = self._update_sequence_candidates(
+            record,
+            transition_outcomes,
+            object_hypotheses,
+            component_hypotheses,
+        )
         graph_summary = self.transition_graph_summary()
         object_summary = self.object_memory_summary()
         causal.update(
@@ -186,6 +214,10 @@ class JEPAAttemptMemory:
                 "object_changed_region_count": float(object_summary["observed_regions"]),
                 "object_changed_color_count": float(object_summary["observed_colors"]),
                 "object_delayed_region_links": float(delayed_region_links),
+                "component_relation_count": float(object_summary["component_relation_count"]),
+                "component_goal_relation_count": float(object_summary["component_goal_relation_count"]),
+                "component_delayed_relation_links": float(delayed_component_links),
+                "sequence_contradictions": float(object_summary["sequence_contradictions"]),
                 "sequence_candidates_added": float(sequence_candidates_added),
                 "sequence_candidate_count": float(object_summary["sequence_candidate_count"]),
             }
@@ -213,6 +245,7 @@ class JEPAAttemptMemory:
             next_attempt_plan=next_plan,
             transition_graph_summary=graph_summary,
             object_causal_hypotheses=object_hypotheses[:12],
+            component_causal_hypotheses=component_hypotheses[:12],
             sequence_plan_summary=object_summary,
             jepa_action_evidence=jepa_action_evidence,
             action_distribution_delta=action_distribution_delta,
@@ -260,9 +293,11 @@ class JEPAAttemptMemory:
                 if obs_key and seen_here and action not in seen_here:
                     scores[action] += 0.08
             scores[action] += self._object_region_score(action, frame)
+            scores[action] += self._component_relation_score(action, frame)
         planned_action = self.sequence_plan_action(legal_actions)
         if planned_action is not None:
-            scores[planned_action] = scores.get(planned_action, 0.0) + 0.85
+            plan_support = self._sequence_plan_support(planned_action, frame)
+            scores[planned_action] = scores.get(planned_action, 0.0) + (0.85 * plan_support)
         return {action: float(max(min(score, 0.75), -0.75)) for action, score in scores.items()}
 
     def action_distribution(self, legal_actions: tuple[str, ...] | list[str]) -> dict[str, float]:
@@ -297,6 +332,11 @@ class JEPAAttemptMemory:
             "observed_regions": len(self.region_counts),
             "observed_colors": len(self.color_counts),
             "region_failures": sum(1 for value in self.region_failures.values() if value > 0),
+            "component_relation_count": len(self.component_relation_counts),
+            "component_goal_relation_count": len(self.component_goal_relations),
+            "component_failures": sum(1 for value in self.component_relation_failures.values() if value > 0),
+            "component_values_seen": len(self.component_value_counts),
+            "sequence_contradictions": self.sequence_contradictions,
             "sequence_candidate_count": len(self.sequence_candidates),
             "active_sequence_length": len(self.active_sequence),
             "active_sequence_remaining": active_remaining,
@@ -305,6 +345,7 @@ class JEPAAttemptMemory:
 
     def start_attempt(self) -> None:
         self.active_sequence = []
+        self.active_sequence_expectations = []
         self.sequence_cursor = 0
         self.active_sequence_source = ""
         candidates = sorted(
@@ -316,6 +357,12 @@ class JEPAAttemptMemory:
             actions = [str(action) for action in candidate.get("actions", []) if str(action)]
             if actions:
                 self.active_sequence = actions[:12]
+                expectations = candidate.get("component_expectations", [])
+                self.active_sequence_expectations = [
+                    item if isinstance(item, dict) else {} for item in list(expectations)[: len(self.active_sequence)]
+                ]
+                while len(self.active_sequence_expectations) < len(self.active_sequence):
+                    self.active_sequence_expectations.append({})
                 self.active_sequence_source = str(candidate.get("source", "prior_attempt_event_window"))
                 return
 
@@ -336,6 +383,42 @@ class JEPAAttemptMemory:
         if str(chosen_action) == self.active_sequence[self.sequence_cursor]:
             self.sequence_cursor += 1
 
+    def observe_live_transition(self, before_observation: Any, action: str, result: Any) -> None:
+        if not self.active_sequence or self.sequence_cursor >= len(self.active_sequence):
+            return
+        action = str(action)
+        expected_action = self.active_sequence[self.sequence_cursor]
+        if action != expected_action:
+            return
+        expected = (
+            self.active_sequence_expectations[self.sequence_cursor]
+            if self.sequence_cursor < len(self.active_sequence_expectations)
+            else {}
+        )
+        before = _public_frame(before_observation)
+        after = _public_frame(getattr(result, "observation", None))
+        event_hit = bool(POSITIVE_EVENTS.intersection(getattr(result, "info", {}).get("events", []))) or float(
+            getattr(result, "reward", 0.0)
+        ) > 0.0
+        if expected and before is not None and after is not None:
+            actual = _component_hypothesis_from_frames(
+                before=before,
+                after=after,
+                action=action,
+                step_index=-1,
+                event_hit=event_hit,
+                score_delta=float(getattr(result, "reward", 0.0)),
+                no_effect=not bool(np.any(before != after)),
+            )
+            if not _component_expectation_matches(expected, actual) and not event_hit:
+                self.sequence_contradictions += 1
+                self.active_sequence = []
+                self.active_sequence_expectations = []
+                self.sequence_cursor = 0
+                self.active_sequence_source = "aborted_by_public_component_contradiction"
+                return
+        self.advance_sequence(action)
+
     def summary(self) -> dict[str, Any]:
         return {
             "entry_count": len(self.entries),
@@ -355,8 +438,10 @@ class JEPAAttemptMemory:
                 "state_action_transition_edge",
                 "public_frame_region_diff",
                 "object_causal_hypothesis",
+                "public_component_causal_graph",
                 "delayed_public_event_credit",
                 "prior_event_sequence_candidate",
+                "component_grounded_sequence_check",
                 "targeted_next_attempt_experiment",
             ],
             "transition_graph": self.transition_graph_summary(),
@@ -423,14 +508,52 @@ class JEPAAttemptMemory:
                 self.color_values[color_id] = self.color_values.get(color_id, 0.0) + value
         return len(delayed_links)
 
+    def _update_component_memory(self, hypotheses: list[dict[str, Any]], outcomes: list[dict[str, Any]]) -> int:
+        event_indices = [index for index, outcome in enumerate(outcomes) if outcome["event_hit"]]
+        delayed_links: set[str] = set()
+        delayed_credit_by_index: dict[int, float] = {}
+        for event_index in event_indices:
+            for prior_index in range(max(0, event_index - 10), event_index):
+                distance = event_index - prior_index
+                delayed_credit_by_index[prior_index] = delayed_credit_by_index.get(prior_index, 0.0) + 0.44 / float(
+                    distance + 1
+                )
+        for hypothesis in hypotheses:
+            relation_key = str(hypothesis.get("relation_key", ""))
+            if not relation_key:
+                continue
+            index = int(hypothesis.get("step_index", -1))
+            value = _component_hypothesis_value(hypothesis) + delayed_credit_by_index.get(index, 0.0)
+            family = str(hypothesis.get("action_family", "other"))
+            self.component_relation_counts[relation_key] = self.component_relation_counts.get(relation_key, 0) + 1
+            self.component_relation_values[relation_key] = self.component_relation_values.get(relation_key, 0.0) + value
+            family_key = (family, relation_key)
+            self.family_component_counts[family_key] = self.family_component_counts.get(family_key, 0) + 1
+            self.family_component_values[family_key] = self.family_component_values.get(family_key, 0.0) + value
+            value_id = int(hypothesis.get("target_value", 0) or hypothesis.get("component_value", 0) or 0)
+            if value_id:
+                self.component_value_counts[value_id] = self.component_value_counts.get(value_id, 0) + 1
+                self.component_value_scores[value_id] = self.component_value_scores.get(value_id, 0.0) + value
+            if str(hypothesis.get("mechanism")) == "blocked_or_no_effect":
+                self.component_relation_failures[relation_key] = self.component_relation_failures.get(relation_key, 0) + 1
+            if bool(hypothesis.get("event_linked")) or index in delayed_credit_by_index:
+                self.component_goal_relations[relation_key] = self.component_goal_relations.get(relation_key, 0.0) + max(
+                    value,
+                    0.1,
+                )
+                delayed_links.add(relation_key)
+        return len(delayed_links)
+
     def _update_sequence_candidates(
         self,
         record: AttemptRecord,
         outcomes: list[dict[str, Any]],
         hypotheses: list[dict[str, Any]],
+        component_hypotheses: list[dict[str, Any]],
     ) -> int:
         added = 0
         hypothesis_by_index = {int(item.get("step_index", -1)): item for item in hypotheses}
+        component_by_index = {int(item.get("step_index", -1)): item for item in component_hypotheses}
         existing = {tuple(str(action) for action in item.get("actions", [])) for item in self.sequence_candidates}
         for event_index, outcome in enumerate(outcomes):
             if not outcome["event_hit"]:
@@ -448,7 +571,20 @@ class JEPAAttemptMemory:
                 for index in range(start, event_index + 1)
                 if index in hypothesis_by_index and _hypothesis_region(hypothesis_by_index[index]) is not None
             ]
-            value = 1.0 + max(float(record.steps[event_index].score_delta), 0.0) + 0.08 * len(linked)
+            linked_components = [
+                component_by_index[index]
+                for index in range(start, event_index + 1)
+                if index in component_by_index and str(component_by_index[index].get("relation_key", ""))
+            ]
+            component_expectations = [
+                _sequence_component_expectation(component_by_index.get(index, {})) for index in range(start, event_index + 1)
+            ]
+            value = (
+                1.0
+                + max(float(record.steps[event_index].score_delta), 0.0)
+                + 0.08 * len(linked)
+                + 0.10 * len(linked_components)
+            )
             self.sequence_candidates.append(
                 {
                     "source": "positive_public_event_window",
@@ -458,6 +594,8 @@ class JEPAAttemptMemory:
                     "event_index": event_index,
                     "linked_regions": [_hypothesis_region(item) for item in linked[:4]],
                     "linked_mechanisms": [str(item.get("mechanism")) for item in linked[:4]],
+                    "linked_component_relations": [str(item.get("relation_key")) for item in linked_components[:6]],
+                    "component_expectations": component_expectations[: len(actions)],
                 }
             )
             existing.add(key)
@@ -498,6 +636,50 @@ class JEPAAttemptMemory:
                     if color and color_count:
                         score += 0.10 * (self.color_values.get(color, 0.0) / max(color_count, 1))
         return float(max(min(score, 0.35), -0.35))
+
+    def _component_relation_score(self, action: str, frame: np.ndarray | None) -> float:
+        if frame is None or not frame.size:
+            return 0.0
+        family = _action_family(action)
+        target = _action_target_cell(action, frame)
+        target_relation = _component_target_relation(frame, target)
+        relation_keys = _candidate_relation_keys(family, target_relation)
+        score = 0.0
+        for relation_key, weight in relation_keys:
+            count = self.component_relation_counts.get(relation_key, 0)
+            if count:
+                score += weight * 0.26 * (self.component_relation_values.get(relation_key, 0.0) / max(count, 1))
+            family_key = (family, relation_key)
+            family_count = self.family_component_counts.get(family_key, 0)
+            if family_count:
+                score += weight * 0.18 * (self.family_component_values.get(family_key, 0.0) / max(family_count, 1))
+            if relation_key in self.component_goal_relations:
+                score += weight * 0.16 * self.component_goal_relations[relation_key]
+            score -= weight * 0.06 * min(float(self.component_relation_failures.get(relation_key, 0)), 4.0)
+        value = int(target_relation.get("value", 0))
+        if value:
+            count = self.component_value_counts.get(value, 0)
+            if count:
+                score += 0.12 * (self.component_value_scores.get(value, 0.0) / max(count, 1))
+        if family == "move" and not relation_keys:
+            score += 0.05
+        return float(max(min(score, 0.45), -0.45))
+
+    def _sequence_plan_support(self, action: str, frame: np.ndarray | None) -> float:
+        if not self.active_sequence_expectations or self.sequence_cursor >= len(self.active_sequence_expectations):
+            return 1.0
+        expected = self.active_sequence_expectations[self.sequence_cursor]
+        relation_key = str(expected.get("relation_key", ""))
+        if not relation_key or frame is None or not frame.size:
+            return 1.0
+        target_relation = _component_target_relation(frame, _action_target_cell(action, frame))
+        current_keys = {key for key, _ in _candidate_relation_keys(_action_family(action), target_relation)}
+        if relation_key in current_keys or str(expected.get("fallback_relation", "")) in current_keys:
+            return 1.0
+        expected_value = int(expected.get("target_value", 0) or 0)
+        if expected_value and target_relation.get("value") == expected_value:
+            return 0.85
+        return 0.35
 
     def _recent_stuck(self) -> bool:
         if not self.entries:
@@ -619,6 +801,403 @@ def _object_hypotheses_from_record(record: AttemptRecord, outcomes: list[dict[st
         if hypothesis is not None:
             hypotheses.append(hypothesis)
     return hypotheses
+
+
+@dataclass(frozen=True)
+class _FrameComponent:
+    component_id: int
+    value: int
+    cells: tuple[tuple[int, int], ...]
+    bbox: tuple[int, int, int, int]
+    centroid: tuple[float, float]
+
+    @property
+    def area(self) -> int:
+        return len(self.cells)
+
+    def compact(self) -> dict[str, Any]:
+        return {
+            "id": int(self.component_id),
+            "value": int(self.value),
+            "area": int(self.area),
+            "bbox": [int(item) for item in self.bbox],
+            "centroid": [round(float(self.centroid[0]), 3), round(float(self.centroid[1]), 3)],
+        }
+
+
+def _component_hypotheses_from_record(record: AttemptRecord, outcomes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    hypotheses: list[dict[str, Any]] = []
+    for index, step in enumerate(record.steps):
+        before = np.asarray(step.frame, dtype=np.int64)
+        after = _step_after_frame(record, index)
+        if after is None or before.size == 0:
+            continue
+        outcome = outcomes[index] if index < len(outcomes) else {}
+        hypothesis = _component_hypothesis_from_frames(
+            before=before,
+            after=after,
+            action=str(step.action),
+            step_index=index,
+            event_hit=bool(outcome.get("event_hit", False)),
+            score_delta=float(step.score_delta),
+            no_effect=bool(outcome.get("no_effect", False)),
+        )
+        if hypothesis is not None:
+            hypotheses.append(hypothesis)
+    return hypotheses
+
+
+def _component_hypothesis_from_frames(
+    *,
+    before: np.ndarray,
+    after: np.ndarray,
+    action: str,
+    step_index: int,
+    event_hit: bool,
+    score_delta: float,
+    no_effect: bool,
+) -> dict[str, Any] | None:
+    if before.shape != after.shape:
+        size_y = min(before.shape[0], after.shape[0])
+        size_x = min(before.shape[1], after.shape[1])
+        before = before[:size_y, :size_x]
+        after = after[:size_y, :size_x]
+    if before.size == 0 or after.size == 0:
+        return None
+    family = _action_family(action)
+    target = _action_target_cell(action, before)
+    target_relation = _component_target_relation(before, target)
+    relation_keys = _candidate_relation_keys(family, target_relation)
+    relation_key = relation_keys[0][0] if relation_keys else f"{family}:no_target"
+    fallback_relation = relation_keys[1][0] if len(relation_keys) > 1 else relation_key
+    changed_mask = before != after
+    changed_pixels = int(np.count_nonzero(changed_mask))
+    before_components = _frame_components(before)
+    after_components = _frame_components(after)
+    matches = _match_components(before_components, after_components)
+    matched_before = set(matches)
+    matched_after = set(matches.values())
+    appeared = [item for idx, item in enumerate(after_components) if idx not in matched_after]
+    disappeared = [item for idx, item in enumerate(before_components) if idx not in matched_before]
+    moved: list[dict[str, Any]] = []
+    for before_idx, after_idx in matches.items():
+        old = before_components[before_idx]
+        new = after_components[after_idx]
+        dy = float(new.centroid[0] - old.centroid[0])
+        dx = float(new.centroid[1] - old.centroid[1])
+        distance = math.sqrt(dy * dy + dx * dx)
+        if distance >= 0.60:
+            moved.append(
+                {
+                    "value": int(old.value),
+                    "area": int(old.area),
+                    "from": [round(float(old.centroid[0]), 3), round(float(old.centroid[1]), 3)],
+                    "to": [round(float(new.centroid[0]), 3), round(float(new.centroid[1]), 3)],
+                    "delta": [round(dy, 3), round(dx, 3)],
+                    "distance": round(distance, 3),
+                }
+            )
+    transforms = _component_transforms(before_components, after_components, matched_before, matched_after)
+    if changed_pixels == 0:
+        mechanism = "blocked_or_no_effect" if no_effect or family in {"move", "object", "contact"} else "stable"
+    elif moved:
+        mechanism = "component_movement"
+    elif appeared and not disappeared:
+        mechanism = "component_appearance"
+    elif disappeared and not appeared:
+        mechanism = "component_disappearance"
+    elif transforms:
+        mechanism = "component_color_transform"
+    elif len(before_components) != len(after_components):
+        mechanism = "component_split_merge"
+    else:
+        mechanism = "component_visual_transform"
+    affected = moved[0]["value"] if moved else None
+    if affected is None and appeared:
+        affected = appeared[0].value
+    if affected is None and disappeared:
+        affected = disappeared[0].value
+    if affected is None and transforms:
+        affected = int(transforms[0].get("after_value", transforms[0].get("before_value", 0)))
+    if affected is None:
+        affected = int(target_relation.get("value", 0))
+    return {
+        "step_index": int(step_index),
+        "action": str(action),
+        "action_family": family,
+        "mechanism": mechanism,
+        "changed_pixels": changed_pixels,
+        "component_count_before": len(before_components),
+        "component_count_after": len(after_components),
+        "moved_components": moved[:4],
+        "appeared_components": [item.compact() for item in appeared[:4]],
+        "disappeared_components": [item.compact() for item in disappeared[:4]],
+        "transformed_components": transforms[:4],
+        "target_relation": target_relation,
+        "relation_key": relation_key,
+        "fallback_relation": fallback_relation,
+        "target_value": int(target_relation.get("value", 0)),
+        "component_value": int(affected or 0),
+        "event_linked": bool(event_hit),
+        "score_delta": float(score_delta),
+    }
+
+
+def _background_value(frame: np.ndarray) -> int:
+    values, counts = np.unique(np.asarray(frame, dtype=np.int64), return_counts=True)
+    if len(values) == 0:
+        return 0
+    return int(values[int(np.argmax(counts))])
+
+
+def _frame_components(frame: np.ndarray) -> list[_FrameComponent]:
+    arr = np.asarray(frame, dtype=np.int64)
+    if arr.ndim != 2:
+        return []
+    background = _background_value(arr)
+    seen = np.zeros(arr.shape, dtype=bool)
+    components: list[_FrameComponent] = []
+    height, width = arr.shape
+    component_id = 0
+    for y0 in range(height):
+        for x0 in range(width):
+            if seen[y0, x0] or int(arr[y0, x0]) == background:
+                continue
+            value = int(arr[y0, x0])
+            stack = [(y0, x0)]
+            seen[y0, x0] = True
+            cells: list[tuple[int, int]] = []
+            while stack:
+                y, x = stack.pop()
+                cells.append((int(y), int(x)))
+                for dy, dx in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                    ny, nx = y + dy, x + dx
+                    if (
+                        0 <= ny < height
+                        and 0 <= nx < width
+                        and not seen[ny, nx]
+                        and int(arr[ny, nx]) == value
+                    ):
+                        seen[ny, nx] = True
+                        stack.append((ny, nx))
+            cells_tuple = tuple(sorted(cells))
+            ys = [cell[0] for cell in cells_tuple]
+            xs = [cell[1] for cell in cells_tuple]
+            components.append(
+                _FrameComponent(
+                    component_id=component_id,
+                    value=value,
+                    cells=cells_tuple,
+                    bbox=(min(ys), min(xs), max(ys), max(xs)),
+                    centroid=(float(sum(ys) / len(ys)), float(sum(xs) / len(xs))),
+                )
+            )
+            component_id += 1
+    components.sort(key=lambda item: (-item.area, item.value, item.component_id))
+    return components
+
+
+def _match_components(before: list[_FrameComponent], after: list[_FrameComponent]) -> dict[int, int]:
+    candidates: list[tuple[float, int, int]] = []
+    for before_idx, old in enumerate(before):
+        old_cells = set(old.cells)
+        for after_idx, new in enumerate(after):
+            if old.value != new.value:
+                continue
+            area_ratio = min(old.area, new.area) / max(max(old.area, new.area), 1)
+            if area_ratio < 0.45:
+                continue
+            new_cells = set(new.cells)
+            overlap = len(old_cells & new_cells) / max(len(old_cells | new_cells), 1)
+            distance = math.dist(old.centroid, new.centroid)
+            if overlap <= 0.0 and distance > max(3.0, math.sqrt(max(old.area, new.area)) + 1.5):
+                continue
+            score = overlap + max(0.0, 4.0 - distance) * 0.12 + area_ratio * 0.15
+            candidates.append((score, before_idx, after_idx))
+    candidates.sort(reverse=True)
+    matched_before: set[int] = set()
+    matched_after: set[int] = set()
+    matches: dict[int, int] = {}
+    for _score, before_idx, after_idx in candidates:
+        if before_idx in matched_before or after_idx in matched_after:
+            continue
+        matches[before_idx] = after_idx
+        matched_before.add(before_idx)
+        matched_after.add(after_idx)
+    return matches
+
+
+def _component_transforms(
+    before: list[_FrameComponent],
+    after: list[_FrameComponent],
+    matched_before: set[int],
+    matched_after: set[int],
+) -> list[dict[str, Any]]:
+    transforms: list[dict[str, Any]] = []
+    for before_idx, old in enumerate(before):
+        if before_idx in matched_before:
+            continue
+        old_cells = set(old.cells)
+        for after_idx, new in enumerate(after):
+            if after_idx in matched_after or old.value == new.value:
+                continue
+            new_cells = set(new.cells)
+            overlap = len(old_cells & new_cells) / max(min(len(old_cells), len(new_cells)), 1)
+            if overlap <= 0.0 and not _bbox_touches(old.bbox, new.bbox, margin=1):
+                continue
+            transforms.append(
+                {
+                    "before_value": int(old.value),
+                    "after_value": int(new.value),
+                    "before_area": int(old.area),
+                    "after_area": int(new.area),
+                    "overlap": round(float(overlap), 3),
+                    "before_bbox": [int(item) for item in old.bbox],
+                    "after_bbox": [int(item) for item in new.bbox],
+                }
+            )
+            break
+    return transforms
+
+
+def _bbox_touches(a: tuple[int, int, int, int], b: tuple[int, int, int, int], *, margin: int = 0) -> bool:
+    ay0, ax0, ay1, ax1 = a
+    by0, bx0, by1, bx1 = b
+    return not (ay1 + margin < by0 or by1 + margin < ay0 or ax1 + margin < bx0 or bx1 + margin < ax0)
+
+
+def _action_target_cell(action: str, frame: np.ndarray) -> tuple[int, int] | None:
+    return _click_cell(action, frame.shape)
+
+
+def _component_target_relation(frame: np.ndarray, target: tuple[int, int] | None) -> dict[str, Any]:
+    components = _frame_components(frame)
+    if target is None:
+        return {"kind": "no_target", "value": 0, "area_bucket": 0, "component_count": len(components)}
+    y, x = target
+    if not (0 <= y < frame.shape[0] and 0 <= x < frame.shape[1]):
+        return {"kind": "out_of_bounds", "value": 0, "area_bucket": 0, "component_count": len(components)}
+    for component in components:
+        if (y, x) in component.cells:
+            return {
+                "kind": "on_component",
+                "value": int(component.value),
+                "area_bucket": _area_bucket(component.area),
+                "component_id": int(component.component_id),
+                "component_count": len(components),
+            }
+    nearest: tuple[_FrameComponent, float] | None = None
+    for component in components:
+        distance = math.dist((float(y), float(x)), component.centroid)
+        if nearest is None or distance < nearest[1]:
+            nearest = (component, distance)
+    if nearest is not None and nearest[1] <= 1.75:
+        component = nearest[0]
+        return {
+            "kind": "adjacent_component",
+            "value": int(component.value),
+            "area_bucket": _area_bucket(component.area),
+            "component_id": int(component.component_id),
+            "component_count": len(components),
+        }
+    return {
+        "kind": "background",
+        "value": int(frame[y, x]),
+        "area_bucket": 0,
+        "cell": [int(y), int(x)],
+        "component_count": len(components),
+    }
+
+
+def _area_bucket(area: int) -> int:
+    if area <= 1:
+        return 1
+    if area <= 4:
+        return 4
+    if area <= 16:
+        return 16
+    return 64
+
+
+def _candidate_relation_keys(family: str, relation: dict[str, Any]) -> list[tuple[str, float]]:
+    kind = str(relation.get("kind", "no_target"))
+    value = int(relation.get("value", 0))
+    area_bucket = int(relation.get("area_bucket", 0))
+    keys: list[tuple[str, float]] = []
+    if kind == "no_target":
+        keys.append((f"{family}:no_target", 1.0))
+        keys.append(("*:no_target", 0.35))
+        return keys
+    if kind == "background":
+        cell = relation.get("cell", [])
+        if isinstance(cell, list) and len(cell) >= 2:
+            keys.append((f"{family}:background:cell:{int(cell[0])}:{int(cell[1])}", 1.0))
+        keys.append((f"{family}:background", 0.18))
+        keys.append(("*:background", 0.08))
+        return keys
+    if value:
+        keys.append((f"{family}:{kind}:value:{value}:area:{area_bucket}", 1.0))
+        keys.append((f"{family}:{kind}:value:{value}", 0.74))
+        keys.append((f"*:{kind}:value:{value}", 0.52))
+    keys.append((f"{family}:{kind}", 0.45))
+    keys.append((f"*:{kind}", 0.28))
+    return keys
+
+
+def _component_hypothesis_value(hypothesis: dict[str, Any]) -> float:
+    mechanism = str(hypothesis.get("mechanism", ""))
+    changed_pixels = int(hypothesis.get("changed_pixels", 0))
+    value = 0.0
+    if bool(hypothesis.get("event_linked")):
+        value += 1.12 + min(max(float(hypothesis.get("score_delta", 0.0)), 0.0), 2.0)
+    if changed_pixels:
+        value += 0.16 + min(float(changed_pixels), 32.0) * 0.007
+    if mechanism in {
+        "component_movement",
+        "component_appearance",
+        "component_disappearance",
+        "component_color_transform",
+        "component_split_merge",
+    }:
+        value += 0.10
+    if mechanism == "blocked_or_no_effect":
+        value -= 0.46
+    return float(value)
+
+
+def _sequence_component_expectation(hypothesis: dict[str, Any]) -> dict[str, Any]:
+    if not hypothesis:
+        return {}
+    return {
+        "relation_key": str(hypothesis.get("relation_key", "")),
+        "fallback_relation": str(hypothesis.get("fallback_relation", "")),
+        "mechanism": str(hypothesis.get("mechanism", "")),
+        "target_value": int(hypothesis.get("target_value", 0) or hypothesis.get("component_value", 0) or 0),
+        "changed_expected": int(hypothesis.get("changed_pixels", 0)) > 0,
+    }
+
+
+def _component_expectation_matches(expected: dict[str, Any], actual: dict[str, Any] | None) -> bool:
+    if not expected:
+        return True
+    if actual is None:
+        return not bool(expected.get("changed_expected", False))
+    if bool(expected.get("changed_expected", False)) and int(actual.get("changed_pixels", 0)) == 0:
+        return False
+    expected_keys = {str(expected.get("relation_key", "")), str(expected.get("fallback_relation", ""))}
+    expected_keys.discard("")
+    if expected_keys and str(actual.get("relation_key", "")) in expected_keys:
+        return True
+    if expected_keys and str(actual.get("fallback_relation", "")) in expected_keys:
+        return True
+    expected_value = int(expected.get("target_value", 0) or 0)
+    actual_value = int(actual.get("target_value", 0) or actual.get("component_value", 0) or 0)
+    if expected_value and expected_value == actual_value and int(actual.get("changed_pixels", 0)) > 0:
+        return True
+    expected_mechanism = str(expected.get("mechanism", ""))
+    if expected_mechanism and expected_mechanism == str(actual.get("mechanism", "")):
+        return True
+    return False
 
 
 def _step_after_frame(record: AttemptRecord, index: int) -> np.ndarray | None:
