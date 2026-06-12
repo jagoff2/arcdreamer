@@ -283,6 +283,74 @@ def test_component_transition_prediction_scores_expected_public_transform() -> N
     assert scores["click:20:20"] > scores["wait"]
 
 
+def test_component_transition_goal_chain_activates_state_grounded_plan() -> None:
+    start_grid = np.zeros((8, 8), dtype=np.int64)
+    start_grid[2, 2] = 5
+    moved_grid = np.zeros((8, 8), dtype=np.int64)
+    moved_grid[2, 3] = 5
+    event_grid = np.zeros((8, 8), dtype=np.int64)
+    event_grid[2, 3] = 6
+    actions = ("right", "click:28:20", "wait")
+    buffer = AttemptBuffer(suite_id="suite", task_id="task", variant="v", split="dev", seed=13, attempt_index=1)
+    start = _obs_grid(0, start_grid, actions)
+    moved = _obs_grid(1, moved_grid, actions)
+    event_after = _obs_grid(2, event_grid, actions)
+    buffer.append_transition(start, "right", ArcAGI3StepResult(moved, -0.001, False, False, {"events": ["move"]}))
+    buffer.append_transition(moved, "click:28:20", ArcAGI3StepResult(event_after, 1.0, False, False, {"events": ["useful_click"]}))
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    entry = memory.ingest_attempt(buffer.to_record())
+
+    scores = memory.plan_scores_for_observation(start)
+    summary = memory.summary()
+
+    assert entry.causal_hypotheses["component_chain_edge_count"] >= 2.0
+    assert entry.causal_hypotheses["component_chain_goal_edge_count"] >= 2.0
+    assert summary["object_memory"]["component_chain_edge_count"] >= 2
+    assert summary["object_memory"]["active_sequence_source"] == "component_transition_goal_chain"
+    assert "component_transition_goal_chain_search" in summary["planner_chain"]
+    assert scores["right"] > scores["wait"]
+    assert memory.sequence_plan_action(actions) == "right"
+    memory.observe_live_transition(
+        start,
+        "right",
+        ArcAGI3StepResult(moved, -0.001, False, False, {"events": ["move"]}),
+    )
+    assert memory.sequence_plan_action(actions) == "click:28:20"
+    moved_scores = memory.plan_scores_for_observation(moved)
+    assert moved_scores["click:28:20"] > moved_scores["wait"]
+
+
+def test_component_transition_goal_chain_aborts_on_postcondition_contradiction() -> None:
+    start_grid = np.zeros((8, 8), dtype=np.int64)
+    start_grid[2, 2] = 5
+    moved_grid = np.zeros((8, 8), dtype=np.int64)
+    moved_grid[2, 3] = 5
+    event_grid = np.zeros((8, 8), dtype=np.int64)
+    event_grid[2, 3] = 6
+    actions = ("right", "click:28:20", "wait")
+    buffer = AttemptBuffer(suite_id="suite", task_id="task", variant="v", split="dev", seed=14, attempt_index=1)
+    start = _obs_grid(0, start_grid, actions)
+    moved = _obs_grid(1, moved_grid, actions)
+    event_after = _obs_grid(2, event_grid, actions)
+    buffer.append_transition(start, "right", ArcAGI3StepResult(moved, -0.001, False, False, {"events": ["move"]}))
+    buffer.append_transition(moved, "click:28:20", ArcAGI3StepResult(event_after, 1.0, False, False, {"events": ["useful_click"]}))
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    memory.ingest_attempt(buffer.to_record())
+    scores = memory.plan_scores_for_observation(start)
+
+    assert scores["right"] > scores["wait"]
+    assert memory.sequence_plan_action(actions) == "right"
+    memory.observe_live_transition(
+        start,
+        "right",
+        ArcAGI3StepResult(start, -0.001, False, False, {"events": ["no_effect"]}),
+    )
+    summary = memory.summary()["object_memory"]
+    assert summary["sequence_contradictions"] == 1
+    assert summary["component_chain_contradictions"] >= 1
+    assert summary["active_sequence_remaining"] == 0
+
+
 def test_component_grounded_sequence_aborts_on_public_contradiction() -> None:
     before_grid = np.zeros((8, 8), dtype=np.int64)
     before_grid[2, 2] = 5

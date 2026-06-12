@@ -5434,3 +5434,103 @@
   - Strongest remaining capability bottleneck is generic transition-goal chain search and mechanic/goal inference from public component transitions.
 - Exact next action:
   - Implement generic transition-goal chain search over the predicted component-transition graph, with public-state preconditions/postconditions and re-planning after contradiction, then rerun tests, official evaluation, audits, compaction, docs, and commit.
+
+## Step 0185 - Component transition-goal chain search implemented, official result still negative
+
+- Files touched:
+  - `src\jepa_attempt_memory.py`
+  - `tests\test_video_jepa.py`
+  - `docs\jepa_attempt_report.json`
+  - `docs\generalization_audit_after_jepa.json`
+  - `docs\jepa_attempt_traces\`
+  - `RESEARCH_STATE.md`
+  - `METHODS_ATTEMPTED.md`
+  - `ARC_RESULTS.md`
+  - `FAILURE_ANALYSIS.md`
+  - `TODO_NEXT.md`
+  - `CONTEXT.md`
+- Commands run:
+  - `Get-Content -Raw GOAL.md`
+  - `Get-Content -Raw RESEARCH_STATE.md`
+  - `Get-Content -Raw METHODS_ATTEMPTED.md`
+  - `Get-Content -Raw ARC_RESULTS.md`
+  - `Get-Content -Raw FAILURE_ANALYSIS.md`
+  - `Get-Content -Raw TODO_NEXT.md`
+  - `Get-Content -Raw CONTEXT.md`
+  - `git status --short --branch`
+  - `rg` over `src\jepa_attempt_memory.py`, `src\jepa_arc_eval.py`, and `tests\test_video_jepa.py`
+  - `python -m py_compile src\jepa_attempt_memory.py tests\test_video_jepa.py`
+  - `pytest -q tests\test_video_jepa.py`
+  - `pytest -q`
+  - `python -m src.jepa_arc_eval --config external --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --jepa-checkpoint runs/video_jepa.pt --json-output docs/jepa_attempt_report.json --trace-dir docs/jepa_attempt_traces --device cuda`
+  - parsed `docs\jepa_attempt_report.json` for primary aggregate, attempt table, and gates
+  - generic anonymous-credential phrase scan over `docs`, `data`, `src`, `tests`, `frozen`, and `CONTEXT.md`
+  - `Get-ChildItem docs\jepa_attempt_traces -Recurse -File | Measure-Object Length -Sum`
+  - one-off Python compaction over `docs\jepa_attempt_traces\*.json`
+  - compact trace schema check for required step fields, component chain planner marker, component chain summary keys, and component state signatures
+  - `python -m src.generalization_audit --json-output docs/generalization_audit_after_jepa.json`
+  - `python -m audit.leakage_scan`
+  - final `pytest -q`
+  - `Get-FileHash -Algorithm SHA256 -LiteralPath @('src\jepa_attempt_memory.py','src\jepa_arc_eval.py','tests\test_video_jepa.py','docs\jepa_attempt_report.json','docs\generalization_audit_after_jepa.json','docs\jepa_attempt_traces\_official_jepa_worker_report.json')`
+- Observed results/errors:
+  - Implemented public component transition-goal chain memory:
+    - creates compact public component-state signatures from frame shape, background value, and connected component cells;
+    - records graph edges keyed by `(before_state_signature, action, after_state_signature)`;
+    - tracks chain edge counts, values, goal-linked values, failures, contradictions, expectations, and post-state goal values;
+    - searches short chains from the current public component state and activates the best legal first action as a live sequence plan;
+    - carries public preconditions/postconditions in sequence expectations and aborts stale chains on live public postcondition contradictions.
+  - Extended component hypotheses and sequence expectations with before/after state signatures while preserving the existing relation, mechanism, target-value, and changed-pixel checks.
+  - Added focused tests for state-grounded chain activation and postcondition-contradiction abort.
+  - Syntax check: passed.
+  - Focused JEPA tests after patch: `20 passed in 2.55s`.
+  - Full tests before official rerun: `101 passed in 54.51s`.
+  - Official/external JEPA rerun completed on CUDA and still reported `NO IMPROVEMENT FOUND`.
+  - Latest official JEPA primary result:
+    - `jepa_plus_attempt_memory`: solve `0.0`, score `0.0013333333333333335`, useful events `0.013333333333333334`, repeat collapse `0.8345795011033633`, invalid actions `0.0`, action entropy `0.833174802546318`.
+    - `official_score_gain`: `0.0`.
+    - `official_useful_event_gain`: `0.0`.
+    - `score_or_useful_gain_over_core`: `false`.
+    - `attempt_2_or_3_improves_over_attempt_1`: `false`.
+    - `repeat_collapse_drop_attempt_1_to_3`: `0.007177159865328631`.
+    - `repeat_collapse_drop_gate`: `false`.
+    - `ablation_removes_improvement`: `false`.
+    - `jepa_beats_null_on_dev`: `true`.
+    - `jepa_causal_substrate_chain`: `true`.
+    - `non_arc_drop_within_limit`: `true`.
+    - `hidden_target_canary_diff_zero`: `true`.
+    - `jepa_emits_no_text`: `true`.
+    - `no_hack_passes`: `true`.
+  - Primary attempt table:
+    - attempt 1: mean normalized score `0.004`, useful events `0.04`, repeat collapse `0.8579215341806236`, action entropy `0.7487791837206761`;
+    - attempt 2: mean normalized score `0.0`, useful events `0.0`, repeat collapse `0.7950725948141715`, action entropy `1.0749442526300725`;
+    - attempt 3: mean normalized score `0.0`, useful events `0.0`, repeat collapse `0.8507443743152949`, action entropy `0.6758009712882054`.
+  - Best retained official public result remains `0/25` solved and mean normalized score `0.005` from `docs\arc_affordance_report.json` variant `state_graph_affordance`; this is not a success claim.
+  - Official runtime stdout included an anonymous ARC credential phrase, sanitized in the shell stream. The generic phrase scan returned no matches, and no credential value was persisted in repository artifacts.
+  - JEPA trace compaction after rerun:
+    - compacted `651`
+    - skipped `1`
+    - bytes before `2357075018`
+    - bytes after `257782792`
+    - reduction `0.8906344558270652`
+    - total tree size after compaction, including worker report: `276711501`
+  - Compact trace schema preserves `frame`, `next_frame`, legal actions, score/event deltas, terminal flags, compact JEPA policy diagnostics, transition-graph summaries, object causal hypotheses, component causal hypotheses, component-transition prediction summaries, component transition-goal chain summaries, object/component memory summaries, and sequence plan summaries.
+  - Generalization audit after compaction: `EXTERNAL GENERALIZATION AUDIT PROVEN`.
+  - Leakage scan: `passes=true`, no findings.
+  - Final tests after reports/audits/docs inputs: `101 passed in 54.93s`.
+  - Artifact hashes:
+    - `src\jepa_attempt_memory.py`: `EE5ABD36E57738C797FE9F77A01C177A87357B4104DDF8C28001DD4F164F92FF`
+    - `src\jepa_arc_eval.py`: `0BBA29B725955CAEE6BFAA1EAC3E9D3573791DAB7713B5606AD52CD2A577430B`
+    - `tests\test_video_jepa.py`: `B9CE28B6C36B3FB74716E95D5DF333B7BAA88F2A4E96C23A5526D4F5D0F8FB9B`
+    - `docs\jepa_attempt_report.json`: `22B79FF6224999E36E48BA40A0947FB53A42D38723777F7F1933A6439E3A8D3F`
+    - `docs\generalization_audit_after_jepa.json`: `070C675AF0B980340031E5A34614FD4815068862AAFB0D064CDD5E295DE410A2`
+    - `docs\jepa_attempt_traces\_official_jepa_worker_report.json`: `1342BF494C6E48805112F1CB21F16393C67C4435B3D236CB0F9C55EB02E2CEAB`
+- Active ARC objective advanced:
+  - Implemented the documented generic transition-goal chain search experiment over public component transitions.
+  - Preserved no-hack constraints and verified with official runtime, audit, leakage scan, trace compaction, and tests.
+  - Preserved negative evidence and updated persistent state docs.
+- Current blockers:
+  - No completion for the active ARC objective. Current official completion remains `0/25`; target is at least `20/25`.
+  - Exact public component-state chain search does not improve attempts 2 or 3 over attempt 1 on score or useful events.
+  - Strongest remaining capability bottleneck is richer generic public component relation abstraction, because exact state signatures are too sparse and relation/goal inference remains absent.
+- Exact next action:
+  - Implement richer generic public component relations and relation-level goal abstraction over the existing transition-goal chain substrate, then rerun tests, official evaluation, audits, compaction, docs, and commit.

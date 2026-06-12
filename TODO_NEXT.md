@@ -4,16 +4,16 @@ Last updated: 2026-06-12.
 
 ## Ranked Experiments
 
-1. Build generic transition-goal chain search over the component transition graph.
-   - Use predicted component transitions as graph edges and search for short public-state experiment chains that move from current component relations toward previously goal-linked component mechanisms.
-   - Prefer plans with public-state preconditions and expected postconditions, not single-step scalar bonuses.
-   - Replan when observed public transitions contradict expected postconditions.
-   - Success criterion: attempts 2 or 3 improve official useful events or score over attempt 1 without increasing invalid actions.
-
-2. Add richer generic public component relations.
+1. Add richer generic public component relations.
    - Track containment, alignment, color match, object removal, object transfer, split/merge, and repeated transform relations from public frames only.
    - Link generic action families and click cells to these relations without game IDs or per-game branches.
    - Use contradictions to lower stale component hypotheses.
+   - Success criterion: attempts 2 or 3 improve official useful events or score over attempt 1 without increasing invalid actions.
+
+2. Abstract transition-goal chains over relations, not only exact public states.
+   - Current chain search uses exact public component-state signatures, which are legal but sparse.
+   - Add relation-level chain nodes for containment, adjacency, color-match, removal, transfer, and movement-relative-to-target.
+   - Preserve public-state preconditions/postconditions as validation checks, but let relation goals bridge visually different attempts.
 
 3. Ground sequence candidates in predicted public state transitions.
    - Current sequence candidates carry component expectations, but they still mostly replay prior positive-event windows.
@@ -30,6 +30,13 @@ Last updated: 2026-06-12.
    - Treat internal losses as diagnostics only; proof remains official public runtime.
 
 ## Attempted This Run
+
+Component transition-goal chain search:
+   - Record exact public component-state signatures before and after each action.
+   - Store component graph edges keyed by `(before_state, action, after_state)` with counts, values, failures, contradictions, expectations, delayed public-event credit, and goal-state values.
+   - Search short action chains from the current public component state and activate the best chain as the live sequence plan.
+   - Abort stale chains when observed public postconditions contradict the predicted after-state.
+   - Result: implemented and audited, but official runtime remained `NO IMPROVEMENT FOUND`; attempts 2 and 3 did not improve score or useful events over attempt 1.
 
 Predicted component-transition planning and scoring cache:
    - Record component relation-to-mechanism predictions for movement, appearance, disappearance, color/shape transform, visual transform, split/merge, stable, and blocked/no-effect outcomes.
@@ -61,4 +68,4 @@ Transition-graph next-attempt planner:
 
 ## Immediate Next Step
 
-Implement experiment 1: generic transition-goal chain search over the existing predicted component-transition graph. Focus on public-state preconditions/postconditions and short experiment chains toward goal-linked mechanisms, then rerun tests, official evaluation, audits, compaction, and docs.
+Implement experiment 1: richer generic public component relations. Focus on relation-level goal abstraction over the existing transition-goal chain substrate, then rerun tests, official evaluation, audits, compaction, and docs.

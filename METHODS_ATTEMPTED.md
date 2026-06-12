@@ -2,6 +2,14 @@
 
 Last updated: 2026-06-12.
 
+## Component Transition-Goal Chain Search
+
+- Rationale: predicted component transitions scored one action at a time. They did not search over public state transitions toward previously goal-linked component states or preserve expected postconditions across a multi-step experiment.
+- Code touched: `src/jepa_attempt_memory.py`, `tests/test_video_jepa.py`.
+- Mechanism: record exact public component-state signatures before and after each action; store component chain edges keyed by `(before_state, action, after_state)` with counts, values, failures, contradictions, expectations, delayed public-event credit, and goal-state values; search short action chains from the current public component state; activate the best chain as the live sequence plan; reject stale chains when observed public postconditions contradict the predicted after-state.
+- Result: syntax check passed, focused JEPA tests passed, full tests passed before and after official evaluation, generalization/leakage audits passed, trace schema remained valid after compaction, official runtime still reported `NO IMPROVEMENT FOUND`. Primary `jepa_plus_attempt_memory` stayed at `0/25` solved, mean normalized score `0.0013333333333333335`, useful events `0.013333333333333334`, invalid action rate `0.0`, repeat collapse `0.8345795011033633`.
+- Status: retained as a legal public-evidence substrate and sequence-grounding improvement, not a performance success. Attempt 2 repeat collapse improved to `0.7950725948141715`, but attempts 2 and 3 still had zero score and zero useful events.
+
 ## Predicted Component-Transition Planning and Scoring Cache
 
 - Rationale: the component graph stored public component relations and sequence expectations, but legal action scoring still mostly rewarded historical relation/contact values. It did not explicitly score expected next component mechanisms, and component extraction was recomputed during per-action scoring.
