@@ -4,27 +4,35 @@ Last updated: 2026-06-12.
 
 ## Ranked Experiments
 
-1. Add region/object causal hypotheses to attempt memory.
-   - Track changed regions, contacts, pushes, carries, toggles, spawns, removals, and blocked motion using public frames only.
-   - Link click/move actions to components and delayed frame changes.
-   - Use contradictions to lower confidence in stale hypotheses.
+1. Replace coarse 8x8 region hypotheses with component-level public causal graphs.
+   - Track connected components, component colors, bounding boxes, centroids, contact relations, containment, alignment, disappearance, appearance, split/merge, and color transforms from public frames only.
+   - Link generic action families and click cells to component-level effects without game IDs or per-game branches.
+   - Use contradictions to lower stale component hypotheses.
    - Success criterion: attempts 2 or 3 improve official useful events or score over attempt 1 without increasing invalid actions.
 
-2. Replace scalar action nudges with sequence-level plans.
-   - Current transition graph can bias a single current action, but it does not maintain a compact multi-step experiment across states.
-   - Add recurrent plan state over a proposed public-evidence experiment while preserving live recurrent state and ARC legality.
+2. Ground sequence candidates in predicted public state transitions.
+   - Current sequence candidates replay prior positive-event windows, but they are not tied to expected public component changes.
+   - Add compact plan state with predicted next public component relation after each action and abandon/replan when observed public changes contradict it.
    - Avoid fixed schedules, forced entropy, game-specific branches, and hardcoded action strings beyond generic action-family parsing.
 
-3. Train or adapt the JEPA encoder on legal failed-attempt traces without solution labels.
+3. Mine recurring public partial-score patterns as generic mechanisms.
+   - Identify which public component relations preceded partial-score events such as the recurring `lf52` partial score.
+   - Generalize only mechanisms that can be expressed without game ID, source inspection, hidden labels, solution labels, or per-game tuning.
+
+4. Train or adapt the JEPA encoder on legal failed-attempt traces without solution labels.
    - Use only public observations, legal actions, chosen actions, score/event deltas, and terminal flags.
    - Do not use game IDs as features or tune per game.
    - Treat internal losses as diagnostics only; proof remains official public runtime.
 
-4. Add official trace analysis for the single recurring partial-score game.
-   - Identify what public event patterns preceded the `lf52` partial score without hardcoding that game or branching on its ID.
-   - Generalize only if the same mechanism appears in other traces.
-
 ## Attempted This Run
+
+Region/object causal hypotheses and sequence candidate planner:
+   - Store post-action `next_frame` in attempt timelines.
+   - Infer public-frame movement, spawn, removal, toggle/transform, visual transform, and blocked/no-effect hypotheses.
+   - Track changed regions, changed colors, delayed public-event region links, region/action-family values, and failed regions.
+   - Score future legal actions by public region contact and action-family evidence.
+   - Replay short prior-event action windows as compact sequence candidates.
+   - Result: implemented and audited, but official runtime remained `NO IMPROVEMENT FOUND`; attempts 2 and 3 did not improve score or useful events over attempt 1.
 
 Transition-graph next-attempt planner:
    - Build from full attempt traces: public observation hash, action, next observation hash, score/event delta, terminal flag.
@@ -34,4 +42,4 @@ Transition-graph next-attempt planner:
 
 ## Immediate Next Step
 
-Implement experiment 1: region/object causal hypotheses from public frame diffs. Focus on changed components, contacts, blocked moves, object appearances/removals, and delayed event links, then feed those hypotheses into a sequence-level next-attempt planner rather than another one-step scalar action nudge.
+Implement experiment 1: component-level public causal graphs from frame diffs. Focus on connected components and public relations instead of coarse 8x8 regions, then feed only supported component hypotheses into sequence-level plans with contradiction handling.

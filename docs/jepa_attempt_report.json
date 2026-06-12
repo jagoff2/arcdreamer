@@ -265,7 +265,12 @@
       "transition_graph_edges": 11.0,
       "transition_graph_positive_edges": 7.0,
       "transition_graph_no_effect_edges": 1.0,
-      "transition_graph_delayed_credit_edges": 10.0
+      "transition_graph_delayed_credit_edges": 10.0,
+      "object_changed_region_count": 5.0,
+      "object_changed_color_count": 1.0,
+      "object_delayed_region_links": 5.0,
+      "sequence_candidates_added": 7.0,
+      "sequence_candidate_count": 7.0
     },
     "jepa_next_attempt_plan": {
       "right": 3.7246271539843465,
@@ -306,12 +311,12 @@
         "solve_rate": 0.0,
         "mean_score": 0.0013333333333333335,
         "mean_normalized_score": 0.0013333333333333335,
-        "mean_steps": 104.8,
+        "mean_steps": 103.96,
         "mean_invalid_action_rate": 0.0,
-        "mean_unique_states": 105.8,
+        "mean_unique_states": 104.96,
         "mean_useful_events": 0.013333333333333334,
-        "mean_action_entropy": 0.5730467577041524,
-        "mean_repeat_collapse": 0.8867226507234964
+        "mean_action_entropy": 0.7573842498806574,
+        "mean_repeat_collapse": 0.8448250960415711
       },
       "baseline_core": {
         "solve_rate": 0.0,
@@ -328,12 +333,12 @@
         "solve_rate": 0.0,
         "mean_score": 0.0013333333333333335,
         "mean_normalized_score": 0.0013333333333333335,
-        "mean_steps": 104.8,
+        "mean_steps": 103.96,
         "mean_invalid_action_rate": 0.0,
-        "mean_unique_states": 105.8,
+        "mean_unique_states": 104.96,
         "mean_useful_events": 0.013333333333333334,
-        "mean_action_entropy": 0.6203486666293264,
-        "mean_repeat_collapse": 0.8752519080124866
+        "mean_action_entropy": 0.6864253681115136,
+        "mean_repeat_collapse": 0.8607239187052945
       },
       "jepa_pretrained_frozen_if_available": {
         "solve_rate": 0.0,
@@ -350,12 +355,12 @@
         "solve_rate": 0.0,
         "mean_score": 0.0013333333333333335,
         "mean_normalized_score": 0.0013333333333333335,
-        "mean_steps": 104.8,
+        "mean_steps": 103.96,
         "mean_invalid_action_rate": 0.0,
-        "mean_unique_states": 105.8,
+        "mean_unique_states": 104.96,
         "mean_useful_events": 0.013333333333333334,
-        "mean_action_entropy": 0.5596495383137113,
-        "mean_repeat_collapse": 0.888397678769673
+        "mean_action_entropy": 0.7240672217003745,
+        "mean_repeat_collapse": 0.8516683631497388
       },
       "jepa_trained_dev": {
         "solve_rate": 0.0,
@@ -404,8 +409,8 @@
         "mean_invalid_action_rate": 0.0,
         "mean_unique_states": 104.92,
         "mean_useful_events": 0.0,
-        "mean_action_entropy": 0.5335771378191043,
-        "mean_repeat_collapse": 0.897281625335902
+        "mean_action_entropy": 0.9707892288329503,
+        "mean_repeat_collapse": 0.791545689588788
       },
       {
         "variant": "attempt_memory_no_jepa",
@@ -413,12 +418,12 @@
         "solve_rate": 0.0,
         "mean_score": 0.0,
         "mean_normalized_score": 0.0,
-        "mean_steps": 100.08,
+        "mean_steps": 97.56,
         "mean_invalid_action_rate": 0.0,
-        "mean_unique_states": 101.08,
+        "mean_unique_states": 98.56,
         "mean_useful_events": 0.0,
-        "mean_action_entropy": 0.43678395157267674,
-        "mean_repeat_collapse": 0.9049647926539636
+        "mean_action_entropy": 0.5525843370883462,
+        "mean_repeat_collapse": 0.8850080643553018
       },
       {
         "variant": "baseline_core",
@@ -482,8 +487,8 @@
         "mean_invalid_action_rate": 0.0,
         "mean_unique_states": 104.92,
         "mean_useful_events": 0.0,
-        "mean_action_entropy": 0.6433443278665972,
-        "mean_repeat_collapse": 0.8657124996528418
+        "mean_action_entropy": 0.8774161563528656,
+        "mean_repeat_collapse": 0.8148790229221212
       },
       {
         "variant": "jepa_plus_attempt_memory",
@@ -491,12 +496,12 @@
         "solve_rate": 0.0,
         "mean_score": 0.0,
         "mean_normalized_score": 0.0,
-        "mean_steps": 100.08,
+        "mean_steps": 97.56,
         "mean_invalid_action_rate": 0.0,
-        "mean_unique_states": 101.08,
+        "mean_unique_states": 98.56,
         "mean_useful_events": 0.0,
-        "mean_action_entropy": 0.4689224883007062,
-        "mean_repeat_collapse": 0.9021216902039945
+        "mean_action_entropy": 0.43308076426099906,
+        "mean_repeat_collapse": 0.9093711990131383
       },
       {
         "variant": "jepa_pretrained_frozen_if_available",
@@ -560,8 +565,8 @@
         "mean_invalid_action_rate": 0.0,
         "mean_unique_states": 104.92,
         "mean_useful_events": 0.0,
-        "mean_action_entropy": 0.5361123465372831,
-        "mean_repeat_collapse": 0.8882888829626525
+        "mean_action_entropy": 0.9707892288329503,
+        "mean_repeat_collapse": 0.791545689588788
       },
       {
         "variant": "jepa_random_init",
@@ -569,12 +574,12 @@
         "solve_rate": 0.0,
         "mean_score": 0.0,
         "mean_normalized_score": 0.0,
-        "mean_steps": 100.08,
+        "mean_steps": 97.56,
         "mean_invalid_action_rate": 0.0,
-        "mean_unique_states": 101.08,
+        "mean_unique_states": 98.56,
         "mean_useful_events": 0.0,
-        "mean_action_entropy": 0.3940570846831746,
-        "mean_repeat_collapse": 0.918982619165743
+        "mean_action_entropy": 0.4526332525474974,
+        "mean_repeat_collapse": 0.9055378656798051
       },
       {
         "variant": "jepa_trained_dev",
@@ -1850,12 +1855,12 @@
       "solve_rate": 0.0,
       "mean_score": 0.0013333333333333335,
       "mean_normalized_score": 0.0013333333333333335,
-      "mean_steps": 104.8,
+      "mean_steps": 103.96,
       "mean_invalid_action_rate": 0.0,
-      "mean_unique_states": 105.8,
+      "mean_unique_states": 104.96,
       "mean_useful_events": 0.013333333333333334,
-      "mean_action_entropy": 0.5730467577041524,
-      "mean_repeat_collapse": 0.8867226507234964
+      "mean_action_entropy": 0.7573842498806574,
+      "mean_repeat_collapse": 0.8448250960415711
     },
     "jepa_trained_dev": {
       "solve_rate": 0.0,
@@ -1872,12 +1877,12 @@
       "solve_rate": 0.0,
       "mean_score": 0.0013333333333333335,
       "mean_normalized_score": 0.0013333333333333335,
-      "mean_steps": 104.8,
+      "mean_steps": 103.96,
       "mean_invalid_action_rate": 0.0,
-      "mean_unique_states": 105.8,
+      "mean_unique_states": 104.96,
       "mean_useful_events": 0.013333333333333334,
-      "mean_action_entropy": 0.5596495383137113,
-      "mean_repeat_collapse": 0.888397678769673
+      "mean_action_entropy": 0.7240672217003745,
+      "mean_repeat_collapse": 0.8516683631497388
     },
     "null_control": {
       "solve_rate": 0.0,
@@ -1897,7 +1902,7 @@
     "score_or_useful_gain_over_core": false,
     "official_score_gain": 0.0,
     "official_useful_event_gain": 0.0,
-    "repeat_collapse_drop_attempt_1_to_3": -0.04420015602337091,
+    "repeat_collapse_drop_attempt_1_to_3": -0.051449664832514785,
     "repeat_collapse_drop_gate": false,
     "ablation_removes_improvement": false,
     "jepa_beats_null_on_dev": true,
@@ -2597,8 +2602,8 @@
   ],
   "hashes": {
     "src/attempt_buffer.py": {
-      "sha256": "A769816C4FB5366BED84D24DE27F6F4F31B1FC1B51590FD3EC30A47B8D9840EA",
-      "size_bytes": 9432
+      "sha256": "33E69313AC81DDFEF6826EEB6E4708BFD3DA95D1AB0D54AFE75FB12ADF564157",
+      "size_bytes": 9655
     },
     "src/video_jepa.py": {
       "sha256": "A54BEC05A4DD34CBF293738A67C0D4D1BB72354446448837DB7AE0F19E8532DF",
@@ -2609,24 +2614,24 @@
       "size_bytes": 8184
     },
     "src/jepa_attempt_memory.py": {
-      "sha256": "EC48E8DE673EE50D106B917E11EA62818E48EC8A6BA5C423FF879CF01252C2B5",
-      "size_bytes": 18863
+      "sha256": "D9E98898FA50E314D4C7AED82476189DE278C7B68449E7C7281D8AC2C4392CE5",
+      "size_bytes": 37382
     },
     "src/jepa_arc_eval.py": {
-      "sha256": "4F1D63A355253DE7E6296CC4733B96B16808381F32F96C18CE46B9F62523A32B",
-      "size_bytes": 36213
+      "sha256": "7A9E80E6E427E9A64DA77936D4949FBBAAB03B4516BD466F7B333E1D2B233705",
+      "size_bytes": 36372
     },
     "tests/test_video_jepa.py": {
-      "sha256": "FB674C11BA4461647BA4923B399EB67866B2968C3546E1C35A36B04A221A2328",
-      "size_bytes": 8944
+      "sha256": "B32C15E9084317F059A0DB5199CE10B0854EFD1C509389B93D1F1B851BB51AE2",
+      "size_bytes": 12239
     },
     "data/jepa_trace_manifest.json": {
       "sha256": "43B65F56306BB27F3AA435E3F2733BF6BCAED47ACECC38815510974298C48077",
       "size_bytes": 3535
     },
     "docs/jepa_attempt_report.json": {
-      "sha256": "3928452C28B72F1D9CFE59F94FB8B40F75C34BBA6097F827B0F2BA6202923654",
-      "size_bytes": 205327
+      "sha256": "B05A9483B157D2904C57DC070657EA4BD1ACBA91BDE4904A0251AB5B38525AC2",
+      "size_bytes": 205594
     },
     "frozen/recurrent_latent_fast.pt": {
       "sha256": "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD",

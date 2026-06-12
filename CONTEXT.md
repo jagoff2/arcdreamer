@@ -3195,7 +3195,7 @@
   - `CONTEXT.md`
 - Commands run:
   - `python -m src.jepa_arc_eval --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --jepa-checkpoint runs/video_jepa.pt --config external --json-output docs/jepa_attempt_report.json --trace-dir docs/jepa_attempt_traces`
-  - `rg -n "Got anonymous API key|anonymous API key|d4c2d07c|50676679" docs data src tests frozen CONTEXT.md -S`
+  - generic anonymous-credential phrase and fragment scan over `docs`, `data`, `src`, `tests`, `frozen`, and `CONTEXT.md`
   - `python -c "import json; d=json.load(open('docs/jepa_attempt_report.json')); print(json.dumps({...}, indent=2))"`
   - `Get-ChildItem docs\jepa_attempt_traces -Recurse -Filter *.json | Measure-Object | Select-Object Count`
   - `git status --short`
@@ -4828,7 +4828,7 @@
   - `Get-Process -Id 13028 -ErrorAction SilentlyContinue | Select-Object Id,CPU,WorkingSet64,StartTime,Path`
   - `Get-ChildItem docs\arc_affordance_traces -Recurse -Filter *.json | Group-Object { $_.Directory.Name }`
   - `python -c "... summarize docs/arc_affordance_report.json ..."`
-  - `rg -n "Got anonymous API key|anonymous API key" docs data src tests frozen CONTEXT.md -S`
+  - generic anonymous-credential phrase scan over `docs`, `data`, `src`, `tests`, `frozen`, and `CONTEXT.md`
 - Observed results/errors:
   - Official evaluator completed with exit code `0`.
   - Terminal outcome: `NO SIGNAL FOUND`.
@@ -4989,7 +4989,7 @@
   - `pytest -q tests\test_video_jepa.py`
   - `pytest -q`
   - `python -m src.jepa_arc_eval --config external --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --jepa-checkpoint runs/video_jepa.pt --json-output docs/jepa_attempt_report.json --trace-dir docs/jepa_attempt_traces --device cuda`
-  - `rg -n "Got anonymous API key|anonymous API key|<redacted-runtime-credential>" docs data src tests frozen CONTEXT.md -S`
+  - generic anonymous-credential phrase and exact-token scan over `docs`, `data`, `src`, `tests`, `frozen`, and `CONTEXT.md`
   - `Get-ChildItem docs\jepa_attempt_traces -Recurse -File | Measure-Object Length -Sum`
   - one-off Python compaction over `docs\jepa_attempt_traces\*.json`
   - `python -m src.generalization_audit --json-output docs/generalization_audit_after_jepa.json`
@@ -5074,7 +5074,7 @@
   - `pytest -q tests\test_video_jepa.py`
   - `pytest -q`
   - `python -m src.jepa_arc_eval --config external --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --jepa-checkpoint runs/video_jepa.pt --json-output docs/jepa_attempt_report.json --trace-dir docs/jepa_attempt_traces --device cuda`
-  - `rg -n "Got anonymous API key|anonymous API key" docs data src tests frozen -S`
+  - generic anonymous-credential phrase scan over `docs`, `data`, `src`, `tests`, and `frozen`
   - one-off exact-token scan over `docs`, `data`, `src`, `tests`, `frozen`, and `CONTEXT.md` without printing the token value
   - `Get-ChildItem docs\jepa_attempt_traces -Recurse -Filter *.json | Measure-Object Length -Sum`
   - one-off Python compaction over `docs\jepa_attempt_traces\*.json`
@@ -5135,3 +5135,96 @@
   - Strongest remaining bottleneck is object/region causal hypothesis formation plus sequence-level experiment planning.
 - Exact next action:
   - Implement region/object causal hypotheses from public frame diffs and feed them into a compact sequence-level next-attempt planner without game-specific branches, hidden labels, source inspection, or fixed schedules.
+
+## Step 0182 - Region/object causal planner implemented, official result still negative
+
+- Files touched:
+  - `src\attempt_buffer.py`
+  - `src\jepa_attempt_memory.py`
+  - `src\jepa_arc_eval.py`
+  - `tests\test_video_jepa.py`
+  - `docs\jepa_attempt_report.json`
+  - `docs\generalization_audit_after_jepa.json`
+  - `docs\jepa_attempt_traces\`
+  - `RESEARCH_STATE.md`
+  - `METHODS_ATTEMPTED.md`
+  - `ARC_RESULTS.md`
+  - `FAILURE_ANALYSIS.md`
+  - `TODO_NEXT.md`
+  - `CONTEXT.md`
+- Commands run:
+  - `Get-Content -Raw GOAL.md`
+  - `Get-Content -Raw RESEARCH_STATE.md`
+  - `Get-Content -Raw METHODS_ATTEMPTED.md`
+  - `Get-Content -Raw ARC_RESULTS.md`
+  - `Get-Content -Raw FAILURE_ANALYSIS.md`
+  - `Get-Content -Raw TODO_NEXT.md`
+  - `Get-Content -Raw CONTEXT.md`
+  - `python -m py_compile src\attempt_buffer.py src\jepa_attempt_memory.py src\jepa_arc_eval.py`
+  - `pytest -q tests\test_video_jepa.py`
+  - `pytest -q`
+  - `python -m src.jepa_arc_eval --config external --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --jepa-checkpoint runs/video_jepa.pt --json-output docs/jepa_attempt_report.json --trace-dir docs/jepa_attempt_traces --device cuda`
+  - generic anonymous-credential phrase scan over `docs`, `data`, `src`, `tests`, and `frozen`
+  - one-off exact-token scan over repository artifacts and `CONTEXT.md` without printing the token value
+  - `Get-ChildItem docs\jepa_attempt_traces -Recurse -Filter *.json | Measure-Object Length -Sum`
+  - one-off Python compaction over `docs\jepa_attempt_traces\*.json`
+  - `python -m src.generalization_audit --json-output docs/generalization_audit_after_jepa.json`
+  - `python -m audit.leakage_scan`
+  - final `pytest -q`
+  - `Get-FileHash -Algorithm SHA256 -LiteralPath @('src\attempt_buffer.py','src\jepa_attempt_memory.py','src\jepa_arc_eval.py','tests\test_video_jepa.py','docs\jepa_attempt_report.json','docs\generalization_audit_after_jepa.json','docs\jepa_attempt_traces\_official_jepa_worker_report.json')`
+- Observed results/errors:
+  - Added `next_frame` capture to attempt timeline steps so public frame diffs can be computed from compact traces.
+  - Implemented public region/object causal hypotheses:
+    - public movement, spawn, removal, toggle/transform, visual transform, and blocked/no-effect hypotheses;
+    - changed-region and changed-color counts;
+    - action-family to region/color values;
+    - delayed public-event region links;
+    - failed-region accounting from blocked/no-effect public transitions.
+  - Added object-region action scoring and short sequence candidates from prior public-event action windows.
+  - Wired attempt start and action choice so the best legal sequence candidate can be replayed across an attempt while preserving the existing recurrent state and audit action-source strings.
+  - Added focused tests for `next_frame` persistence, public movement hypothesis detection, object-region contact scoring, and sequence candidate replay.
+  - Focused JEPA tests after patch: `13 passed in 2.57s`.
+  - Full tests before official rerun: `94 passed in 54.08s`.
+  - Official/external JEPA rerun completed on CUDA and still reported `NO IMPROVEMENT FOUND`.
+  - Latest official JEPA primary result:
+    - `jepa_plus_attempt_memory`: solve `0.0`, score `0.0013333333333333335`, useful events `0.013333333333333334`, repeat collapse `0.8607239187052945`, invalid actions `0.0`.
+    - `official_score_gain`: `0.0`.
+    - `official_useful_event_gain`: `0.0`.
+    - `attempt_2_or_3_improves_over_attempt_1`: `false`.
+    - `repeat_collapse_drop_attempt_1_to_3`: `-0.051449664832514785`.
+    - `jepa_causal_substrate_chain`: `true`.
+    - `no_hack_passes`: `true`.
+  - Primary attempt table:
+    - attempt 1: mean normalized score `0.004`, useful events `0.04`, repeat collapse `0.8579215341806236`, action entropy `0.7487791837206761`;
+    - attempt 2: mean normalized score `0.0`, useful events `0.0`, repeat collapse `0.8148790229221212`, action entropy `0.8774161563528656`;
+    - attempt 3: mean normalized score `0.0`, useful events `0.0`, repeat collapse `0.9093711990131383`, action entropy `0.43308076426099906`.
+  - Best retained official public result remains `0/25` solved and mean normalized score `0.005` from `docs\arc_affordance_report.json` variant `state_graph_affordance`; this is not a success claim.
+  - Runtime stdout included a fresh anonymous ARC credential string. The generic phrase scan over `docs`, `data`, `src`, `tests`, and `frozen` returned no matches, and the one-off exact-token scan returned `hits=0`. The credential value was not persisted.
+  - JEPA trace compaction after rerun:
+    - compacted `651`
+    - skipped `1`
+    - bytes before `2319825117`
+    - bytes after `246863146`
+    - reduction `0.893585449959`
+  - Compact trace schema preserves `frame`, `next_frame`, legal actions, score/event deltas, terminal flags, compact JEPA policy diagnostics, transition-graph summaries, object causal hypotheses, object memory summary, and sequence plan summaries.
+  - Generalization audit after compaction: `EXTERNAL GENERALIZATION AUDIT PROVEN`.
+  - Leakage scan: `passes=true`, no findings.
+  - Final tests after reports/audits: `94 passed in 55.26s`.
+  - Artifact hashes:
+    - `src\attempt_buffer.py`: `33E69313AC81DDFEF6826EEB6E4708BFD3DA95D1AB0D54AFE75FB12ADF564157`
+    - `src\jepa_attempt_memory.py`: `D9E98898FA50E314D4C7AED82476189DE278C7B68449E7C7281D8AC2C4392CE5`
+    - `src\jepa_arc_eval.py`: `7A9E80E6E427E9A64DA77936D4949FBBAAB03B4516BD466F7B333E1D2B233705`
+    - `tests\test_video_jepa.py`: `B32C15E9084317F059A0DB5199CE10B0854EFD1C509389B93D1F1B851BB51AE2`
+    - `docs\jepa_attempt_report.json`: `E37177906C3A84C10C547B407D0D966D9F62D094BED22FED299BBF297E160F64`
+    - `docs\generalization_audit_after_jepa.json`: `52023C63F540E0F69EE3F7D97266F08D39398860676F47CB3DE3AAC7F2F65949`
+    - `docs\jepa_attempt_traces\_official_jepa_worker_report.json`: `5B3C8A13373FB3B03A7CEAD44DC9A3B7E72D86381059B4BB8821B5E66C758EFF`
+- GOAL.md requirement advanced:
+  - Implemented the documented next experiment using public frame-diff causal evidence and compact sequence candidates.
+  - Preserved no-hack constraints and verified with official runtime, audit, leakage scan, and tests.
+  - Preserved negative evidence and updated persistent state docs.
+- Current blockers:
+  - No Terminal Outcome A for the active ARC objective. Current official completion remains `0/25`; target is at least `20/25`.
+  - The region/object causal planner does not improve attempts 2 or 3 over attempt 1 on score or useful events.
+  - Strongest remaining bottleneck is component-level mechanic/goal inference and sequence grounding from public observations.
+- Exact next action:
+  - Implement component-level public causal graphs from frame diffs and feed supported component hypotheses into sequence-level plans with contradiction handling.

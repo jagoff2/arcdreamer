@@ -2,6 +2,14 @@
 
 Last updated: 2026-06-12.
 
+## Region/Object Causal Hypotheses and Sequence Candidate Planner
+
+- Rationale: transition-graph memory was public and causal, but too local. It scored individual state-action edges without identifying changed objects/regions or preserving a compact multi-step experiment across attempts.
+- Code touched: `src/attempt_buffer.py`, `src/jepa_attempt_memory.py`, `src/jepa_arc_eval.py`, `tests/test_video_jepa.py`.
+- Mechanism: store `next_frame` in attempt traces; infer public-frame movement, spawn, removal, toggle/transform, visual transform, and blocked/no-effect hypotheses; record changed regions/colors and delayed public-event region links; score legal actions by object-region contact and action-family evidence; save short prior-event action windows as sequence candidates and replay the best legal candidate at the next attempt start.
+- Result: focused tests passed, full tests passed, generalization/leakage audits passed, official runtime still reported `NO IMPROVEMENT FOUND`. Primary `jepa_plus_attempt_memory` stayed at `0/25` solved, mean normalized score `0.0013333333333333335`, useful events `0.013333333333333334`, invalid action rate `0.0`, repeat collapse `0.8607239187052945`.
+- Status: retained as a legal public-evidence substrate, not a performance success. Attempt 2 reduced repeat collapse versus attempt 1, but no later-attempt score/useful-event improvement occurred.
+
 ## Transition-Graph Next-Attempt Planner
 
 - Rationale: current attempt memory changed action distributions but did not convert prior attempts into targeted next-attempt experiments over state transitions and delayed effects.

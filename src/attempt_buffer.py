@@ -49,6 +49,7 @@ class AttemptStep:
     terminal: bool
     obs_hash: str
     next_obs_hash: str
+    next_frame: list[list[int]] | None = None
     invalid_action: bool = False
     diagnostics: dict[str, Any] = field(default_factory=dict)
 
@@ -75,6 +76,7 @@ class AttemptRecord:
             "score_delta": "public reward or score delta from transition",
             "event_delta": "public event strings from transition",
             "terminal": "terminated or truncated flag after transition",
+            "next_frame": "fixed 8x8 public observation grid after action when captured",
         }
         return payload
 
@@ -136,6 +138,7 @@ class AttemptBuffer:
                         "actions": result.observation.available_actions,
                     }
                 ),
+                next_frame=observation_frame(result.observation).astype(int).tolist(),
                 invalid_action=bool(invalid_action),
                 diagnostics=json_safe(diagnostics or {}),
             )

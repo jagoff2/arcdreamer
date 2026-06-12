@@ -107,6 +107,8 @@ class JEPAAugmentedController:
 
     def reset_attempt(self, seed: int) -> None:
         self.base.reset(seed)
+        if self.variant.use_memory and not self.variant.null_control:
+            self.memory.start_attempt()
         self.frames = 0
         self.last_base_action = None
 
@@ -129,6 +131,7 @@ class JEPAAugmentedController:
             chosen = base_action
         else:
             chosen = max(legal, key=lambda action: (adjusted.get(action, -1.0e9), -legal.index(action)))
+            self.memory.advance_sequence(chosen)
         changed = chosen != base_action
         self.changed_actions += int(changed)
         self.frames += 1

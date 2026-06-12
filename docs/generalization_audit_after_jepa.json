@@ -499,8 +499,8 @@
       "size_bytes": 15486
     },
     "src/attempt_buffer.py": {
-      "sha256": "A769816C4FB5366BED84D24DE27F6F4F31B1FC1B51590FD3EC30A47B8D9840EA",
-      "size_bytes": 9432
+      "sha256": "33E69313AC81DDFEF6826EEB6E4708BFD3DA95D1AB0D54AFE75FB12ADF564157",
+      "size_bytes": 9655
     },
     "src/video_jepa.py": {
       "sha256": "A54BEC05A4DD34CBF293738A67C0D4D1BB72354446448837DB7AE0F19E8532DF",
@@ -511,12 +511,12 @@
       "size_bytes": 8184
     },
     "src/jepa_attempt_memory.py": {
-      "sha256": "EC48E8DE673EE50D106B917E11EA62818E48EC8A6BA5C423FF879CF01252C2B5",
-      "size_bytes": 18863
+      "sha256": "D9E98898FA50E314D4C7AED82476189DE278C7B68449E7C7281D8AC2C4392CE5",
+      "size_bytes": 37382
     },
     "src/jepa_arc_eval.py": {
-      "sha256": "4F1D63A355253DE7E6296CC4733B96B16808381F32F96C18CE46B9F62523A32B",
-      "size_bytes": 36213
+      "sha256": "7A9E80E6E427E9A64DA77936D4949FBBAAB03B4516BD466F7B333E1D2B233705",
+      "size_bytes": 36372
     },
     "tests/test_external_generalization.py": {
       "sha256": "195D4E4991970BBEF88E51B442FD8C2BC01A18A3421AB02704DCA72318AFAFD2",
@@ -539,8 +539,8 @@
       "size_bytes": 3901
     },
     "tests/test_video_jepa.py": {
-      "sha256": "FB674C11BA4461647BA4923B399EB67866B2968C3546E1C35A36B04A221A2328",
-      "size_bytes": 8944
+      "sha256": "B32C15E9084317F059A0DB5199CE10B0854EFD1C509389B93D1F1B851BB51AE2",
+      "size_bytes": 12239
     },
     "docs/external_generalization_report.json": {
       "sha256": "34D5E34D0249DEDEA3AAA1A2E31DB33FCAA0CC1DBA70A8F77B30F40628E4C2AC",
@@ -607,11 +607,11 @@
       "size_bytes": 21132
     },
     "docs/jepa_attempt_report.json": {
-      "sha256": "B05A9483B157D2904C57DC070657EA4BD1ACBA91BDE4904A0251AB5B38525AC2",
-      "size_bytes": 205594
+      "sha256": "E37177906C3A84C10C547B407D0D966D9F62D094BED22FED299BBF297E160F64",
+      "size_bytes": 205811
     },
     "docs/generalization_audit_after_jepa.json": {
-      "sha256": "C0A8B4645603F9EF49CA1460A851663546A0A5CBF0D721EE0B1AD2B57EEED4A4",
+      "sha256": "A0B00B94D5E32649FD2CAAEB7252E14B83BE49DA02418FA76DB663467B66DA30",
       "size_bytes": 25139
     },
     "frozen/recurrent_latent_fast.pt": {

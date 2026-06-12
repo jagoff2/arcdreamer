@@ -16,12 +16,16 @@ from src.video_jepa import VideoJEPA, jepa_loss, null_future_loss
 def _obs(step: int, y: int, x: int) -> ArcAGI3Observation:
     grid = np.zeros((8, 8), dtype=np.int64)
     grid[y, x] = 2
+    return _obs_grid(step, grid, ("up", "down", "wait"))
+
+
+def _obs_grid(step: int, grid: np.ndarray, actions: tuple[str, ...]) -> ArcAGI3Observation:
     return ArcAGI3Observation(
         task_id="test",
         episode_id="episode",
         step_index=step,
         grid=grid,
-        available_actions=("up", "down", "wait"),
+        available_actions=actions,
         extras={},
     )
 
@@ -40,6 +44,7 @@ def test_attempt_buffer_stores_full_attempt_timeline() -> None:
     assert payload["steps"][0]["legal_actions"] == ["up", "down", "wait"]
     assert payload["steps"][0]["score_delta"] == 0.25
     assert payload["steps"][0]["event_delta"] == ["positive_reward"]
+    assert payload["steps"][0]["next_frame"][3][2] == 2
     tensors = tensors_from_attempts([record])
     assert tensors["frames"].shape[0] == 1
     assert tensors["legal_masks"].sum().item() == 3
@@ -147,6 +152,64 @@ def test_transition_graph_planner_credits_delayed_public_event_predecessor() -> 
     assert entry.transition_graph_summary["effect_edges"] == 1
     assert scores["down"] > scores["wait"]
     assert scores["down"] > 0.0
+
+
+def test_object_causal_hypothesis_detects_public_movement() -> None:
+    before_grid = np.zeros((8, 8), dtype=np.int64)
+    before_grid[2, 2] = 4
+    after_grid = np.zeros((8, 8), dtype=np.int64)
+    after_grid[2, 3] = 4
+    buffer = AttemptBuffer(suite_id="suite", task_id="task", variant="v", split="dev", seed=6, attempt_index=1)
+    before = _obs_grid(0, before_grid, ("right", "left", "wait"))
+    after = _obs_grid(1, after_grid, ("right", "left", "wait"))
+    buffer.append_transition(before, "right", ArcAGI3StepResult(after, -0.001, False, False, {"events": ["move"]}))
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    entry = memory.ingest_attempt(buffer.to_record())
+
+    assert entry.object_causal_hypotheses
+    assert entry.object_causal_hypotheses[0]["mechanism"] == "movement"
+    assert entry.object_causal_hypotheses[0]["movement_colors"] == [4]
+    assert entry.causal_hypotheses["object_changed_region_count"] >= 1.0
+    assert memory.summary()["object_memory"]["observed_colors"] == 1
+
+
+def test_object_region_memory_scores_contact_clicks_from_public_frame_diff() -> None:
+    before_grid = np.zeros((8, 8), dtype=np.int64)
+    after_grid = np.zeros((8, 8), dtype=np.int64)
+    after_grid[2, 2] = 5
+    actions = ("click:20:20", "click:56:56", "wait")
+    buffer = AttemptBuffer(suite_id="suite", task_id="task", variant="v", split="dev", seed=7, attempt_index=1)
+    before = _obs_grid(0, before_grid, actions)
+    after = _obs_grid(1, after_grid, actions)
+    buffer.append_transition(before, "click:20:20", ArcAGI3StepResult(after, 0.5, False, False, {"events": ["useful_click"]}))
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    entry = memory.ingest_attempt(buffer.to_record())
+    scores = memory.plan_scores_for_observation(before)
+
+    assert entry.object_causal_hypotheses[0]["mechanism"] == "spawn"
+    assert entry.object_causal_hypotheses[0]["click_contacts_change"] is True
+    assert entry.causal_hypotheses["object_delayed_region_links"] == 0.0
+    assert scores["click:20:20"] > scores["click:56:56"]
+    assert scores["click:20:20"] > scores["wait"]
+
+
+def test_sequence_plan_replays_prior_public_event_window_when_legal() -> None:
+    buffer = AttemptBuffer(suite_id="suite", task_id="task", variant="v", split="dev", seed=8, attempt_index=1)
+    start = _obs(0, 2, 2)
+    moved = _obs(1, 3, 2)
+    after_event = _obs(2, 3, 2)
+    buffer.append_transition(start, "down", ArcAGI3StepResult(moved, -0.001, False, False, {"events": ["move"]}))
+    buffer.append_transition(moved, "up", ArcAGI3StepResult(after_event, 1.0, False, False, {"events": ["positive_reward"]}))
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    entry = memory.ingest_attempt(buffer.to_record())
+
+    assert entry.sequence_plan_summary["sequence_candidate_count"] == 1
+    memory.start_attempt()
+    first_scores = memory.plan_scores_for_observation(start)
+    assert first_scores["down"] > first_scores["wait"]
+    memory.advance_sequence("down")
+    second_scores = memory.plan_scores_for_observation(moved)
+    assert second_scores["up"] > second_scores["wait"]
 
 
 def test_jepa_temporal_representation_changes_next_attempt_distribution() -> None:
