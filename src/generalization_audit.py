@@ -34,11 +34,17 @@ AUDIT_PATHS = [
     "src/arc_affordance_search.py",
     "src/arc_affordance_eval.py",
     "src/arc_affordance_report.py",
+    "src/attempt_buffer.py",
+    "src/video_jepa.py",
+    "src/jepa_train.py",
+    "src/jepa_attempt_memory.py",
+    "src/jepa_arc_eval.py",
     "tests/test_external_generalization.py",
     "tests/test_external_collapse.py",
     "tests/test_perceptual_affordance.py",
     "tests/test_external_base_training.py",
     "tests/test_arc_affordance_baseline.py",
+    "tests/test_video_jepa.py",
     "docs/external_generalization_report.json",
     "docs/external_generalization_report.md",
     "docs/generalization_audit.json",
@@ -55,11 +61,15 @@ AUDIT_PATHS = [
     "docs/arc_affordance_report.json",
     "docs/arc_affordance_report.md",
     "docs/generalization_audit_after_affordance_baseline.json",
+    "docs/jepa_attempt_report.json",
+    "docs/generalization_audit_after_jepa.json",
     "frozen/recurrent_latent_fast.pt",
     "frozen/external_base_v1.pt",
     "frozen/external_base_manifest_v1.json",
     "data/external_traces_manifest.json",
+    "data/jepa_trace_manifest.json",
     "runs/explorer_tiny.pt",
+    "runs/video_jepa.pt",
 ]
 
 
@@ -89,6 +99,11 @@ def external_no_hack_scan(report: dict[str, Any]) -> dict[str, Any]:
         Path("src/arc_affordance_search.py"),
         Path("src/arc_affordance_eval.py"),
         Path("src/arc_affordance_report.py"),
+        Path("src/attempt_buffer.py"),
+        Path("src/video_jepa.py"),
+        Path("src/jepa_train.py"),
+        Path("src/jepa_attempt_memory.py"),
+        Path("src/jepa_arc_eval.py"),
     ]
     forbidden_literals = [
         "hidden" + "_goal",
@@ -151,6 +166,11 @@ def no_text_as_state_check() -> dict[str, Any]:
             Path("src/arc_affordance_search.py"),
             Path("src/arc_affordance_eval.py"),
             Path("src/arc_affordance_report.py"),
+            Path("src/attempt_buffer.py"),
+            Path("src/video_jepa.py"),
+            Path("src/jepa_train.py"),
+            Path("src/jepa_attempt_memory.py"),
+            Path("src/jepa_arc_eval.py"),
         ]
         if path.exists()
     )
@@ -570,6 +590,96 @@ def arc_affordance_report_checks(report_path: str | Path = "docs/arc_affordance_
     }
 
 
+def jepa_report_checks(report_path: str | Path = "docs/jepa_attempt_report.json") -> dict[str, Any]:
+    path = Path(report_path)
+    if not path.exists():
+        return {"present": False, "passes": True}
+    report = load_json(path)
+    variants = set(report.get("variant_ids", []))
+    required_variants = {
+        "baseline_core",
+        "attempt_memory_no_jepa",
+        "jepa_random_init",
+        "jepa_pretrained_frozen_if_available",
+        "jepa_trained_dev",
+        "jepa_plus_attempt_memory",
+        "null_control",
+    }
+    outcome = report.get("terminal_outcome")
+    gates = report.get("gates", {})
+    no_hack = report.get("no_hack_proof", {})
+    official = report.get("official", {})
+    non_arc = report.get("non_arc", {})
+    attempt_rows = official.get("attempt_table", [])
+    by_variant_attempt = {(row.get("variant"), int(row.get("attempt_index", -1))) for row in attempt_rows}
+    trace_paths = [Path(item) for item in report.get("trace_paths", [])]
+    missing = [str(item) for item in trace_paths if not item.exists()]
+    sample_failures: list[str] = []
+    for item in trace_paths[:20]:
+        if not item.exists():
+            continue
+        payload = load_json(item)
+        attempt = payload.get("attempt", {})
+        steps = attempt.get("steps", [])
+        if not steps:
+            sample_failures.append(str(item))
+            continue
+        required_step = {"frame", "action", "legal_actions", "score_delta", "event_delta", "terminal"}
+        if not required_step.issubset(steps[0]):
+            sample_failures.append(str(item))
+    expected_a = all(
+        bool(gates.get(key))
+        for key in [
+            "attempt_2_or_3_improves_over_attempt_1",
+            "score_or_useful_gain_over_core",
+            "repeat_collapse_drop_gate",
+            "ablation_removes_improvement",
+            "jepa_beats_null_on_dev",
+            "non_arc_drop_within_limit",
+            "hidden_target_canary_diff_zero",
+            "jepa_emits_no_text",
+            "no_hack_passes",
+        ]
+    )
+    gate_consistent = (expected_a and outcome == "JEPA IMPROVEMENT FOUND") or (
+        (not expected_a) and outcome == "NO IMPROVEMENT FOUND"
+    )
+    device_runtime = official.get("device_runtime", {})
+    cuda_available = bool(torch.cuda.is_available())
+    non_arc_baseline = non_arc.get("aggregate_by_variant", {}).get("baseline_core", {})
+    non_arc_primary = non_arc.get("aggregate_by_variant", {}).get("jepa_plus_attempt_memory", {})
+    checks = {
+        "jepa_report_present": True,
+        "jepa_outcome_valid": outcome in {"JEPA IMPROVEMENT FOUND", "NO IMPROVEMENT FOUND"},
+        "jepa_gate_consistent": gate_consistent,
+        "jepa_variants_complete": required_variants.issubset(variants),
+        "jepa_attempt_table_complete": all((variant, attempt) in by_variant_attempt for variant in required_variants for attempt in [1, 2, 3]),
+        "jepa_traces_exist": bool(trace_paths) and not missing,
+        "jepa_trace_schema": not sample_failures,
+        "jepa_beats_null": bool(gates.get("jepa_beats_null_on_dev")),
+        "jepa_non_arc_drop_limit": bool(gates.get("non_arc_drop_within_limit"))
+        and float(gates.get("non_arc_drop", 1.0)) <= 0.05,
+        "jepa_no_hack_passes": bool(no_hack.get("passes")),
+        "jepa_hidden_canary_zero": bool(gates.get("hidden_target_canary_diff_zero")),
+        "jepa_emits_no_text": bool(gates.get("jepa_emits_no_text")) and not bool(no_hack.get("jepa_emits_text")),
+        "jepa_actions_not_direct": no_hack.get("actions_from") == "existing_core_plus_attempt_memory",
+        "jepa_data_manifest_dev_only": bool(report.get("data_manifest", {}).get("used_official_sealed_data") is False),
+        "jepa_core_choice_recorded": report.get("core_choice", {}).get("selected_core") == "old_base_finetuned",
+        "jepa_cuda_available_recorded": bool(device_runtime.get("torch_cuda_available")) == cuda_available,
+        "jepa_cuda_runtime": (not cuda_available) or str(device_runtime.get("resolved_device", "")).startswith("cuda"),
+        "jepa_non_arc_aggregates_present": bool(non_arc_baseline) and bool(non_arc_primary),
+    }
+    return {
+        "present": True,
+        "passes": all(checks.values()),
+        "checks": checks,
+        "missing_traces": missing[:20],
+        "sample_schema_failures": sample_failures[:20],
+        "outcome": outcome,
+        "primary_variant": report.get("primary_variant"),
+    }
+
+
 def build_audit(
     *,
     report_path: str | Path,
@@ -586,6 +696,7 @@ def build_audit(
     perception = perception_report_checks()
     external_base = external_base_report_checks()
     arc_affordance = arc_affordance_report_checks()
+    jepa = jepa_report_checks()
     hashes = collect_hashes(AUDIT_PATHS + EXTERNAL_AUDITED_PATHS)
     frozen_ok = (
         hashes["frozen/recurrent_latent_fast.pt"].get("sha256") == "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD"
@@ -608,6 +719,8 @@ def build_audit(
         checks.update(external_base.get("checks", {}))
     if arc_affordance["present"]:
         checks.update(arc_affordance.get("checks", {}))
+    if jepa["present"]:
+        checks.update(jepa.get("checks", {}))
     audit = {
         "terminal_outcome": "EXTERNAL GENERALIZATION AUDIT PROVEN" if all(value is True or not isinstance(value, bool) for value in checks.values()) else "NOT PROVEN",
         "external_report": str(report_path),
@@ -621,6 +734,7 @@ def build_audit(
         "perception_report_checks": perception,
         "external_base_report_checks": external_base,
         "arc_affordance_report_checks": arc_affordance,
+        "jepa_report_checks": jepa,
         "hashes": hashes,
         "limitations": [],
     }

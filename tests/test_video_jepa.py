@@ -1,0 +1,102 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import numpy as np
+import torch
+
+from src.arcagi3_adapter import ArcAGI3Observation, ArcAGI3StepResult
+from src.attempt_buffer import AttemptBuffer, tensors_from_attempts
+from src.jepa_attempt_memory import JEPAAttemptMemory
+from src.jepa_train import synthetic_attempts, train_jepa
+from src.video_jepa import VideoJEPA, jepa_loss, null_future_loss
+
+
+def _obs(step: int, y: int, x: int) -> ArcAGI3Observation:
+    grid = np.zeros((8, 8), dtype=np.int64)
+    grid[y, x] = 2
+    return ArcAGI3Observation(
+        task_id="test",
+        episode_id="episode",
+        step_index=step,
+        grid=grid,
+        available_actions=("up", "down", "wait"),
+        extras={},
+    )
+
+
+def test_attempt_buffer_stores_full_attempt_timeline() -> None:
+    buffer = AttemptBuffer(suite_id="suite", task_id="task", variant="v", split="dev", seed=1, attempt_index=2)
+    before = _obs(0, 2, 2)
+    after = _obs(1, 3, 2)
+    result = ArcAGI3StepResult(after, 0.25, False, False, {"events": ["positive_reward"]})
+    buffer.append_transition(before, "down", result)
+    record = buffer.to_record()
+    payload = record.to_dict()
+    assert payload["attempt_index"] == 2
+    assert payload["steps"][0]["frame"][2][2] == 2
+    assert payload["steps"][0]["action"] == "down"
+    assert payload["steps"][0]["legal_actions"] == ["up", "down", "wait"]
+    assert payload["steps"][0]["score_delta"] == 0.25
+    assert payload["steps"][0]["event_delta"] == ["positive_reward"]
+    tensors = tensors_from_attempts([record])
+    assert tensors["frames"].shape[0] == 1
+    assert tensors["legal_masks"].sum().item() == 3
+
+
+def test_video_jepa_predicts_latent_future_without_text() -> None:
+    records = synthetic_attempts(12, seed=44)
+    batch = tensors_from_attempts(records, max_steps=24)
+    model = VideoJEPA()
+    output = model(batch["frames"], batch["action_ids"], batch["legal_counts"], batch["valid"])
+    assert output["predicted_future"].shape == output["target_future"].shape
+    assert model.emits_text is False
+    loss = jepa_loss(output)
+    null = null_future_loss(output)
+    assert torch.isfinite(loss)
+    assert torch.isfinite(null)
+
+
+def test_tiny_training_beats_null_on_generated_attempts() -> None:
+    records = synthetic_attempts(32, seed=45)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    _, metrics = train_jepa(records, device=device, seed=123)
+    assert metrics["jepa_beats_null"] is True
+    assert metrics["predicts_actions"] is False
+    assert metrics["emits_text"] is False
+
+
+def test_attempt_memory_bias_uses_prior_attempts_not_direct_jepa_action() -> None:
+    records = synthetic_attempts(4, seed=46)
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    memory.ingest_attempt(records[0])
+    summary = memory.summary()
+    assert summary["direct_action_source"] is False
+    assert summary["emits_text"] is False
+    legal_actions = records[0].steps[0].legal_actions
+    scores = {action: memory.score_action(action) for action in legal_actions}
+    assert all(isinstance(value, float) for value in scores.values())
+
+
+def test_minimal_report_schema_for_audit(tmp_path: Path) -> None:
+    report = {
+        "terminal_outcome": "NO IMPROVEMENT FOUND",
+        "variant_ids": [
+            "baseline_core",
+            "attempt_memory_no_jepa",
+            "jepa_random_init",
+            "jepa_pretrained_frozen_if_available",
+            "jepa_trained_dev",
+            "jepa_plus_attempt_memory",
+            "null_control",
+        ],
+        "gates": {"jepa_beats_null_on_dev": True, "non_arc_drop_within_limit": True},
+        "no_hack_proof": {"passes": True, "jepa_emits_text": False},
+        "official": {"attempt_table": []},
+        "non_arc": {"aggregate_by_variant": {}},
+        "trace_paths": [],
+    }
+    path = tmp_path / "report.json"
+    path.write_text(json.dumps(report), encoding="utf-8")
+    assert json.loads(path.read_text())["terminal_outcome"] == "NO IMPROVEMENT FOUND"

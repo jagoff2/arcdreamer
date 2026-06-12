@@ -1,0 +1,65 @@
+{
+  "format": "jepa_attempt_trace_manifest_v1",
+  "training_sources": [
+    "generated_non_arc_dev_attempts"
+  ],
+  "generated_attempts": 128,
+  "indexed_non_arc_dev_traces": 148,
+  "dev_trace_index_sample": [
+    "docs\\external_base_traces\\gymnasium_classic_control\\dev\\baselines\\coverage_graph_exploration\\CartPole-v1.seed_0.json",
+    "docs\\external_base_traces\\gymnasium_classic_control\\dev\\baselines\\coverage_graph_exploration\\CartPole-v1.seed_1.json",
+    "docs\\external_base_traces\\gymnasium_classic_control\\dev\\baselines\\greedy_observable_score_delta\\CartPole-v1.seed_0.json",
+    "docs\\external_base_traces\\gymnasium_classic_control\\dev\\baselines\\greedy_observable_score_delta\\CartPole-v1.seed_1.json",
+    "docs\\external_base_traces\\gymnasium_classic_control\\dev\\baselines\\novelty_first\\CartPole-v1.seed_0.json",
+    "docs\\external_base_traces\\gymnasium_classic_control\\dev\\baselines\\novelty_first\\CartPole-v1.seed_1.json",
+    "docs\\external_base_traces\\gymnasium_classic_control\\dev\\baselines\\oracle_free_observed_graph_bfs\\CartPole-v1.seed_0.json",
+    "docs\\external_base_traces\\gymnasium_classic_control\\dev\\baselines\\oracle_free_observed_graph_bfs\\CartPole-v1.seed_1.json",
+    "docs\\external_base_traces\\gymnasium_classic_control\\dev\\baselines\\random_legal\\CartPole-v1.seed_0.json",
+    "docs\\external_base_traces\\gymnasium_classic_control\\dev\\baselines\\random_legal\\CartPole-v1.seed_1.json",
+    "docs\\external_base_traces\\gymnasium_classic_control\\dev\\baselines\\repeat_last_action\\CartPole-v1.seed_0.json",
+    "docs\\external_base_traces\\gymnasium_classic_control\\dev\\baselines\\repeat_last_action\\CartPole-v1.seed_1.json",
+    "docs\\external_base_traces\\gymnasium_classic_control\\dev\\from_scratch_external_base\\CartPole-v1.seed_0.json",
+    "docs\\external_base_traces\\gymnasium_classic_control\\dev\\from_scratch_external_base\\CartPole-v1.seed_1.json",
+    "docs\\external_base_traces\\gymnasium_classic_control\\dev\\null_training_control\\CartPole-v1.seed_0.json",
+    "docs\\external_base_traces\\gymnasium_classic_control\\dev\\null_training_control\\CartPole-v1.seed_1.json",
+    "docs\\external_base_traces\\gymnasium_classic_control\\dev\\old_base_finetuned\\CartPole-v1.seed_0.json",
+    "docs\\external_base_traces\\gymnasium_classic_control\\dev\\old_base_finetuned\\CartPole-v1.seed_1.json",
+    "docs\\external_base_traces\\gymnasium_classic_control\\dev\\old_base_unchanged\\CartPole-v1.seed_0.json",
+    "docs\\external_base_traces\\gymnasium_classic_control\\dev\\old_base_unchanged\\CartPole-v1.seed_1.json"
+  ],
+  "used_official_sealed_data": false,
+  "used_hidden_labels": false,
+  "used_action_advice": false,
+  "attempt_unit_fields": [
+    "frames",
+    "actions",
+    "legal_actions",
+    "score_delta",
+    "event_delta",
+    "terminal"
+  ],
+  "metrics": {
+    "seed": 20270612,
+    "device": "cuda",
+    "train_attempts": 102,
+    "val_attempts": 26,
+    "train_loss": 0.1296790987253189,
+    "val_loss": 0.18186116218566895,
+    "null_loss": 0.654235303401947,
+    "jepa_beats_null": true,
+    "loss_tail": [
+      0.16689083,
+      0.16117667,
+      0.1561652,
+      0.15168269,
+      0.14688754,
+      0.14175163,
+      0.13695252,
+      0.13298266
+    ],
+    "predicts_actions": false,
+    "emits_text": false
+  },
+  "checkpoint": "runs\\video_jepa.pt",
+  "checkpoint_sha256": "B7EAC3E729ED345F85EA668EE55D9FA6B8624AABD07A8C7E841D5B9A377963C1"
+}

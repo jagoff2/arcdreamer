@@ -3079,6 +3079,310 @@
 - Exact next action:
   - Run `pytest -q`.
 
+## Step 0178 - JEPA goal resumed and implementation scaffold added
+
+- Files touched:
+  - `src\attempt_buffer.py`
+  - `src\video_jepa.py`
+  - `src\jepa_train.py`
+  - `src\jepa_attempt_memory.py`
+  - `src\jepa_arc_eval.py`
+  - `tests\test_video_jepa.py`
+  - `src\generalization_audit.py`
+  - `CONTEXT.md`
+- Commands run:
+  - `Get-Content -Raw GOAL.md`
+  - `Get-Content -Raw CONTEXT.md`
+  - `git status --short`
+  - `rg --files`
+  - `Get-Content CONTEXT.md -Tail 220`
+  - `Get-Content src\base_eval.py`
+  - `Get-Content src\external_collapse_experiment.py`
+  - `Get-Content src\arcagi3_official.py`
+  - `Get-Content src\generalization_audit.py`
+  - `Get-Content src\arcagi3_adapter.py`
+  - `Get-Content src\external_eval.py`
+  - `Get-Content audit\leakage_scan.py`
+  - `python -m py_compile src\attempt_buffer.py src\video_jepa.py src\jepa_train.py src\jepa_attempt_memory.py src\jepa_arc_eval.py src\generalization_audit.py`
+  - `pytest -q tests\test_video_jepa.py`
+  - `rg -n "from_pretrained|transformers|huggingface_hub|AutoModel|AutoTokenizer|torch\.hub|load_state_dict_from_url|sentencepiece|tiktoken|anthropic|cohere|llama|mistral|qwen|bert|openai|t5" src\attempt_buffer.py src\video_jepa.py src\jepa_train.py src\jepa_attempt_memory.py src\jepa_arc_eval.py tests\test_video_jepa.py -i`
+  - `git status --short`
+- Observed results/errors:
+  - Repository `GOAL.md` still contains the older recurrent-latent organism objective, not the active JEPA ARC objective. Current work proceeds from the active thread goal while preserving the mismatch in context.
+  - Worktree had only `CONTEXT.md` modified at resume before JEPA edits.
+  - Added `AttemptBuffer` with full frame/action/legal-action/score/event/terminal timeline storage and tensor conversion.
+  - Added action-conditioned `VideoJEPA` that predicts future latent visual tokens, not pixels, actions, labels, goals, or solutions, and exposes `emits_text=false`.
+  - Added dev-only/generated JEPA training command that writes `runs/video_jepa.pt` and `data/jepa_trace_manifest.json`; manifest records that official sealed data, hidden labels, and action advice are not used.
+  - Added attempt memory with JEPA token storage, failed-action statistics, event candidates, causal numeric summaries, and next-attempt numeric action biases. It marks `direct_action_source=false`.
+  - Added JEPA ARC evaluator with required variants, attempt-1/2/3 official sealed loop, non-ARC sealed comparison, official-runtime worker fallback, no-hack proof, and report generation for `docs/jepa_attempt_report.json`.
+  - Added focused JEPA tests.
+  - Wired JEPA artifact checks into `src\generalization_audit.py`.
+  - `py_compile` passed.
+  - Focused JEPA tests passed: `5 passed in 2.58s`.
+  - Targeted sensitive-string scan returned no matches; `rg` exit code was `1` because no matches were found.
+- Current blockers:
+  - Full test suite, required JEPA training, official/non-ARC evaluation, leakage scan, and generalization audit have not run after the new implementation.
+- Exact next action:
+  - Run `pytest -q`, then train JEPA with the required command.
+
+## Step 0179 - Full test suite passed after JEPA implementation
+
+- Files touched:
+  - `CONTEXT.md`
+- Commands run:
+  - `pytest -q`
+- Observed results/errors:
+  - Full test suite passed: `86 passed in 88.25s`.
+  - This includes the new JEPA focused tests plus the existing ARC/external/audit tests.
+- Current blockers:
+  - Required JEPA training, official/non-ARC evaluation, leakage scan, and generalization audit have not run after the new implementation.
+- Exact next action:
+  - Run `python -m src.jepa_train --config dev --output runs/video_jepa.pt --manifest data/jepa_trace_manifest.json`.
+
+## Step 0180 - Required JEPA training command passed on CUDA
+
+- Files touched:
+  - `runs\video_jepa.pt`
+  - `data\jepa_trace_manifest.json`
+  - `CONTEXT.md`
+- Commands run:
+  - `python -m src.jepa_train --config dev --output runs/video_jepa.pt --manifest data/jepa_trace_manifest.json`
+- Observed results/errors:
+  - Command completed with exit code `0`.
+  - Training device: `cuda`.
+  - Generated/dev attempt count: train `102`, validation `26`.
+  - Final train loss: `0.1296790987253189`.
+  - Validation JEPA latent loss: `0.18186116218566895`.
+  - Validation null loss: `0.654235303401947`.
+  - JEPA beats null: `true`.
+  - Checkpoint wrote `runs\video_jepa.pt`.
+  - Manifest wrote `data\jepa_trace_manifest.json`.
+  - Manifest records `used_official_sealed_data=false`, `used_hidden_labels=false`, and `used_action_advice=false`.
+- Current blockers:
+  - Required official/non-ARC JEPA evaluation, leakage scan, and generalization audit have not run.
+- Exact next action:
+  - Run `python -m src.jepa_arc_eval --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --jepa-checkpoint runs/video_jepa.pt --config external --json-output docs/jepa_attempt_report.json --trace-dir docs/jepa_attempt_traces`.
+
+## Step 0181 - First JEPA evaluation attempt exposed checkpoint-argument mismatch and was patched
+
+- Files touched:
+  - `src\jepa_arc_eval.py`
+  - `CONTEXT.md`
+- Commands run:
+  - `python -m src.jepa_arc_eval --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --jepa-checkpoint runs/video_jepa.pt --config external --json-output docs/jepa_attempt_report.json --trace-dir docs/jepa_attempt_traces`
+  - `.venv\Scripts\python.exe -m src.jepa_arc_eval --config official_worker --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --jepa-checkpoint runs/video_jepa.pt --json-output docs\jepa_attempt_traces\_official_jepa_worker_report.json --trace-dir docs/jepa_attempt_traces --core-arm old_base_finetuned --device cuda`
+  - `python -m py_compile src\jepa_arc_eval.py`
+  - `pytest -q tests\test_video_jepa.py`
+- Observed results/errors:
+  - Main JEPA evaluation command failed before report generation.
+  - The repo Python interpreter lacks `arc_agi`, so fallback to `.venv\Scripts\python.exe` was expected.
+  - The venv worker then failed because the required command's `--checkpoint frozen/recurrent_latent_fast.pt` is the recurrent-core checkpoint, while selected core `old_base_finetuned` requires the external-base checkpoint payload.
+  - Exact worker error: `ValueError: frozen/recurrent_latent_fast.pt is not an external base checkpoint`.
+  - Patched `src\jepa_arc_eval.py` to preserve the required `--checkpoint` argument in the report while resolving the actual external-base checkpoint to `frozen/external_base_v1.pt` when the selected core requires it.
+  - Patched fallback subprocess handling to print worker stdout/stderr on failure.
+  - `py_compile` passed after the fix.
+  - Focused JEPA tests passed after the fix: `5 passed in 2.47s`.
+- Current blockers:
+  - Required JEPA evaluation has not completed after the checkpoint-resolution fix.
+- Exact next action:
+  - Retry the required `python -m src.jepa_arc_eval ... --config external ...` command.
+
+## Step 0182 - Required JEPA ARC evaluation completed with Outcome B
+
+- Files touched:
+  - `docs\jepa_attempt_report.json`
+  - `docs\jepa_attempt_traces\`
+  - `CONTEXT.md`
+- Commands run:
+  - `python -m src.jepa_arc_eval --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --jepa-checkpoint runs/video_jepa.pt --config external --json-output docs/jepa_attempt_report.json --trace-dir docs/jepa_attempt_traces`
+  - `rg -n "Got anonymous API key|anonymous API key|d4c2d07c|50676679" docs data src tests frozen CONTEXT.md -S`
+  - `python -c "import json; d=json.load(open('docs/jepa_attempt_report.json')); print(json.dumps({...}, indent=2))"`
+  - `Get-ChildItem docs\jepa_attempt_traces -Recurse -Filter *.json | Measure-Object | Select-Object Count`
+  - `git status --short`
+- Observed results/errors:
+  - Required JEPA evaluation command completed with exit code `0`.
+  - Official worker used `.venv\Scripts\python.exe` for the installed official ARC runtime after repo Python reported `arc_agi` unavailable.
+  - Official worker wrote all required variant/attempt traces:
+    - `baseline_core`: `75` official traces.
+    - `attempt_memory_no_jepa`: `75` official traces.
+    - `jepa_random_init`: `75` official traces.
+    - `jepa_pretrained_frozen_if_available`: `75` official traces.
+    - `jepa_trained_dev`: `75` official traces.
+    - `jepa_plus_attempt_memory`: `75` official traces.
+    - `null_control`: `75` official traces.
+  - Report outcome: `NO IMPROVEMENT FOUND`.
+  - Report trace coverage: official traces `525`, non-ARC traces `126`, total report trace paths `651`; recursive JSON count in `docs\jepa_attempt_traces` is `652` including the worker report.
+  - Core choice in report: `old_base_finetuned`, selected from `docs/external_base_report.json` by non-ARC dev-only selection source.
+  - JEPA dev metrics in report: CUDA device, train attempts `102`, validation attempts `26`, validation JEPA loss `0.18186116218566895`, null loss `0.654235303401947`, `jepa_beats_null=true`.
+  - Official gates:
+    - Attempt 2/3 improves over attempt 1: `false`.
+    - Score/useful gain over core gate: `false`.
+    - Official score gain: `0.004`.
+    - Official useful-event gain: `0.04`.
+    - Repeat collapse drop from attempt 1 to 3: `-0.06315089967939458`.
+    - Repeat-collapse gate: `false`.
+    - Ablation removes improvement: `false`.
+    - Non-ARC drop: `0.0`, within limit.
+    - Hidden-target canary diff zero: `true`.
+    - JEPA emits no text: `true`.
+    - No-hack proof: `true`.
+  - Runtime stdout printed a fresh anonymous ARC credential, but targeted grep for credential log text and the two observed key fragments found no fresh credential persisted in docs, data, source, tests, frozen artifacts, or context. The only grep match was an older context line containing the phrase, not a credential.
+- Current blockers:
+  - Required leakage scan and generalization audit have not run after the JEPA report generation.
+- Exact next action:
+  - Run `python -m audit.leakage_scan`.
+
+## Step 0183 - Required leakage scan passed
+
+- Files touched:
+  - `CONTEXT.md`
+- Commands run:
+  - `python -m audit.leakage_scan`
+- Observed results/errors:
+  - Command completed with exit code `0`.
+  - Leakage scan result: `passes=true`.
+  - Findings: none.
+  - Checks all true:
+    - no external or pretrained imports.
+    - no external or pretrained text patterns.
+    - no unexpected weight files.
+    - runtime is not a prompt loop.
+- Current blockers:
+  - Required generalization audit has not run after the JEPA report generation.
+- Exact next action:
+  - Run `python -m src.generalization_audit --json-output docs/generalization_audit_after_jepa.json`.
+
+## Step 0184 - Required generalization audit passed with JEPA checks
+
+- Files touched:
+  - `docs\generalization_audit_after_jepa.json`
+  - `CONTEXT.md`
+- Commands run:
+  - `python -m src.generalization_audit --json-output docs/generalization_audit_after_jepa.json`
+- Observed results/errors:
+  - Command completed with exit code `0`.
+  - Audit terminal outcome: `EXTERNAL GENERALIZATION AUDIT PROVEN`.
+  - JEPA-specific checks all passed:
+    - report present and outcome valid.
+    - gate consistency.
+    - all required variants present.
+    - attempt table has attempts 1, 2, and 3 for every required variant.
+    - traces exist and sample schema passed.
+    - JEPA beats null.
+    - non-ARC drop within limit.
+    - no-hack proof passes.
+    - hidden-target canary zero.
+    - JEPA emits no text.
+    - actions are not direct from JEPA.
+    - data manifest is dev/generated only.
+    - core choice recorded as `old_base_finetuned`.
+    - CUDA runtime evidence recorded.
+    - non-ARC aggregates present.
+  - Audit limitations: no active capability claim is externally supported, which is acceptable discipline and not a performance success.
+- Current blockers:
+  - Full `pytest -q` has not been rerun after the final `src\jepa_arc_eval.py` checkpoint-resolution patch.
+- Exact next action:
+  - Rerun `pytest -q` for final verification.
+
+## Step 0185 - Final JEPA verification passed and final report evidence collected
+
+- Files touched:
+  - `CONTEXT.md`
+- Commands run:
+  - `pytest -q`
+  - `git status --short`
+  - `python -c "... hash collection ..."`
+  - `python -c "... summarize docs/jepa_attempt_report.json ..."`
+  - `Get-ChildItem docs\jepa_attempt_traces -Recurse -Filter *.json | Measure-Object | Select-Object Count`
+- Observed results/errors:
+  - Final full test suite passed after the final evaluator patch: `86 passed in 53.22s`.
+  - Two initial metric-collection commands failed because Unix-style heredoc/newline quoting was used in PowerShell. They did not modify files and were rerun with PowerShell-compatible here-strings.
+  - Current JEPA report outcome: `NO IMPROVEMENT FOUND`.
+  - Required command results:
+    - `pytest -q`: passed, `86 passed`.
+    - `python -m src.jepa_train --config dev --output runs/video_jepa.pt --manifest data/jepa_trace_manifest.json`: passed on CUDA.
+    - `python -m src.jepa_arc_eval --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --jepa-checkpoint runs/video_jepa.pt --config external --json-output docs/jepa_attempt_report.json --trace-dir docs/jepa_attempt_traces`: passed.
+    - `python -m audit.leakage_scan`: passed with no findings.
+    - `python -m src.generalization_audit --json-output docs/generalization_audit_after_jepa.json`: passed, `EXTERNAL GENERALIZATION AUDIT PROVEN`.
+  - JEPA report gates:
+    - Attempt 2/3 improves over attempt 1: `false`.
+    - Score or useful-event gain over core: `false`.
+    - Official score gain over core: `0.004`.
+    - Official useful-event gain over core: `0.04`.
+    - Repeat collapse drop attempt 1 to 3: `-0.06315089967939458`.
+    - Repeat collapse gate: `false`.
+    - Ablation removes improvement: `false`.
+    - JEPA beats null on dev: `true`.
+    - Non-ARC drop: `0.0`, within limit.
+    - Hidden target canary diff zero: `true`.
+    - JEPA emits no text: `true`.
+    - No-hack proof: `true`.
+  - Trace evidence:
+    - Official report trace paths: `525`.
+    - Non-ARC report trace paths: `126`.
+    - Total report trace paths: `651`.
+    - Recursive JSON files under `docs\jepa_attempt_traces`: `652`, including worker report.
+  - Official aggregate by selected primary variant `jepa_plus_attempt_memory`:
+    - Mean normalized score `0.002666666666666667`.
+    - Mean useful events `0.02666666666666667`.
+    - Mean repeat collapse `0.8774651795772449`.
+    - Invalid action rate `0.0`.
+    - Solve rate `0.0`.
+  - Official baseline core aggregate:
+    - Mean normalized score `0.0`.
+    - Mean useful events `0.0`.
+    - Mean repeat collapse `0.833294177107705`.
+    - Invalid action rate `0.0`.
+    - Solve rate `0.0`.
+  - JEPA dev latent prediction:
+    - Validation JEPA loss `0.18186116218566895`.
+    - Null loss `0.654235303401947`.
+    - `jepa_beats_null=true`.
+  - Important hashes collected before this context append:
+    - `GOAL.md`: `7889C5DED870918F1FB4831236725FFE2325A43664837EE37A31FB07799DF246`
+    - `CONTEXT.md`: `39D86F8F651F189BF5354D14829BE944E40CAC7177B2AADD96B6132811BD0770`
+    - `docs\arcagi3_failure_report.json`: `3B9AC146B3BF882757C5A9F24151586EDB019D0F85E652BA4BFEF2ACE81FC8F4`
+    - `docs\external_generalization_report.json`: `34D5E34D0249DEDEA3AAA1A2E31DB33FCAA0CC1DBA70A8F77B30F40628E4C2AC`
+    - `docs\external_base_report.json`: `CEB588733BE30151C6205217486D273723211CB98FAE43C4B56AC33DA4FC6FD5`
+    - `data\jepa_trace_manifest.json`: `43B65F56306BB27F3AA435E3F2733BF6BCAED47ACECC38815510974298C48077`
+    - `runs\video_jepa.pt`: `B7EAC3E729ED345F85EA668EE55D9FA6B8624AABD07A8C7E841D5B9A377963C1`
+    - `docs\jepa_attempt_report.json`: `969C7A4E651D674F6072B7A414E64DB12720385570469B4DA3AEF889C9268FB3`
+    - `docs\generalization_audit_after_jepa.json`: `8F433A2DE94F078DB5E042250EE1EFBAE6EDC788BE2F2356F3759E8BD2AA64C2`
+    - `frozen\recurrent_latent_fast.pt`: `D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD`
+    - `frozen\external_base_v1.pt`: `567C30E7F43876D0F31F8342D1D16A92161616F687E7D3115C3C5067CAE61F6D`
+    - `runs\explorer_tiny.pt`: `F0A2F8BE9F64B7928083E6EF59A5535998AF5E8465F4FDD3E3C1B7EDDB6727E9`
+- Current blockers:
+  - Need stage and commit the JEPA implementation/report artifacts atomically.
+- Exact next action:
+  - Stage source, tests, report, traces, manifest, generated checkpoint, and context; commit with a JEPA-specific message.
+
+## Step 0186 - JEPA traces compacted and audit rerun
+
+- Files touched:
+  - `docs\jepa_attempt_traces\`
+  - `docs\generalization_audit_after_jepa.json`
+  - `CONTEXT.md`
+- Commands run:
+  - `Get-ChildItem docs\jepa_attempt_traces -Recurse -File | Sort-Object Length -Descending | Select-Object -First 5 FullName,Length`
+  - `Get-Content <largest JEPA trace> -TotalCount 80`
+  - `python -c "... compact docs/jepa_attempt_traces JSON files ..."`
+  - `python -m src.generalization_audit --json-output docs/generalization_audit_after_jepa.json`
+- Observed results/errors:
+  - Initial JEPA trace directory size was `2206031846` bytes (`2103.84 MiB`) across `652` JSON files, too large for a sane atomic commit.
+  - Rewrote all `652` JEPA trace JSON files in compact form while preserving audited fields:
+    - metadata.
+    - attempt identity.
+    - per-step `frame`, `action`, `legal_actions`, `score_delta`, `event_delta`, `terminal`, hashes, and invalid flag.
+    - compact summary metrics.
+  - Compacted trace directory size is `124816793` bytes, a `94.34202215954773%` reduction.
+  - Reran generalization audit after compaction.
+  - Audit terminal outcome remained `EXTERNAL GENERALIZATION AUDIT PROVEN`.
+  - JEPA trace checks remained true: traces exist and sample schema passed.
+- Current blockers:
+  - Need final staging and atomic commit.
+- Exact next action:
+  - Stage source, tests, report, compacted traces, manifest, generated checkpoint, and context; commit with a JEPA-specific message.
+
 ## Step 0178 - Full pytest suite passed
 
 - Files touched:
@@ -3214,6 +3518,53 @@
   - None.
 - Exact next action:
   - Stage all affordance baseline artifacts, run staged diff checks, and commit atomically.
+
+## Step 0182 - Attempt-level Video-JEPA goal initialized
+
+- Files touched:
+  - `CONTEXT.md`
+- Commands run:
+  - `get_goal`
+  - `git status --short`
+  - `rg --files`
+  - `Get-Content GOAL.md`
+  - `Get-Content CONTEXT.md | Select-Object -Last 220`
+  - `python -c "... hash required reports and checkpoints ..."`
+  - `python -c "... inspect docs/external_base_report.json ..."`
+  - `python -c "... inspect docs/external_generalization_report.json ..."`
+  - `python -c "... inspect docs/arcagi3_failure_report.json ..."`
+  - `python -c "... inspect external_base_report schema, selection, and sealed score table ..."`
+  - `rg -n "class .*Controller|make_controller|old_base|external_base|checkpoint_arm|ARCAGI3Adapter|HeadCollapsedExplorer|load_explorer_checkpoint|ExternalBase" src\base_retrain_experiment.py src\base_eval.py src\base_world_model.py src\arcagi3_adapter.py src\external_collapse_experiment.py`
+- Observed results/errors:
+  - Active thread goal is now attempt-level action-conditioned Video-JEPA over the best current neural core.
+  - Worktree started clean.
+  - Repository `GOAL.md` still contains the older recurrent-latent organism objective, not the active JEPA objective. Current work proceeds from the active thread goal while recording this mismatch.
+  - Required source/report/checkpoint hashes at initialization:
+    - `GOAL.md`: `7889C5DED870918F1FB4831236725FFE2325A43664837EE37A31FB07799DF246`
+    - `CONTEXT.md`: `92ED70302FDD2391310E7B33A31FF24D3C1312256D8C42E5377AACF2D36FCA10`
+    - `docs\arcagi3_failure_report.json`: `3B9AC146B3BF882757C5A9F24151586EDB019D0F85E652BA4BFEF2ACE81FC8F4`
+    - `docs\external_generalization_report.json`: `34D5E34D0249DEDEA3AAA1A2E31DB33FCAA0CC1DBA70A8F77B30F40628E4C2AC`
+    - `docs\external_base_report.json`: `CEB588733BE30151C6205217486D273723211CB98FAE43C4B56AC33DA4FC6FD5`
+    - `docs\arc_affordance_report.json`: `385FA0787B7EF59F974258EF1BBD3019525742BB67AE513BE717C84F7582C21F`
+    - `frozen\recurrent_latent_fast.pt`: `D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD`
+    - `frozen\external_base_v1.pt`: `567C30E7F43876D0F31F8342D1D16A92161616F687E7D3115C3C5067CAE61F6D`
+    - `runs\explorer_tiny.pt`: `F0A2F8BE9F64B7928083E6EF59A5535998AF5E8465F4FDD3E3C1B7EDDB6727E9`
+  - Best current neural core choice:
+    - Chosen core: `old_base_finetuned`.
+    - Evidence source: `docs\external_base_report.json`, `selection.selected_variant = old_base_finetuned`.
+    - Selection source: `non_arc_dev_only_before_official_sealed_eval`.
+    - Candidate non-ARC dev table tied `old_base_finetuned`, `old_base_world_model`, and `from_scratch_external_base` at mean normalized score `0.065625`; report-selected priority breaks the tie in favor of `old_base_finetuned`.
+    - Sealed non-ARC scores also tie all model arms at non-ARC mean normalized score `0.05833333333333333`; official sealed scores do not support using this as an improvement claim.
+  - Relevant official baseline/core context:
+    - `docs\arcagi3_failure_report.json` terminal outcome: `ARC FAILURE DIAGNOSIS PROVEN`.
+    - `docs\external_generalization_report.json` terminal outcome: `EXTERNAL GENERALIZATION DISCIPLINE PROVEN`.
+    - `docs\external_base_report.json` terminal outcome: `NO IMPROVEMENT FOUND`.
+    - External-base selected arm official sealed score gain over old base: `-0.004`; useful-event gain over old base: `-0.04`; gate failed.
+  - JEPA implementation must therefore treat `old_base_finetuned` as the best current neural core for action production, but final proof must preserve negative results if JEPA does not improve official sealed attempts.
+- Current blockers:
+  - Need implement attempt buffer, action-conditioned JEPA, attempt memory, JEPA train/eval commands, tests, report, traces, and audit coverage.
+- Exact next action:
+  - Inspect base and external evaluation controller APIs for reuse in `jepa_arc_eval`.
 
 ## Step 0125 - Final full pytest passes after CUDA metadata patch
 
