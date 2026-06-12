@@ -30,10 +30,15 @@ AUDIT_PATHS = [
     "src/base_pretrain.py",
     "src/base_eval.py",
     "src/base_retrain_experiment.py",
+    "src/arc_affordance_baseline.py",
+    "src/arc_affordance_search.py",
+    "src/arc_affordance_eval.py",
+    "src/arc_affordance_report.py",
     "tests/test_external_generalization.py",
     "tests/test_external_collapse.py",
     "tests/test_perceptual_affordance.py",
     "tests/test_external_base_training.py",
+    "tests/test_arc_affordance_baseline.py",
     "docs/external_generalization_report.json",
     "docs/external_generalization_report.md",
     "docs/generalization_audit.json",
@@ -47,6 +52,9 @@ AUDIT_PATHS = [
     "docs/external_base_report.md",
     "docs/generalization_audit_after_base_retrain.json",
     "docs/audit_after_external_base.json",
+    "docs/arc_affordance_report.json",
+    "docs/arc_affordance_report.md",
+    "docs/generalization_audit_after_affordance_baseline.json",
     "frozen/recurrent_latent_fast.pt",
     "frozen/external_base_v1.pt",
     "frozen/external_base_manifest_v1.json",
@@ -77,6 +85,10 @@ def external_no_hack_scan(report: dict[str, Any]) -> dict[str, Any]:
         Path("src/base_pretrain.py"),
         Path("src/base_eval.py"),
         Path("src/base_retrain_experiment.py"),
+        Path("src/arc_affordance_baseline.py"),
+        Path("src/arc_affordance_search.py"),
+        Path("src/arc_affordance_eval.py"),
+        Path("src/arc_affordance_report.py"),
     ]
     forbidden_literals = [
         "hidden" + "_goal",
@@ -135,6 +147,10 @@ def no_text_as_state_check() -> dict[str, Any]:
             Path("src/base_pretrain.py"),
             Path("src/base_eval.py"),
             Path("src/base_retrain_experiment.py"),
+            Path("src/arc_affordance_baseline.py"),
+            Path("src/arc_affordance_search.py"),
+            Path("src/arc_affordance_eval.py"),
+            Path("src/arc_affordance_report.py"),
         ]
         if path.exists()
     )
@@ -425,6 +441,135 @@ def external_base_report_checks(report_path: str | Path = "docs/external_base_re
     }
 
 
+def arc_affordance_report_checks(report_path: str | Path = "docs/arc_affordance_report.json") -> dict[str, Any]:
+    path = Path(report_path)
+    if not path.exists():
+        return {"present": False, "passes": True}
+    report = load_json(path)
+    declared_variants = {item.get("variant_id") for item in report.get("declared_variants", [])}
+    variant_rows = {item.get("variant") for item in report.get("variant_table", [])}
+    comparison_rows = {item.get("variant") for item in report.get("comparison_table", [])}
+    ablation_rows = {item.get("variant") for item in report.get("ablation_table", [])}
+    trace_paths = [Path(item) for item in report.get("trace_paths", [])]
+    missing = [str(item) for item in trace_paths if not item.exists()]
+    sample_failures: list[str] = []
+    required_step_fields = {
+        "game",
+        "step",
+        "obs_hash",
+        "legal_action_count",
+        "chosen_action",
+        "baseline_actions",
+        "component_summary",
+        "changed_regions",
+        "action_effect_memory",
+        "score_delta",
+        "event_delta",
+        "terminal",
+        "invalid_flag",
+        "repeat_cycle_stats",
+        "choice_reason",
+    }
+    for trace_path in trace_paths[:20]:
+        if not trace_path.exists():
+            continue
+        payload = load_json(trace_path)
+        steps = payload.get("steps", [])
+        if not steps:
+            sample_failures.append(str(trace_path))
+            continue
+        if not required_step_fields.issubset(steps[0]):
+            sample_failures.append(str(trace_path))
+    gate = report.get("improvement_gate", {})
+    selected = str(report.get("selected_variant", ""))
+    selected_row = next((row for row in report.get("aggregate_table", []) if row.get("variant") == selected), {})
+    outcome = report.get("terminal_outcome")
+    no_hack = report.get("no_hack_proof", {})
+    runtime = report.get("runtime_status", {})
+    device_runtime = runtime.get("device_runtime", {})
+    old_explorer_device = runtime.get("old_explorer_device", {})
+    cuda_available = bool(torch.cuda.is_available())
+    gate_consistent = (
+        (bool(gate.get("passes")) and outcome == "AFFORDANCE BASELINE SIGNAL FOUND")
+        or ((not bool(gate.get("passes"))) and outcome == "NO SIGNAL FOUND")
+    )
+    repeat = float(selected_row.get("mean_repeat_collapse", 1.0))
+    repeat_explained = repeat <= 0.50 or bool(report.get("repeat_collapse_explanation"))
+    required_variants = {
+        "component_click_search",
+        "change_memory_search",
+        "state_graph_affordance",
+        "event_linked_ranking",
+        "object_persistence_search",
+        "combined_affordance_search",
+    }
+    required_ablations = {
+        "ablation_no_component_memory",
+        "ablation_no_change_memory",
+        "ablation_no_event_memory",
+    }
+    required_comparisons = {
+        "random_legal",
+        "repeat_last_action",
+        "coverage_graph_exploration",
+        "novelty_first",
+        "greedy_observable_score_delta",
+        "oracle_free_observed_graph_bfs",
+        "old_explorer",
+    }
+    allowed_inputs = set(report.get("source_data", {}).get("allowed_inputs", []))
+    disallowed_sources = set(report.get("source_data", {}).get("not_used", []))
+    checks = {
+        "arc_affordance_report_present": True,
+        "arc_affordance_outcome_valid": outcome in {"AFFORDANCE BASELINE SIGNAL FOUND", "NO SIGNAL FOUND"},
+        "arc_affordance_gate_consistent": gate_consistent,
+        "arc_affordance_declared_variants_complete": required_variants.issubset(declared_variants),
+        "arc_affordance_variant_rows_complete": required_variants.issubset(variant_rows),
+        "arc_affordance_comparisons_complete": required_comparisons.issubset(comparison_rows)
+        and required_comparisons.issubset(set(report.get("comparison_baselines", []))),
+        "arc_affordance_ablations_complete": required_ablations.issubset(ablation_rows),
+        "arc_affordance_traces_exist": bool(trace_paths) and not missing,
+        "arc_affordance_required_official_traces": int(report.get("required_official_trace_count", 0)) >= 25,
+        "arc_affordance_trace_schema": not sample_failures,
+        "arc_affordance_no_hack_passes": bool(no_hack.get("passes")),
+        "arc_affordance_no_external_judge": bool(no_hack.get("no_external_judge")),
+        "arc_affordance_no_game_specific_branches": bool(no_hack.get("no_game_specific_branches")),
+        "arc_affordance_no_forced_cycle": bool(no_hack.get("no_forced_cycle")),
+        "arc_affordance_invalid_action_rate_zero": float(gate.get("official_invalid_action_rate", 1.0)) == 0.0,
+        "arc_affordance_repeat_ok_or_explained": repeat_explained,
+        "arc_affordance_source_data_public_only": {
+            "official public observations",
+            "legal actions",
+            "public reward and score deltas",
+            "public event deltas",
+            "terminal flags",
+        }.issubset(allowed_inputs)
+        and {
+            "neural training",
+            "pretrained models",
+            "web data",
+            "game source inspection",
+            "game-specific branches",
+            "manual hints",
+        }.issubset(disallowed_sources),
+        "arc_affordance_cuda_available_recorded": bool(device_runtime.get("torch_cuda_available")) == cuda_available,
+        "arc_affordance_cuda_runtime": (not cuda_available) or str(runtime.get("resolved_device", "")).startswith("cuda"),
+        "arc_affordance_old_explorer_cuda_parameters": (not cuda_available)
+        or bool(old_explorer_device.get("cuda_model_parameters")),
+        "arc_affordance_action_effect_metrics_present": "action_effect_hit_rate" in report
+        and "no_op_avoidance_after_no_effect_evidence" in report,
+    }
+    return {
+        "present": True,
+        "passes": all(checks.values()),
+        "checks": checks,
+        "missing_traces": missing[:20],
+        "sample_schema_failures": sample_failures[:20],
+        "outcome": outcome,
+        "selected_variant": selected,
+    }
+
+
 def build_audit(
     *,
     report_path: str | Path,
@@ -440,6 +585,7 @@ def build_audit(
     collapse = collapse_report_checks()
     perception = perception_report_checks()
     external_base = external_base_report_checks()
+    arc_affordance = arc_affordance_report_checks()
     hashes = collect_hashes(AUDIT_PATHS + EXTERNAL_AUDITED_PATHS)
     frozen_ok = (
         hashes["frozen/recurrent_latent_fast.pt"].get("sha256") == "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD"
@@ -460,6 +606,8 @@ def build_audit(
         checks.update(perception.get("checks", {}))
     if external_base["present"]:
         checks.update(external_base.get("checks", {}))
+    if arc_affordance["present"]:
+        checks.update(arc_affordance.get("checks", {}))
     audit = {
         "terminal_outcome": "EXTERNAL GENERALIZATION AUDIT PROVEN" if all(value is True or not isinstance(value, bool) for value in checks.values()) else "NOT PROVEN",
         "external_report": str(report_path),
@@ -472,6 +620,7 @@ def build_audit(
         "collapse_report_checks": collapse,
         "perception_report_checks": perception,
         "external_base_report_checks": external_base,
+        "arc_affordance_report_checks": arc_affordance,
         "hashes": hashes,
         "limitations": [],
     }

@@ -3079,6 +3079,142 @@
 - Exact next action:
   - Run `pytest -q`.
 
+## Step 0178 - Full pytest suite passed
+
+- Files touched:
+  - `CONTEXT.md`
+- Commands run:
+  - `pytest -q`
+- Observed results/errors:
+  - Full test suite passed.
+  - Result: `81 passed in 87.45s (0:01:27)`.
+- Current blockers:
+  - Need run leakage scan and generalization audit for the affordance report.
+- Exact next action:
+  - Run `python -m audit.leakage_scan`.
+
+## Step 0179 - Leakage scan passed
+
+- Files touched:
+  - `CONTEXT.md`
+- Commands run:
+  - `python -m audit.leakage_scan`
+- Observed results/errors:
+  - Leakage scan passed.
+  - `passes=true`.
+  - Findings: `[]`.
+  - Checks true:
+    - no external or pretrained imports.
+    - no external or pretrained text patterns.
+    - no unexpected weight files.
+    - runtime is not a prompt loop.
+- Current blockers:
+  - Need run generalization audit for the affordance baseline artifacts.
+- Exact next action:
+  - Run `python -m src.generalization_audit --json-output docs/generalization_audit_after_affordance_baseline.json`.
+
+## Step 0180 - Generalization audit passed for affordance artifacts
+
+- Files touched:
+  - `docs\generalization_audit_after_affordance_baseline.json`
+  - `CONTEXT.md`
+- Commands run:
+  - `python -m src.generalization_audit --json-output docs/generalization_audit_after_affordance_baseline.json`
+- Observed results/errors:
+  - Audit terminal outcome: `EXTERNAL GENERALIZATION AUDIT PROVEN`.
+  - Affordance-specific audit checks all passed:
+    - report present and outcome valid.
+    - gate consistent.
+    - declared variants complete.
+    - variant rows complete.
+    - comparisons complete.
+    - ablations complete.
+    - traces exist.
+    - required official traces present.
+    - trace schema valid.
+    - no-hack proof passes.
+    - no external judge.
+    - no game-specific branches.
+    - no forced cycle.
+    - invalid action rate is zero.
+    - repeat collapse is acceptable or explained.
+    - source data is public-only.
+    - CUDA availability and runtime recorded.
+    - old explorer CUDA parameters recorded.
+    - action-effect metrics present.
+  - Audit limitation preserved:
+    - `No active capability claim is externally supported; this is acceptable discipline, not performance success.`
+- Current blockers:
+  - Need final artifact inspection, hashes, git diff review, atomic commit, and final report.
+- Exact next action:
+  - Inspect final report tables/hashes and git status.
+
+## Step 0181 - Final affordance artifact inspection before commit
+
+- Files touched:
+  - `CONTEXT.md`
+- Commands run:
+  - `git status --short`
+  - `python -c "... collect selected artifact hashes ..."`
+  - `python -c "... print report variant/comparison/ablation tables ..."`
+  - `git diff --stat`
+  - `Get-ChildItem docs\arc_affordance_traces -Recurse -File`
+  - `git ls-files --others --exclude-standard docs\arc_affordance_traces`
+  - `Test-Path AGENTS.md`
+- Observed results/errors:
+  - Worktree changes before staging:
+    - modified `CONTEXT.md`
+    - modified `src\generalization_audit.py`
+    - new `docs\arc_affordance_report.json`
+    - new `docs\arc_affordance_report.md`
+    - new `docs\arc_affordance_traces\`
+    - new `docs\generalization_audit_after_affordance_baseline.json`
+    - new `src\arc_affordance_baseline.py`
+    - new `src\arc_affordance_eval.py`
+    - new `src\arc_affordance_report.py`
+    - new `src\arc_affordance_search.py`
+    - new `tests\test_arc_affordance_baseline.py`
+  - Trace corpus:
+    - Count: `400`
+    - Size: `103638442` bytes (`98.84 MiB`)
+  - Report has `400` per-game rows and `400` trace paths.
+  - Variant table:
+    - `state_graph_affordance`: score `0.005`, useful events `0.04`, repeat `0.22784841859240573`, invalid `0.0`.
+    - `change_memory_search`: score `0.0`, useful events `0.0`, repeat `0.1945945731859923`, invalid `0.0`.
+    - `combined_affordance_search`: score `0.0`, useful events `0.0`, repeat `0.15957937752966717`, invalid `0.0`.
+    - `component_click_search`: score `0.0`, useful events `0.0`, repeat `0.2252431860163445`, invalid `0.0`.
+    - `event_linked_ranking`: score `0.0`, useful events `0.0`, repeat `0.23651873308895727`, invalid `0.0`.
+    - `object_persistence_search`: score `0.0`, useful events `0.0`, repeat `0.21978392237711397`, invalid `0.0`.
+  - Comparison table:
+    - `coverage_graph_exploration`: score `0.004`, useful events `0.04`, repeat `0.0749172119575549`, invalid `0.0`.
+    - `greedy_observable_score_delta`: score `0.004`, useful events `0.04`, repeat `0.8631976574155228`, invalid `0.0`.
+    - `novelty_first`: score `0.004`, useful events `0.04`, repeat `0.24933473808625575`, invalid `0.0`.
+    - `old_explorer`: score `0.004`, useful events `0.04`, repeat `0.8579215341806236`, invalid `0.0`.
+    - `oracle_free_observed_graph_bfs`: score `0.004`, useful events `0.04`, repeat `0.06396729622579062`, invalid `0.0`.
+    - `random_legal`: score `0.0`, useful events `0.0`, repeat `0.09264401897636443`, invalid `0.0`.
+    - `repeat_last_action`: score `0.0`, useful events `0.0`, repeat `0.9993442622950819`, invalid `0.0`.
+  - Ablation table:
+    - `ablation_no_component_memory`: score `0.005`, useful events `0.04`, repeat `0.16751678858206875`, invalid `0.0`.
+    - `ablation_no_change_memory`: score `0.0`, useful events `0.0`, repeat `0.18862717293775272`, invalid `0.0`.
+    - `ablation_no_event_memory`: score `0.0`, useful events `0.0`, repeat `0.14154486044769676`, invalid `0.0`.
+  - Selected artifact hashes before this context append:
+    - `GOAL.md`: `7889C5DED870918F1FB4831236725FFE2325A43664837EE37A31FB07799DF246`
+    - `src\arc_affordance_baseline.py`: `EED671853DB86EF21103C76B6A64E682C921DB1EEBAA094402F4F1D353E89AD5`
+    - `src\arc_affordance_search.py`: `131DEF7AF3F95666017BD2F1F4F951D32D091E02B177BDDCCDB65D487351ED41`
+    - `src\arc_affordance_eval.py`: `B4C89F0D910BA7CB6CB0AD933BA7AB3111DCDEE0EB9AC68A4C26963A7DFB49E8`
+    - `src\arc_affordance_report.py`: `FA4D0242C053B59EDE38547BF90C813AB5C0EC3F502E9B3C9ED611A468956CD9`
+    - `src\generalization_audit.py`: `A3220AA995C54B6B9B080DD86A994DD1D87681EBA56731BE65E4502E118EE8F9`
+    - `tests\test_arc_affordance_baseline.py`: `4E88B78CE5B9595A6FA154CCBC98225C6D698CF4B29204D5DF36EC28609D2D9A`
+    - `docs\arc_affordance_report.json`: `385FA0787B7EF59F974258EF1BBD3019525742BB67AE513BE717C84F7582C21F`
+    - `docs\arc_affordance_report.md`: `BDFC5805108C507532DDB5058301D9539C2D05FF97348E80D2E39CF5DD6CEF5F`
+    - `docs\generalization_audit_after_affordance_baseline.json`: `B8DEC9CDEB85C7FD6173414DF910D0E1109113EB4F918A58DB39CFF9C2449960`
+    - `runs\explorer_tiny.pt`: `F0A2F8BE9F64B7928083E6EF59A5535998AF5E8465F4FDD3E3C1B7EDDB6727E9`
+  - `AGENTS.md` exists and remains unchanged.
+- Current blockers:
+  - None.
+- Exact next action:
+  - Stage all affordance baseline artifacts, run staged diff checks, and commit atomically.
+
 ## Step 0125 - Final full pytest passes after CUDA metadata patch
 
 - Files touched:
@@ -4184,3 +4320,197 @@
   - None.
 - Exact next action:
   - Stage all goal artifacts, commit atomically, and provide the final technical report.
+
+## Step 0173 - Official ARC affordance baseline goal initialized
+
+- Files touched:
+  - `CONTEXT.MD`
+- Commands run:
+  - `get_goal`
+  - `rg -n "recurrence|ARC|arcagi3|affordance|external_base|GOAL" C:\Users\user\.codex\memories\MEMORY.md`
+  - `git status --short`
+  - `rg --files`
+  - `Get-Content GOAL.md`
+  - `Get-Content CONTEXT.md -Tail 260`
+  - `python -c "... hash and report extraction ..."`
+  - `Get-Content src\arcagi3_baselines.py`
+  - `Get-Content src\arcagi3_official.py`
+  - `Get-Content src\external_collapse_experiment.py`
+  - `Get-Content src\arcagi3_adapter.py`
+  - `Get-Content src\external_eval.py`
+- Observed results/errors:
+  - Active thread goal is now the non-neural official ARC-AGI-3 affordance-discovery baseline.
+  - Worktree started clean.
+  - Memory registry search returned no relevant retained notes.
+  - Repository `GOAL.md` still contains the older recurrent-latent organism objective, not the active affordance-baseline objective. Current work proceeds from the active thread goal while recording this mismatch.
+  - Source hashes at initialization:
+    - `GOAL.md`: `7889C5DED870918F1FB4831236725FFE2325A43664837EE37A31FB07799DF246`
+    - `CONTEXT.md`: `B22C840B6A1E9EEB6C732C0582E8FF944F2D2C99A8C5D09A760B28E8163AD96F`
+    - `docs\arcagi3_failure_report.json`: `3B9AC146B3BF882757C5A9F24151586EDB019D0F85E652BA4BFEF2ACE81FC8F4`
+    - `docs\external_generalization_report.json`: `34D5E34D0249DEDEA3AAA1A2E31DB33FCAA0CC1DBA70A8F77B30F40628E4C2AC`
+    - `docs\external_collapse_report.json`: `6CC4601A2533BF9BDCBCF45EEEACA9DD469A3505132A42918D4CB2296EC49DEF`
+    - `docs\external_base_report.json`: `CEB588733BE30151C6205217486D273723211CB98FAE43C4B56AC33DA4FC6FD5`
+    - `docs\perceptual_affordance_report.json`: `3C92C31DAE8ED3EDF941925DB1AE7B3AA6942220BE8132C7C69B93162FB42612`
+  - Prior official baseline scores from `docs\arcagi3_failure_report.json`:
+    - `explorer`: score `0.0`, useful events `0.0`, repeat collapse `0.9185028932649604`.
+    - `random_legal`: score `0.0`, useful events `0.0`, repeat collapse `0.09048051777578081`.
+    - `repeat_last_action`: score `0.0`, useful events `0.0`, repeat collapse `0.9993442622950819`.
+    - `coverage_graph_exploration`: score `0.004`, useful events `0.08`, repeat collapse `0.0749172119575549`.
+    - `novelty_first`: score `0.004`, useful events `0.08`, repeat collapse `0.24933473808625575`.
+    - `greedy_observable_score_delta`: score `0.004`, useful events `0.08`, repeat collapse `0.8628768240821895`.
+    - `oracle_free_observed_graph_bfs`: score `0.004`, useful events `0.08`, repeat collapse `0.06396729622579062`.
+  - Gate implied by active goal:
+    - New non-neural baseline must reach official useful events at least `0.16`.
+    - New non-neural baseline must reach mean normalized score at least `0.009`.
+    - Invalid action rate must stay `0.0`.
+    - Repeat collapse must be `<= 0.50` or explicitly explained.
+  - Prior failure causes from `docs\arcagi3_failure_report.json`:
+    - Primary failure taxonomy: `C exploration stuck/cycle` on `21` games and `F wrong/absent goal inference` on `4` games.
+    - Flat class counts: `C=25`, `F=23`, `G=21`, `H=19`.
+    - Noted visible-state bottlenecks include large click surfaces without object semantics.
+  - Prior patch experiments:
+    - Collapse selected `valence_only`, score gain `0.005`, repeat drop `0.2898760892775156`, gate failed.
+    - Perceptual affordance selected `full_perceptual_affordance`, score gain `-0.004`, useful-event gain `-0.04`, gate failed.
+    - External base selected `old_base_finetuned`, score gain `-0.004`, useful-event gain `-0.04`, gate failed.
+  - Planned declared non-neural variants:
+    - `component_click_search`
+    - `change_memory_search`
+    - `state_graph_affordance`
+    - `event_linked_ranking`
+    - `object_persistence_search`
+    - `combined_affordance_search`
+  - Required comparison policies:
+    - `random_legal`
+    - `repeat_last_action`
+    - `coverage_graph_exploration`
+    - `novelty_first`
+    - `greedy_observable_score_delta`
+    - `oracle_free_observed_graph_bfs`
+    - `old_explorer`
+- Current blockers:
+  - Need implement official non-neural affordance baseline modules, tests, report generation, audit coverage, and traces.
+- Exact next action:
+  - Add `src\arc_affordance_baseline.py`, `src\arc_affordance_search.py`, `src\arc_affordance_eval.py`, `src\arc_affordance_report.py`, and `tests\test_arc_affordance_baseline.py`.
+
+## Step 0174 - Affordance evaluator CUDA path made explicit
+
+- Files touched:
+  - `src\arc_affordance_eval.py`
+  - `CONTEXT.md`
+- Commands run:
+  - `git status --short`
+  - `rg -n "device|cuda|make_adapter|OldExplorer|explorer" src tests docs -S`
+  - `Get-Process python -ErrorAction SilentlyContinue | Select-Object Id,CPU,ProcessName,Path,StartTime`
+  - `Get-CimInstance Win32_Process -Filter "name = 'python.exe'" | Select-Object ProcessId,CreationDate,CommandLine`
+  - `rg -n "device|cuda|make_adapter|OldExplorer|explorer" src\arc_affordance_eval.py src\external_collapse_experiment.py src\device.py -S`
+  - `Get-Content src\arc_affordance_eval.py`
+  - `python -m py_compile src\arc_affordance_eval.py src\arc_affordance_report.py src\arc_affordance_baseline.py src\arc_affordance_search.py`
+- Observed results/errors:
+  - No active ARC affordance evaluation command line was visible in running Python processes.
+  - Existing older official reports show CUDA was available previously (`torch_cuda_available=true`, CUDA `12.8`, two devices).
+  - `src\arc_affordance_eval.py` already defaulted `--device` to `cuda`, but the new report did not prove resolved placement.
+  - Patched `OldExplorerPolicy` to record requested device and adapter parameter placement via `adapter_device_summary`.
+  - Patched official evaluation to resolve `--device` with the shared device resolver before loading the old explorer adapter.
+  - Patched runtime status to include requested device, resolved device, CUDA runtime metadata, and old explorer adapter device summary.
+  - `py_compile` passed for all new affordance modules.
+- Current blockers:
+  - Need run tests, leakage/generalization audit integration, official CUDA evaluation, trace/report generation, and final atomic commit.
+- Exact next action:
+  - Run focused affordance tests and patch failures.
+
+## Step 0175 - Focused affordance tests repaired
+
+- Files touched:
+  - `src\arc_affordance_report.py`
+  - `CONTEXT.md`
+- Commands run:
+  - `pytest -q tests\test_arc_affordance_baseline.py`
+  - `python -c "from src.arc_affordance_report import no_hack_proof; import json; print(json.dumps(no_hack_proof(), indent=2))"`
+  - `rg -n "hidden_goal|ground_truth|answer_key|solution_path|manual_hint|game_id ==|round_robin|official_game_id|fixture_id" src -g "arc_affordance*.py" -i`
+  - `python -m py_compile src\arc_affordance_eval.py src\arc_affordance_report.py src\arc_affordance_baseline.py src\arc_affordance_search.py`
+  - `pytest -q tests\test_arc_affordance_baseline.py`
+- Observed results/errors:
+  - Initial focused test run failed: `test_report_gate_and_no_hack_proof` reported `no_hack_proof()["passes"] is False`.
+  - Root cause was audit self-match: `src\arc_affordance_report.py` contained the literal `official_game_id` inside the no-hack proof's own AST branch detector.
+  - Patched the detector to build public-id names from split string fragments while preserving the same check.
+  - Follow-up `py_compile` passed.
+  - Follow-up focused test result: `4 passed in 1.14s`.
+- Current blockers:
+  - Generalization audit does not yet inspect the new affordance report/traces.
+- Exact next action:
+  - Add affordance report/traces checks to `src\generalization_audit.py`.
+
+## Step 0176 - Generalization audit wired to affordance artifacts
+
+- Files touched:
+  - `src\generalization_audit.py`
+  - `src\arc_affordance_report.py`
+  - `CONTEXT.md`
+- Commands run:
+  - `Get-Content src\generalization_audit.py`
+  - `rg -n "external_collapse|perceptual|external_base|AUDIT_PATHS|no_text_as_state|build_audit|leak|report_checks" src\generalization_audit.py`
+  - `python -m py_compile src\generalization_audit.py src\arc_affordance_report.py src\arc_affordance_eval.py`
+  - `rg -n "from_pretrained|transformers|huggingface_hub|AutoModel|AutoTokenizer|torch.hub|load_state_dict_from_url|sentencepiece|tiktoken|anthropic|cohere|llama|mistral|qwen|bert|openai|t5" src\arc_affordance_baseline.py src\arc_affordance_search.py src\arc_affordance_eval.py src\arc_affordance_report.py src\generalization_audit.py tests\test_arc_affordance_baseline.py -i`
+  - `pytest -q tests\test_arc_affordance_baseline.py`
+- Observed results/errors:
+  - Added new affordance source, test, report, and audit artifact paths to `AUDIT_PATHS`.
+  - Added affordance source files to external no-hack scanning and no-text-as-state scanning.
+  - Added `arc_affordance_report_checks()` with variant, comparison, ablation, trace existence/schema, gate consistency, source-data, CUDA runtime, old explorer CUDA parameter placement, invalid-action, repeat-collapse, action-effect metric, and no-hack checks.
+  - Added `no_forced_cycle=true` to the affordance report no-hack proof.
+  - `py_compile` passed for patched audit/report/eval files.
+  - Targeted leakage-sensitive string scan returned no matches.
+  - Focused affordance test result after audit integration: `4 passed in 1.18s`.
+- Current blockers:
+  - Need run official ARC-AGI-3 affordance evaluation on CUDA and generate report/traces.
+- Exact next action:
+  - Run `python -m src.arc_affordance_eval --config official --json-output docs/arc_affordance_report.json --trace-dir docs/arc_affordance_traces --device cuda`.
+
+## Step 0177 - Official ARC affordance evaluation completed
+
+- Files touched:
+  - `docs\arc_affordance_report.json`
+  - `docs\arc_affordance_report.md`
+  - `docs\arc_affordance_traces\`
+  - `CONTEXT.md`
+- Commands run:
+  - `python -m src.arc_affordance_eval --config official --json-output docs/arc_affordance_report.json --trace-dir docs/arc_affordance_traces --device cuda`
+  - `Get-Process -Id 13028 -ErrorAction SilentlyContinue | Select-Object Id,CPU,WorkingSet64,StartTime,Path`
+  - `Get-ChildItem docs\arc_affordance_traces -Recurse -Filter *.json | Group-Object { $_.Directory.Name }`
+  - `python -c "... summarize docs/arc_affordance_report.json ..."`
+  - `rg -n "Got anonymous API key|anonymous API key" docs data src tests frozen CONTEXT.md -S`
+- Observed results/errors:
+  - Official evaluator completed with exit code `0`.
+  - Terminal outcome: `NO SIGNAL FOUND`.
+  - Answer yes/no: `no`.
+  - Selected variant: `state_graph_affordance`.
+  - Required official trace count in report: `400`.
+  - Trace counts are complete: all `16` evaluated controllers have `25` official traces each.
+  - Improvement gate:
+    - Useful-event gain over best existing baseline: `0.0`.
+    - Score gain over best existing baseline: `0.001`.
+    - Invalid action rate: `0.0`.
+    - Repeat collapse: `0.22784841859240573`.
+    - Best existing baseline useful events: `0.04`.
+    - Best existing baseline score: `0.004`.
+    - Gate passes: `false`.
+  - Selected-variant diagnostics:
+    - Action-effect hit rate: `1.0`.
+    - No-op avoidance after no-effect evidence: `0.41630714583608686`.
+  - CUDA/runtime evidence in report:
+    - Requested device: `cuda`.
+    - Resolved device: `cuda`.
+    - Torch: `2.11.0+cu128`.
+    - CUDA runtime: `12.8`.
+    - CUDA devices: two `NVIDIA GeForce RTX 5060 Ti`.
+    - Old explorer adapter device: `cuda`.
+    - Old explorer parameter device: `cuda:0`.
+    - Old explorer CUDA parameters: `true`.
+  - No-hack proof in report passes with no findings:
+    - no neural training, no model tuning, no external data, no official source inspection, no game-specific branches, no forced cycle, no external judge.
+  - Bridge/perception assessment in report:
+    - `Evidence is mixed: some generic signal moved, but not enough to clear both useful-event and score gates.`
+  - Runtime stdout included an anonymous ARC credential log line, but a targeted grep across docs, data, source, tests, frozen artifacts, and context found no persisted credential log text.
+- Current blockers:
+  - Need run required full test suite, leakage scan, and generalization audit.
+- Exact next action:
+  - Run `pytest -q`.
