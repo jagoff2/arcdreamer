@@ -2,6 +2,14 @@
 
 Last updated: 2026-06-12.
 
+## Relation-Level Component Goal Chains
+
+- Rationale: exact public component-state chains were legal but too sparse. The same component relation can recur at different coordinates, so exact cells should not be the only bridge between attempts.
+- Code touched: `src/jepa_attempt_memory.py`, `tests/test_video_jepa.py`.
+- Mechanism: create public relation-state signatures from frame shape, background, component value/area counts, alignment, adjacency, and containment without exact cells; abstract contact actions into relation templates such as component value and area bucket; store relation-chain edges keyed by `(before_relation_state, action_template, after_relation_state)` with values, goal values, failures, contradictions, expectations, and delayed public-event credit; resolve relation templates to currently legal actions at planning time; abort stale relation-chain plans when live public relation postconditions contradict expectations.
+- Result: syntax check passed, focused JEPA tests passed, full tests passed before official evaluation, compact trace schema remained valid after compaction, generalization/leakage audits passed, and official runtime still reported `NO IMPROVEMENT FOUND`. Primary `jepa_plus_attempt_memory` stayed at `0/25` solved, mean normalized score `0.0013333333333333335`, useful events `0.013333333333333334`, invalid action rate `0.0`, repeat collapse `0.8425362339951956`.
+- Status: retained as a legal public-evidence substrate and relation-generalization improvement in focused tests, not a performance success. Attempt 2 repeat collapse improved to `0.7925725948141715`, but attempts 2 and 3 still had zero score and zero useful events.
+
 ## Component Transition-Goal Chain Search
 
 - Rationale: predicted component transitions scored one action at a time. They did not search over public state transitions toward previously goal-linked component states or preserve expected postconditions across a multi-step experiment.

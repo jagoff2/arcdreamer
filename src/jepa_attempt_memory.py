@@ -98,6 +98,14 @@ class JEPAAttemptMemory:
         self.component_chain_expectations: dict[tuple[str, str, str], dict[str, Any]] = {}
         self.component_chain_edges_by_state: dict[str, set[tuple[str, str]]] = {}
         self.component_goal_state_values: dict[str, float] = {}
+        self.component_relation_chain_counts: dict[tuple[str, str, str], int] = {}
+        self.component_relation_chain_values: dict[tuple[str, str, str], float] = {}
+        self.component_relation_chain_goal_values: dict[tuple[str, str, str], float] = {}
+        self.component_relation_chain_failures: dict[tuple[str, str, str], int] = {}
+        self.component_relation_chain_contradictions: dict[tuple[str, str, str], int] = {}
+        self.component_relation_chain_expectations: dict[tuple[str, str, str], dict[str, Any]] = {}
+        self.component_relation_chain_edges_by_state: dict[str, set[tuple[str, str]]] = {}
+        self.component_relation_goal_state_values: dict[str, float] = {}
         self.sequence_contradictions = 0
         self.sequence_candidates: list[dict[str, Any]] = []
         self.active_sequence: list[str] = []
@@ -144,6 +152,14 @@ class JEPAAttemptMemory:
         self.component_chain_expectations.clear()
         self.component_chain_edges_by_state.clear()
         self.component_goal_state_values.clear()
+        self.component_relation_chain_counts.clear()
+        self.component_relation_chain_values.clear()
+        self.component_relation_chain_goal_values.clear()
+        self.component_relation_chain_failures.clear()
+        self.component_relation_chain_contradictions.clear()
+        self.component_relation_chain_expectations.clear()
+        self.component_relation_chain_edges_by_state.clear()
+        self.component_relation_goal_state_values.clear()
         self.sequence_contradictions = 0
         self.sequence_candidates.clear()
         self.active_sequence.clear()
@@ -246,6 +262,7 @@ class JEPAAttemptMemory:
         delayed_region_links = self._update_object_memory(object_hypotheses, transition_outcomes)
         delayed_component_links = self._update_component_memory(component_hypotheses, transition_outcomes)
         delayed_component_chain_links = self._update_component_chain_graph(component_hypotheses, transition_outcomes)
+        delayed_relation_chain_links = self._update_component_relation_chain_graph(component_hypotheses, transition_outcomes)
         sequence_candidates_added = self._update_sequence_candidates(
             record,
             transition_outcomes,
@@ -273,6 +290,11 @@ class JEPAAttemptMemory:
                 "component_goal_state_count": float(object_summary["component_goal_state_count"]),
                 "component_chain_contradictions": float(object_summary["component_chain_contradictions"]),
                 "component_chain_delayed_links": float(delayed_component_chain_links),
+                "component_relation_chain_edge_count": float(object_summary["component_relation_chain_edge_count"]),
+                "component_relation_chain_goal_edge_count": float(object_summary["component_relation_chain_goal_edge_count"]),
+                "component_relation_goal_state_count": float(object_summary["component_relation_goal_state_count"]),
+                "component_relation_chain_contradictions": float(object_summary["component_relation_chain_contradictions"]),
+                "component_relation_chain_delayed_links": float(delayed_relation_chain_links),
                 "sequence_contradictions": float(object_summary["sequence_contradictions"]),
                 "sequence_candidates_added": float(sequence_candidates_added),
                 "sequence_candidate_count": float(object_summary["sequence_candidate_count"]),
@@ -363,11 +385,19 @@ class JEPAAttemptMemory:
             scores[action] += self._component_relation_score(action, frame, target_relation)
             scores[action] += self._component_transition_prediction_score(action, frame, target_relation)
         chain_plan = self._component_chain_plan(frame, legal_actions, components)
-        if chain_plan is not None:
-            self._activate_component_chain_plan(chain_plan)
-            first_action = str(chain_plan.get("actions", [""])[0])
+        relation_chain_plan = self._component_relation_chain_plan(frame, legal_actions, components)
+        selected_plan = chain_plan
+        if relation_chain_plan is not None and (
+            selected_plan is None
+            or float(relation_chain_plan.get("value", 0.0)) > float(selected_plan.get("value", 0.0)) + 0.08
+        ):
+            selected_plan = relation_chain_plan
+        if selected_plan is not None:
+            self._activate_component_chain_plan(selected_plan)
+            first_action = str(selected_plan.get("actions", [""])[0])
             if first_action in scores:
-                scores[first_action] += 0.34 * min(max(float(chain_plan.get("value", 0.0)), 0.0), 1.5)
+                scale = 0.30 if str(selected_plan.get("source", "")) == "component_relation_goal_chain" else 0.34
+                scores[first_action] += scale * min(max(float(selected_plan.get("value", 0.0)), 0.0), 1.5)
         planned_action = self.sequence_plan_action(legal_actions)
         if planned_action is not None:
             plan_support = self._sequence_plan_support(planned_action, frame, component_relations.get(planned_action))
@@ -416,6 +446,10 @@ class JEPAAttemptMemory:
             "component_chain_goal_edge_count": len(self.component_chain_goal_values),
             "component_goal_state_count": len(self.component_goal_state_values),
             "component_chain_contradictions": sum(self.component_chain_contradictions.values()),
+            "component_relation_chain_edge_count": len(self.component_relation_chain_counts),
+            "component_relation_chain_goal_edge_count": len(self.component_relation_chain_goal_values),
+            "component_relation_goal_state_count": len(self.component_relation_goal_state_values),
+            "component_relation_chain_contradictions": sum(self.component_relation_chain_contradictions.values()),
             "sequence_contradictions": self.sequence_contradictions,
             "sequence_candidate_count": len(self.sequence_candidates),
             "active_sequence_length": len(self.active_sequence),
@@ -525,6 +559,7 @@ class JEPAAttemptMemory:
                 "component_grounded_sequence_check",
                 "predicted_component_transition_planner",
                 "component_transition_goal_chain_search",
+                "component_relation_goal_chain_search",
                 "targeted_next_attempt_experiment",
             ],
             "transition_graph": self.transition_graph_summary(),
@@ -687,6 +722,52 @@ class JEPAAttemptMemory:
                 goal_value = max(value, 0.1)
                 self.component_chain_goal_values[key] = self.component_chain_goal_values.get(key, 0.0) + goal_value
                 self.component_goal_state_values[after_state] = self.component_goal_state_values.get(after_state, 0.0) + goal_value
+                delayed_goal_edges.add(key)
+        return len(delayed_goal_edges)
+
+    def _update_component_relation_chain_graph(
+        self,
+        hypotheses: list[dict[str, Any]],
+        outcomes: list[dict[str, Any]],
+    ) -> int:
+        event_indices = [index for index, outcome in enumerate(outcomes) if outcome["event_hit"]]
+        delayed_goal_edges: set[tuple[str, str, str]] = set()
+        delayed_credit_by_index: dict[int, float] = {}
+        for event_index in event_indices:
+            for prior_index in range(max(0, event_index - 10), event_index):
+                distance = event_index - prior_index
+                delayed_credit_by_index[prior_index] = delayed_credit_by_index.get(prior_index, 0.0) + 0.42 / float(
+                    distance + 1
+                )
+        for hypothesis in hypotheses:
+            before_state = str(hypothesis.get("before_relation_signature", ""))
+            after_state = str(hypothesis.get("after_relation_signature", ""))
+            action_template = str(hypothesis.get("action_template", ""))
+            if not before_state or not after_state or not action_template:
+                continue
+            index = int(hypothesis.get("step_index", -1))
+            outcome = outcomes[index] if 0 <= index < len(outcomes) else {}
+            key = (before_state, action_template, after_state)
+            value = (
+                _component_hypothesis_value(hypothesis)
+                + 0.30 * float(outcome.get("value", 0.0))
+                + delayed_credit_by_index.get(index, 0.0)
+            )
+            self.component_relation_chain_counts[key] = self.component_relation_chain_counts.get(key, 0) + 1
+            self.component_relation_chain_values[key] = self.component_relation_chain_values.get(key, 0.0) + value
+            self.component_relation_chain_edges_by_state.setdefault(before_state, set()).add((action_template, after_state))
+            self.component_relation_chain_expectations[key] = _relation_sequence_component_expectation(hypothesis)
+            mechanism = str(hypothesis.get("mechanism", ""))
+            if mechanism in NON_PRODUCTIVE_COMPONENT_MECHANISMS or bool(outcome.get("no_effect", False)):
+                self.component_relation_chain_failures[key] = self.component_relation_chain_failures.get(key, 0) + 1
+            if bool(hypothesis.get("event_linked")) or index in delayed_credit_by_index or bool(outcome.get("event_hit", False)):
+                goal_value = max(value, 0.1)
+                self.component_relation_chain_goal_values[key] = (
+                    self.component_relation_chain_goal_values.get(key, 0.0) + goal_value
+                )
+                self.component_relation_goal_state_values[after_state] = (
+                    self.component_relation_goal_state_values.get(after_state, 0.0) + goal_value
+                )
                 delayed_goal_edges.add(key)
         return len(delayed_goal_edges)
 
@@ -886,6 +967,26 @@ class JEPAAttemptMemory:
         score -= 0.28 * min(contradictions, 4.0)
         return float(max(min(score, 1.25), -0.50))
 
+    def _component_relation_chain_edge_score(self, key: tuple[str, str, str]) -> float:
+        count = self.component_relation_chain_counts.get(key, 0)
+        if count <= 0:
+            return 0.0
+        mean_value = self.component_relation_chain_values.get(key, 0.0) / max(count, 1)
+        goal_value = self.component_relation_chain_goal_values.get(key, 0.0) / max(count, 1)
+        state_goal = min(max(self.component_relation_goal_state_values.get(key[2], 0.0), 0.0), 3.0)
+        failures = float(self.component_relation_chain_failures.get(key, 0))
+        contradictions = float(self.component_relation_chain_contradictions.get(key, 0))
+        confidence = min(1.0, math.log1p(float(count)) / math.log(5.0))
+        reliability = max(0.0, 1.0 - (0.50 * failures + contradictions) / max(float(count) + failures + contradictions, 1.0))
+        score = confidence * reliability * (
+            0.34 * max(mean_value, 0.0) + 0.50 * max(goal_value, 0.0) + 0.18 * state_goal
+        )
+        if mean_value < 0.0:
+            score += 0.16 * mean_value
+        score -= 0.12 * min(failures, 4.0)
+        score -= 0.30 * min(contradictions, 4.0)
+        return float(max(min(score, 1.10), -0.45))
+
     def _component_chain_plan(
         self,
         frame: np.ndarray | None,
@@ -972,12 +1073,111 @@ class JEPAAttemptMemory:
         dfs(start_state, 0, [], [], [], 0.0, {start_state})
         return best
 
+    def _component_relation_chain_plan(
+        self,
+        frame: np.ndarray | None,
+        legal_actions: list[str] | tuple[str, ...],
+        components: list[_FrameComponent] | None = None,
+    ) -> dict[str, Any] | None:
+        if frame is None or not frame.size or not self.component_relation_chain_edges_by_state:
+            return None
+        start_state = _component_relation_state_signature(frame, components)
+        if not start_state:
+            return None
+        best: dict[str, Any] | None = None
+        max_depth = 3
+
+        def remember(
+            actions: list[str],
+            expectations: list[dict[str, Any]],
+            edge_keys: list[tuple[str, str, str]],
+            value: float,
+        ) -> None:
+            nonlocal best
+            if not actions:
+                return
+            adjusted = float(value) - 0.045 * float(max(len(actions) - 1, 0))
+            if adjusted <= 0.04:
+                return
+            if best is None or adjusted > float(best.get("value", 0.0)):
+                best = {
+                    "source": "component_relation_goal_chain",
+                    "actions": list(actions),
+                    "component_expectations": [dict(item) for item in expectations],
+                    "edge_keys": [list(item) for item in edge_keys],
+                    "value": adjusted,
+                    "length": len(actions),
+                    "start_relation_state": start_state,
+                }
+
+        def dfs(
+            state: str,
+            depth: int,
+            actions: list[str],
+            expectations: list[dict[str, Any]],
+            edge_keys: list[tuple[str, str, str]],
+            value: float,
+            visited: set[str],
+        ) -> None:
+            if depth >= max_depth:
+                remember(actions, expectations, edge_keys, value)
+                return
+            candidates: list[tuple[float, str, str, tuple[str, str, str], str | None]] = []
+            for action_template, after_state in self.component_relation_chain_edges_by_state.get(state, set()):
+                resolved_action = None
+                if depth == 0:
+                    resolved_action = _resolve_component_relation_action_template(
+                        action_template,
+                        legal_actions,
+                        frame,
+                        components,
+                    )
+                    if resolved_action is None:
+                        continue
+                key = (state, action_template, after_state)
+                edge_score = self._component_relation_chain_edge_score(key)
+                if edge_score <= -0.18:
+                    continue
+                candidates.append((edge_score, action_template, after_state, key, resolved_action))
+            candidates.sort(reverse=True)
+            for edge_score, action_template, after_state, key, resolved_action in candidates[:10]:
+                action = str(resolved_action or action_template)
+                expectation = dict(self.component_relation_chain_expectations.get(key, {}))
+                expectation.setdefault("action_template", action_template)
+                expectation.setdefault("before_relation_signature", state)
+                expectation.setdefault("after_relation_signature", after_state)
+                if resolved_action is not None:
+                    expectation["action"] = str(resolved_action)
+                else:
+                    expectation.setdefault("action", action)
+                new_actions = actions + [action]
+                new_expectations = expectations + [expectation]
+                new_edge_keys = edge_keys + [key]
+                state_goal = min(max(self.component_relation_goal_state_values.get(after_state, 0.0), 0.0), 3.0)
+                goal_bonus = 0.14 * state_goal
+                new_value = value + edge_score + goal_bonus
+                remember(new_actions, new_expectations, new_edge_keys, new_value)
+                if after_state not in visited:
+                    dfs(
+                        after_state,
+                        depth + 1,
+                        new_actions,
+                        new_expectations,
+                        new_edge_keys,
+                        new_value * 0.90,
+                        visited | {after_state},
+                    )
+
+        dfs(start_state, 0, [], [], [], 0.0, {start_state})
+        return best
+
     def _activate_component_chain_plan(self, plan: dict[str, Any]) -> bool:
         actions = [str(action) for action in plan.get("actions", []) if str(action)]
         if not actions:
             return False
+        source = str(plan.get("source", "component_transition_goal_chain"))
         remaining = self.active_sequence[self.sequence_cursor :] if self.active_sequence else []
-        if self.active_sequence_source == "component_transition_goal_chain" and remaining:
+        if self.active_sequence_source == source and remaining:
             if remaining == actions[: len(remaining)]:
                 return False
             if float(plan.get("value", 0.0)) < 0.20:
@@ -990,7 +1190,7 @@ class JEPAAttemptMemory:
         self.active_sequence = actions[:8]
         self.active_sequence_expectations = expectations[: len(self.active_sequence)]
         self.sequence_cursor = 0
-        self.active_sequence_source = "component_transition_goal_chain"
+        self.active_sequence_source = source
         return True
 
     def _sequence_plan_support(
@@ -1008,6 +1208,14 @@ class JEPAAttemptMemory:
         expected_before = str(expected.get("before_state_signature", ""))
         if expected_before and _component_state_signature(frame) != expected_before:
             return 0.25
+        expected_relation_before = str(expected.get("before_relation_signature", ""))
+        if expected_relation_before and _component_relation_state_signature(frame) != expected_relation_before:
+            return 0.25
+        action_template = str(expected.get("action_template", ""))
+        if action_template:
+            resolved_action = _resolve_component_relation_action_template(action_template, [action], frame)
+            if resolved_action == action:
+                return 1.0
         if target_relation is None:
             target_relation = _component_target_relation(frame, _action_target_cell(action, frame))
         current_keys = {key for key, _ in _candidate_relation_keys(_action_family(action), target_relation)}
@@ -1036,6 +1244,14 @@ class JEPAAttemptMemory:
         if before_state and after_state and action:
             chain_key = (before_state, action, after_state)
             self.component_chain_contradictions[chain_key] = self.component_chain_contradictions.get(chain_key, 0) + 1
+        before_relation = str(expected.get("before_relation_signature", ""))
+        after_relation = str(expected.get("after_relation_signature", ""))
+        action_template = str(expected.get("action_template", ""))
+        if before_relation and after_relation and action_template:
+            relation_key = (before_relation, action_template, after_relation)
+            self.component_relation_chain_contradictions[relation_key] = (
+                self.component_relation_chain_contradictions.get(relation_key, 0) + 1
+            )
 
     def _recent_stuck(self) -> bool:
         if not self.entries:
@@ -1225,11 +1441,14 @@ def _component_hypothesis_from_frames(
     after_components = _frame_components(after)
     before_state_signature = _component_state_signature(before, before_components)
     after_state_signature = _component_state_signature(after, after_components)
+    before_relation_signature = _component_relation_state_signature(before, before_components)
+    after_relation_signature = _component_relation_state_signature(after, after_components)
     target = _action_target_cell(action, before)
     target_relation = _component_target_relation(before, target, before_components)
     relation_keys = _candidate_relation_keys(family, target_relation)
     relation_key = relation_keys[0][0] if relation_keys else f"{family}:no_target"
     fallback_relation = relation_keys[1][0] if len(relation_keys) > 1 else relation_key
+    action_template = _component_relation_action_template(action, family, relation_key, target_relation)
     changed_mask = before != after
     changed_pixels = int(np.count_nonzero(changed_mask))
     matches = _match_components(before_components, after_components)
@@ -1289,6 +1508,9 @@ def _component_hypothesis_from_frames(
         "component_count_after": len(after_components),
         "before_state_signature": before_state_signature,
         "after_state_signature": after_state_signature,
+        "before_relation_signature": before_relation_signature,
+        "after_relation_signature": after_relation_signature,
+        "action_template": action_template,
         "moved_components": moved[:4],
         "appeared_components": [item.compact() for item in appeared[:4]],
         "disappeared_components": [item.compact() for item in disappeared[:4]],
@@ -1382,6 +1604,49 @@ def _component_state_signature(frame: np.ndarray, components: list[_FrameCompone
     )
 
 
+def _component_relation_state_signature(frame: np.ndarray, components: list[_FrameComponent] | None = None) -> str:
+    arr = np.asarray(frame, dtype=np.int64)
+    if arr.ndim != 2 or arr.size == 0:
+        return ""
+    if components is None:
+        components = _frame_components(arr)
+    tokens: list[str] = [
+        f"shape:{int(arr.shape[0])}:{int(arr.shape[1])}",
+        f"background:{_background_value(arr)}",
+        f"component_count:{_area_bucket(len(components))}",
+    ]
+    descriptor_counts: dict[tuple[int, int], int] = {}
+    area_counts: dict[int, int] = {}
+    for component in components:
+        area_bucket = _area_bucket(component.area)
+        descriptor = (int(component.value), int(area_bucket))
+        descriptor_counts[descriptor] = descriptor_counts.get(descriptor, 0) + 1
+        area_counts[area_bucket] = area_counts.get(area_bucket, 0) + 1
+    for (value, area_bucket), count in sorted(descriptor_counts.items()):
+        tokens.append(f"value:{value}:area:{area_bucket}:count:{count}")
+    for area_bucket, count in sorted(area_counts.items()):
+        tokens.append(f"area:{area_bucket}:count:{count}")
+    paired_components = sorted(components, key=lambda item: (-item.area, item.value, item.component_id))[:12]
+    for left_index, left in enumerate(paired_components):
+        for right in paired_components[left_index + 1 :]:
+            value_a, value_b = sorted((int(left.value), int(right.value)))
+            area_a, area_b = sorted((_area_bucket(left.area), _area_bucket(right.area)))
+            pair = f"{value_a}:{value_b}:area:{area_a}:{area_b}"
+            if int(left.value) == int(right.value):
+                tokens.append(f"same_value:{int(left.value)}:area:{area_a}:{area_b}")
+            if abs(float(left.centroid[0] - right.centroid[0])) <= 0.5:
+                tokens.append(f"align_row:{pair}")
+            if abs(float(left.centroid[1] - right.centroid[1])) <= 0.5:
+                tokens.append(f"align_col:{pair}")
+            if _bbox_touches(left.bbox, right.bbox, margin=1):
+                tokens.append(f"touch:{pair}")
+            if _bbox_contains(left.bbox, right.bbox):
+                tokens.append(f"contains:{int(left.value)}:{int(right.value)}:area:{_area_bucket(left.area)}:{_area_bucket(right.area)}")
+            elif _bbox_contains(right.bbox, left.bbox):
+                tokens.append(f"contains:{int(right.value)}:{int(left.value)}:area:{_area_bucket(right.area)}:{_area_bucket(left.area)}")
+    return "rel:" + stable_hash({"tokens": sorted(tokens)})
+
+
 def _match_components(before: list[_FrameComponent], after: list[_FrameComponent]) -> dict[int, int]:
     candidates: list[tuple[float, int, int]] = []
     for before_idx, old in enumerate(before):
@@ -1449,6 +1714,12 @@ def _bbox_touches(a: tuple[int, int, int, int], b: tuple[int, int, int, int], *,
     ay0, ax0, ay1, ax1 = a
     by0, bx0, by1, bx1 = b
     return not (ay1 + margin < by0 or by1 + margin < ay0 or ax1 + margin < bx0 or bx1 + margin < ax0)
+
+
+def _bbox_contains(outer: tuple[int, int, int, int], inner: tuple[int, int, int, int]) -> bool:
+    oy0, ox0, oy1, ox1 = outer
+    iy0, ix0, iy1, ix1 = inner
+    return oy0 <= iy0 and ox0 <= ix0 and oy1 >= iy1 and ox1 >= ix1
 
 
 def _action_target_cell(action: str, frame: np.ndarray) -> tuple[int, int] | None:
@@ -1533,6 +1804,56 @@ def _candidate_relation_keys(family: str, relation: dict[str, Any]) -> list[tupl
     return keys
 
 
+def _component_relation_action_template(
+    action: str,
+    family: str,
+    relation_key: str,
+    target_relation: dict[str, Any],
+) -> str:
+    family = str(family)
+    kind = str(target_relation.get("kind", ""))
+    if family == "contact":
+        if kind == "background":
+            return "relation:contact:background"
+        if relation_key:
+            return f"relation:{relation_key}"
+    if family == "move":
+        return f"action:{str(action)}"
+    if action:
+        return f"action:{str(action)}"
+    if relation_key:
+        return f"relation:{relation_key}"
+    return ""
+
+
+def _resolve_component_relation_action_template(
+    template: str,
+    legal_actions: list[str] | tuple[str, ...],
+    frame: np.ndarray | None,
+    components: list[_FrameComponent] | None = None,
+) -> str | None:
+    template = str(template)
+    legal = [str(action) for action in legal_actions]
+    if not template:
+        return None
+    if template.startswith("action:"):
+        action = template[len("action:") :]
+        return action if action in set(legal) else None
+    if not template.startswith("relation:"):
+        return template if template in set(legal) else None
+    if frame is None or not frame.size:
+        return None
+    expected_relation = template[len("relation:") :]
+    if components is None:
+        components = _frame_components(frame)
+    for action in legal:
+        target_relation = _component_target_relation(frame, _action_target_cell(action, frame), components)
+        current_keys = {key for key, _ in _candidate_relation_keys(_action_family(action), target_relation)}
+        if expected_relation in current_keys:
+            return action
+    return None
+
+
 def _component_prediction_key(relation_key: str, mechanism: str) -> str:
     return f"{str(relation_key)}=>{str(mechanism)}"
 
@@ -1573,6 +1894,22 @@ def _sequence_component_expectation(hypothesis: dict[str, Any]) -> dict[str, Any
     }
 
 
+def _relation_sequence_component_expectation(hypothesis: dict[str, Any]) -> dict[str, Any]:
+    if not hypothesis:
+        return {}
+    return {
+        "action": str(hypothesis.get("action", "")),
+        "action_template": str(hypothesis.get("action_template", "")),
+        "before_relation_signature": str(hypothesis.get("before_relation_signature", "")),
+        "after_relation_signature": str(hypothesis.get("after_relation_signature", "")),
+        "relation_key": str(hypothesis.get("relation_key", "")),
+        "fallback_relation": str(hypothesis.get("fallback_relation", "")),
+        "mechanism": str(hypothesis.get("mechanism", "")),
+        "target_value": int(hypothesis.get("target_value", 0) or hypothesis.get("component_value", 0) or 0),
+        "changed_expected": int(hypothesis.get("changed_pixels", 0)) > 0,
+    }
+
+
 def _component_expectation_matches(expected: dict[str, Any], actual: dict[str, Any] | None) -> bool:
     if not expected:
         return True
@@ -1586,6 +1923,14 @@ def _component_expectation_matches(expected: dict[str, Any], actual: dict[str, A
     actual_after = str(actual.get("after_state_signature", ""))
     if expected_after:
         return expected_after == actual_after
+    expected_relation_before = str(expected.get("before_relation_signature", ""))
+    actual_relation_before = str(actual.get("before_relation_signature", ""))
+    if expected_relation_before and actual_relation_before and expected_relation_before != actual_relation_before:
+        return False
+    expected_relation_after = str(expected.get("after_relation_signature", ""))
+    actual_relation_after = str(actual.get("after_relation_signature", ""))
+    if expected_relation_after:
+        return expected_relation_after == actual_relation_after
     if bool(expected.get("changed_expected", False)) and int(actual.get("changed_pixels", 0)) == 0:
         return False
     expected_keys = {str(expected.get("relation_key", "")), str(expected.get("fallback_relation", ""))}

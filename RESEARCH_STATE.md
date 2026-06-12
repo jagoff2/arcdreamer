@@ -16,7 +16,7 @@ Best retained official public result: `0/25` games solved, mean normalized score
 
 Evidence: `docs/arc_affordance_report.json`, selected variant `state_graph_affordance`, mean normalized score `0.005`, useful events `0.04`, invalid action rate `0.0`, repeat collapse `0.22784841859240573`. This did not pass its improvement gate.
 
-Latest recurrent/JEPA run: `docs/jepa_attempt_report.json`, primary variant `jepa_plus_attempt_memory`, `0/25` solved, mean normalized score `0.0013333333333333335`, useful events `0.013333333333333334`, invalid action rate `0.0`, repeat collapse `0.8345795011033633`. Outcome remains `NO IMPROVEMENT FOUND`.
+Latest recurrent/JEPA run: `docs/jepa_attempt_report.json`, primary variant `jepa_plus_attempt_memory`, `0/25` solved, mean normalized score `0.0013333333333333335`, useful events `0.013333333333333334`, invalid action rate `0.0`, repeat collapse `0.8425362339951956`. Outcome remains `NO IMPROVEMENT FOUND`.
 
 ## Current Architecture
 
@@ -27,21 +27,21 @@ Latest recurrent/JEPA run: `docs/jepa_attempt_report.json`, primary variant `jep
 - Attempt memory updates causal hypotheses and next-attempt action distributions without emitting text or direct action advice.
 - Transition-graph attempt memory keyed by public observation hash and action, with visible-effect, no-effect, and delayed-public-event credits.
 - Region/object causal memory built from public frame diffs, coarse click-to-region contact, changed colors, delayed region links, and compact prior-event sequence candidates.
-- Component-level public causal graph over connected components, component action contact relations, public component transforms, component-goal links, live component-grounded sequence contradiction checks, predicted component-transition scoring, and public component-state transition-goal chain search.
+- Component-level public causal graph over connected components, component action contact relations, public component transforms, component-goal links, live component-grounded sequence contradiction checks, predicted component-transition scoring, exact public component-state transition-goal chain search, and relation-level component goal-chain abstraction.
 
 ## Latest Change
 
-Implemented generic component transition-goal chain search in `src/jepa_attempt_memory.py`.
+Implemented relation-level component goal-chain abstraction in `src/jepa_attempt_memory.py`.
 
-The mechanism records public component-state signatures before and after actions, stores `(before_state, action, after_state)` graph edges, applies delayed public-event credit to goal-linked edges and post-states, searches short state-grounded action chains, activates a recurrent sequence plan, and aborts when live public postconditions contradict the expected component state. It does not use game IDs, hidden labels, source inspection, fixed action schedules, text action advice, or external solvers.
+The mechanism records public relation-state signatures before and after component transitions, abstracts contact actions into relation templates such as component value and area bucket instead of exact click coordinates, stores `(before_relation_state, action_template, after_relation_state)` graph edges, searches short relation-grounded chains from the current public frame, resolves relation templates back to currently legal actions, and aborts when live public relation postconditions contradict the expectation. It does not use game IDs, hidden labels, source inspection, fixed action schedules, text action advice, or external solvers.
 
 ## Active Hypothesis
 
-Public component-state chain search is a legal causal substrate and can form state-grounded short plans in focused tests, but official traces show it still does not infer the objective or produce later-attempt score/useful-event gains. Exact public component-state edges are too sparse and local without richer relation semantics.
+Relation-level component chain search is a legal causal substrate and can generalize a learned component-contact transform across changed positions in focused tests, but official traces show it still does not infer the objective or produce later-attempt score/useful-event gains. The abstraction bridges exact coordinate changes, but it still lacks robust mechanic and goal inference.
 
 ## Current Bottleneck
 
-Official traces still show no solved games and negligible useful events. Attempt 2 reduced repeat collapse to `0.7950725948141715` and raised entropy to `1.0749442526300725`, but attempts 2 and 3 still had zero score and zero useful events. The strongest repeated pattern remains exploration stuck/cycle plus absent or wrong goal/mechanic inference.
+Official traces still show no solved games and negligible useful events. Attempt 2 reduced repeat collapse to `0.7925725948141715` and raised entropy to `1.0879785904096957`, but attempts 2 and 3 still had zero score and zero useful events. Attempt 3 repeat collapse worsened to `0.8771145729907918`. The strongest repeated pattern remains exploration stuck/cycle plus absent or wrong goal/mechanic inference.
 
 ## Completion Status
 
