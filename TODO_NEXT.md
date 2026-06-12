@@ -4,26 +4,22 @@ Last updated: 2026-06-12.
 
 ## Ranked Experiments
 
-1. Mine recurring public partial-score patterns as generic mechanisms.
-   - Identify which public component relations precede sparse useful events without branching on game ID or inspecting source.
-   - Express candidates as generic public relation dynamics such as transform-to-value, removal-after-contact, transfer, alignment, containment, or repeated interaction count.
-   - Success criterion: attempts 2 or 3 improve official useful events or score over attempt 1 without increasing invalid actions.
-
-2. Add richer relation dynamics on top of relation-level chains.
-   - Current relation-chain nodes bridge positions, but they do not distinguish color match, repeated transform, removal, transfer, or movement-relative-to-target mechanics well enough.
-   - Track before/after relation deltas explicitly instead of only hashing the whole relation state.
-   - Use contradiction counts to prune stale relation mechanisms without suppressing unseen legal relations.
-
-3. Ground sequence candidates in predicted public relation transitions.
+1. Ground sequence candidates in predicted public relation transitions.
    - Current sequence candidates carry component expectations, but they still mostly replay prior positive-event windows.
-   - Add compact plan state with predicted next public component relation delta after each action and abandon/replan when observed public changes contradict it.
+   - Add compact plan state with predicted next public component relation delta after each action, not only action replay.
+   - Prefer plans whose first predicted relation delta is reachable from the current public frame and abandon/replan when observed public changes contradict it.
    - Avoid fixed schedules, forced entropy, game-specific branches, and hardcoded action strings beyond generic action-family parsing.
 
-4. Add relation-chain activation diagnostics.
-   - Count how often relation-chain plans activate, resolve to legal actions, produce public changes, and abort by contradiction.
+2. Add relation-chain and relation-delta activation diagnostics.
+   - Count how often relation-chain and relation-delta plans activate, resolve to legal actions, produce public changes, trigger useful events, and abort by contradiction.
    - Use those aggregate diagnostics to distinguish weak evidence from stale relation templates without inspecting game source or branching on game identity.
 
-5. Train or adapt the JEPA encoder on legal failed-attempt traces without solution labels.
+3. Mine recurring public partial-score patterns with plan-level context.
+   - The single-action generic relation-delta miner was legal but insufficient.
+   - Next mining should represent two-step or three-step public relation-delta chains such as contact -> transform -> event, movement -> alignment -> event, or repeated contact count -> event.
+   - Success criterion: attempts 2 or 3 improve official useful events or score over attempt 1 without increasing invalid actions.
+
+4. Train or adapt the JEPA encoder on legal failed-attempt traces without solution labels.
    - Use only public observations, legal actions, chosen actions, score/event deltas, and terminal flags.
    - Do not use game IDs as features or tune per game.
    - Treat internal losses as diagnostics only; proof remains official public runtime.
@@ -34,6 +30,12 @@ Relation-level component goal chains:
    - Record public relation-state signatures before and after component transitions.
    - Abstract contact actions into relation templates that can resolve to currently legal clicks on matching component value/area relations.
    - Store relation-chain edges with delayed public-event credit, goal-state values, failures, contradictions, and live postcondition expectations.
+   - Result: implemented and audited, but official runtime remained `NO IMPROVEMENT FOUND`; attempts 2 and 3 did not improve score or useful events over attempt 1.
+
+Generic relation-delta event mechanism mining:
+   - Convert public component before/after hypotheses into scoped generic delta tokens for movement direction, value transform, appearance, disappearance, visual transform, and blocked/no-effect.
+   - Score current legal actions by matching public action templates, generalized relation keys, action family, and component value scopes.
+   - Record delayed public-event goal credit and contradiction penalties for stale expected deltas.
    - Result: implemented and audited, but official runtime remained `NO IMPROVEMENT FOUND`; attempts 2 and 3 did not improve score or useful events over attempt 1.
 
 Component transition-goal chain search:
@@ -73,4 +75,4 @@ Transition-graph next-attempt planner:
 
 ## Immediate Next Step
 
-Implement experiment 1: mine recurring public partial-score patterns as generic relation mechanisms, then rerun tests, official evaluation, audits, compaction, and docs. Do not use game IDs, game source, hidden labels, manual hints, or per-game branches.
+Implement experiment 1: ground sequence candidates in predicted public relation transitions, then rerun tests, official evaluation, audits, compaction, and docs. Do not use game IDs, game source, hidden labels, manual hints, or per-game branches.

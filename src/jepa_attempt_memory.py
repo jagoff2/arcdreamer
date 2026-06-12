@@ -106,6 +106,12 @@ class JEPAAttemptMemory:
         self.component_relation_chain_expectations: dict[tuple[str, str, str], dict[str, Any]] = {}
         self.component_relation_chain_edges_by_state: dict[str, set[tuple[str, str]]] = {}
         self.component_relation_goal_state_values: dict[str, float] = {}
+        self.component_relation_delta_counts: dict[str, int] = {}
+        self.component_relation_delta_values: dict[str, float] = {}
+        self.component_relation_delta_goal_values: dict[str, float] = {}
+        self.component_relation_delta_failures: dict[str, int] = {}
+        self.component_relation_delta_contradictions: dict[str, int] = {}
+        self.component_relation_delta_tokens_by_scope: dict[str, set[str]] = {}
         self.sequence_contradictions = 0
         self.sequence_candidates: list[dict[str, Any]] = []
         self.active_sequence: list[str] = []
@@ -160,6 +166,12 @@ class JEPAAttemptMemory:
         self.component_relation_chain_expectations.clear()
         self.component_relation_chain_edges_by_state.clear()
         self.component_relation_goal_state_values.clear()
+        self.component_relation_delta_counts.clear()
+        self.component_relation_delta_values.clear()
+        self.component_relation_delta_goal_values.clear()
+        self.component_relation_delta_failures.clear()
+        self.component_relation_delta_contradictions.clear()
+        self.component_relation_delta_tokens_by_scope.clear()
         self.sequence_contradictions = 0
         self.sequence_candidates.clear()
         self.active_sequence.clear()
@@ -263,6 +275,10 @@ class JEPAAttemptMemory:
         delayed_component_links = self._update_component_memory(component_hypotheses, transition_outcomes)
         delayed_component_chain_links = self._update_component_chain_graph(component_hypotheses, transition_outcomes)
         delayed_relation_chain_links = self._update_component_relation_chain_graph(component_hypotheses, transition_outcomes)
+        delayed_relation_delta_links = self._update_component_relation_delta_memory(
+            component_hypotheses,
+            transition_outcomes,
+        )
         sequence_candidates_added = self._update_sequence_candidates(
             record,
             transition_outcomes,
@@ -295,6 +311,10 @@ class JEPAAttemptMemory:
                 "component_relation_goal_state_count": float(object_summary["component_relation_goal_state_count"]),
                 "component_relation_chain_contradictions": float(object_summary["component_relation_chain_contradictions"]),
                 "component_relation_chain_delayed_links": float(delayed_relation_chain_links),
+                "component_relation_delta_count": float(object_summary["component_relation_delta_count"]),
+                "component_relation_delta_goal_count": float(object_summary["component_relation_delta_goal_count"]),
+                "component_relation_delta_contradictions": float(object_summary["component_relation_delta_contradictions"]),
+                "component_relation_delta_delayed_links": float(delayed_relation_delta_links),
                 "sequence_contradictions": float(object_summary["sequence_contradictions"]),
                 "sequence_candidates_added": float(sequence_candidates_added),
                 "sequence_candidate_count": float(object_summary["sequence_candidate_count"]),
@@ -384,6 +404,7 @@ class JEPAAttemptMemory:
             target_relation = component_relations.get(action)
             scores[action] += self._component_relation_score(action, frame, target_relation)
             scores[action] += self._component_transition_prediction_score(action, frame, target_relation)
+            scores[action] += self._component_relation_delta_score(action, frame, target_relation)
         chain_plan = self._component_chain_plan(frame, legal_actions, components)
         relation_chain_plan = self._component_relation_chain_plan(frame, legal_actions, components)
         selected_plan = chain_plan
@@ -450,6 +471,10 @@ class JEPAAttemptMemory:
             "component_relation_chain_goal_edge_count": len(self.component_relation_chain_goal_values),
             "component_relation_goal_state_count": len(self.component_relation_goal_state_values),
             "component_relation_chain_contradictions": sum(self.component_relation_chain_contradictions.values()),
+            "component_relation_delta_count": len(self.component_relation_delta_counts),
+            "component_relation_delta_goal_count": len(self.component_relation_delta_goal_values),
+            "component_relation_delta_failures": sum(self.component_relation_delta_failures.values()),
+            "component_relation_delta_contradictions": sum(self.component_relation_delta_contradictions.values()),
             "sequence_contradictions": self.sequence_contradictions,
             "sequence_candidate_count": len(self.sequence_candidates),
             "active_sequence_length": len(self.active_sequence),
@@ -560,6 +585,7 @@ class JEPAAttemptMemory:
                 "predicted_component_transition_planner",
                 "component_transition_goal_chain_search",
                 "component_relation_goal_chain_search",
+                "component_relation_delta_event_miner",
                 "targeted_next_attempt_experiment",
             ],
             "transition_graph": self.transition_graph_summary(),
@@ -771,6 +797,61 @@ class JEPAAttemptMemory:
                 delayed_goal_edges.add(key)
         return len(delayed_goal_edges)
 
+    def _update_component_relation_delta_memory(
+        self,
+        hypotheses: list[dict[str, Any]],
+        outcomes: list[dict[str, Any]],
+    ) -> int:
+        event_indices = [index for index, outcome in enumerate(outcomes) if outcome["event_hit"]]
+        delayed_goal_tokens: set[str] = set()
+        delayed_credit_by_index: dict[int, float] = {}
+        for event_index in event_indices:
+            for prior_index in range(max(0, event_index - 10), event_index):
+                distance = event_index - prior_index
+                delayed_credit_by_index[prior_index] = delayed_credit_by_index.get(prior_index, 0.0) + 0.40 / float(
+                    distance + 1
+                )
+        for hypothesis in hypotheses:
+            index = int(hypothesis.get("step_index", -1))
+            outcome = outcomes[index] if 0 <= index < len(outcomes) else {}
+            token_weights = _component_relation_delta_tokens(hypothesis)
+            if not token_weights:
+                continue
+            value = (
+                _component_hypothesis_value(hypothesis)
+                + 0.28 * float(outcome.get("value", 0.0))
+                + delayed_credit_by_index.get(index, 0.0)
+            )
+            event_linked = (
+                bool(hypothesis.get("event_linked"))
+                or index in delayed_credit_by_index
+                or bool(outcome.get("event_hit", False))
+            )
+            nonproductive = str(hypothesis.get("mechanism", "")) in NON_PRODUCTIVE_COMPONENT_MECHANISMS or bool(
+                outcome.get("no_effect", False)
+            )
+            for token, weight in token_weights:
+                token = str(token)
+                scope = _relation_delta_scope(token)
+                if not token or not scope:
+                    continue
+                self.component_relation_delta_counts[token] = self.component_relation_delta_counts.get(token, 0) + 1
+                self.component_relation_delta_values[token] = (
+                    self.component_relation_delta_values.get(token, 0.0) + value * float(weight)
+                )
+                self.component_relation_delta_tokens_by_scope.setdefault(scope, set()).add(token)
+                if event_linked:
+                    goal_value = max(value * float(weight), 0.08 * float(weight))
+                    self.component_relation_delta_goal_values[token] = (
+                        self.component_relation_delta_goal_values.get(token, 0.0) + goal_value
+                    )
+                    delayed_goal_tokens.add(token)
+                if nonproductive:
+                    self.component_relation_delta_failures[token] = (
+                        self.component_relation_delta_failures.get(token, 0) + 1
+                    )
+        return len(delayed_goal_tokens)
+
     def _update_sequence_candidates(
         self,
         record: AttemptRecord,
@@ -946,6 +1027,54 @@ class JEPAAttemptMemory:
                     nonproductive_penalty += relation_weight * confidence * penalty_mean * 0.20
         score = productive_score - min(nonproductive_penalty, 0.28)
         return float(max(min(score, 0.38), -0.32))
+
+    def _component_relation_delta_score(
+        self,
+        action: str,
+        frame: np.ndarray | None,
+        target_relation: dict[str, Any] | None = None,
+    ) -> float:
+        if target_relation is None and (frame is None or not frame.size):
+            return 0.0
+        family = _action_family(action)
+        if target_relation is None and frame is not None:
+            target_relation = _component_target_relation(frame, _action_target_cell(action, frame))
+        if target_relation is None:
+            return 0.0
+        scopes = _component_relation_delta_action_scopes(action, family, target_relation)
+        if not scopes:
+            return 0.0
+        token_scope_weights: dict[str, float] = {}
+        for scope, scope_weight in scopes.items():
+            for token in self.component_relation_delta_tokens_by_scope.get(scope, set()):
+                token_scope_weights[token] = max(token_scope_weights.get(token, 0.0), float(scope_weight))
+        if not token_scope_weights:
+            return 0.0
+        productive_score = 0.0
+        nonproductive_penalty = 0.0
+        for token, scope_weight in token_scope_weights.items():
+            count = self.component_relation_delta_counts.get(token, 0)
+            if count <= 0:
+                continue
+            mean_value = self.component_relation_delta_values.get(token, 0.0) / max(count, 1)
+            goal_value = self.component_relation_delta_goal_values.get(token, 0.0) / max(count, 1)
+            failures = float(self.component_relation_delta_failures.get(token, 0))
+            contradictions = float(self.component_relation_delta_contradictions.get(token, 0))
+            confidence = min(1.0, math.log1p(float(count)) / math.log(5.0))
+            reliability = max(
+                0.0,
+                1.0 - (0.40 * failures + contradictions) / max(float(count) + failures + contradictions, 1.0),
+            )
+            if _relation_delta_token_is_productive(token):
+                candidate_score = scope_weight * confidence * reliability * (
+                    0.18 * max(mean_value, 0.0) + 0.36 * max(goal_value, 0.0)
+                )
+                productive_score = max(productive_score, candidate_score)
+            else:
+                penalty_mean = max(-mean_value, 0.0) + 0.12 * max(1.0 - max(mean_value, 0.0), 0.0)
+                nonproductive_penalty += scope_weight * confidence * penalty_mean * 0.22
+        score = productive_score - min(nonproductive_penalty, 0.22)
+        return float(max(min(score, 0.22), -0.24))
 
     def _component_chain_edge_score(self, key: tuple[str, str, str]) -> float:
         count = self.component_chain_counts.get(key, 0)
@@ -1238,6 +1367,12 @@ class JEPAAttemptMemory:
             self.component_prediction_contradictions[prediction_key] = (
                 self.component_prediction_contradictions.get(prediction_key, 0) + 1
             )
+        for token in expected.get("relation_delta_tokens", []) or []:
+            token = str(token)
+            if token:
+                self.component_relation_delta_contradictions[token] = (
+                    self.component_relation_delta_contradictions.get(token, 0) + 1
+                )
         before_state = str(expected.get("before_state_signature", ""))
         after_state = str(expected.get("after_state_signature", ""))
         action = str(expected.get("action", ""))
@@ -1498,7 +1633,7 @@ def _component_hypothesis_from_frames(
         affected = int(transforms[0].get("after_value", transforms[0].get("before_value", 0)))
     if affected is None:
         affected = int(target_relation.get("value", 0))
-    return {
+    hypothesis = {
         "step_index": int(step_index),
         "action": str(action),
         "action_family": family,
@@ -1523,6 +1658,8 @@ def _component_hypothesis_from_frames(
         "event_linked": bool(event_hit),
         "score_delta": float(score_delta),
     }
+    hypothesis["relation_delta_tokens"] = [token for token, _weight in _component_relation_delta_tokens(hypothesis)[:16]]
+    return hypothesis
 
 
 def _background_value(frame: np.ndarray) -> int:
@@ -1854,6 +1991,159 @@ def _resolve_component_relation_action_template(
     return None
 
 
+def _general_component_relation_key(relation_key: str) -> str:
+    key = str(relation_key)
+    if not key:
+        return ""
+    parts = key.split(":")
+    if "background" in parts:
+        background_index = parts.index("background")
+        return ":".join(parts[: background_index + 1])
+    return key
+
+
+def _general_component_action_template(template: str) -> str:
+    template = str(template)
+    if template.startswith("relation:"):
+        relation = _general_component_relation_key(template[len("relation:") :])
+        return f"relation:{relation}" if relation else ""
+    return template
+
+
+def _relation_delta_scope(token: str) -> str:
+    return str(token).split("|", 1)[0] if "|" in str(token) else ""
+
+
+def _relation_delta_token_is_productive(token: str) -> bool:
+    delta = str(token).split("|", 1)[-1]
+    return "blocked_or_no_effect" not in delta and delta != "mechanism:stable"
+
+
+def _movement_direction_token(delta: Any) -> str:
+    if not isinstance(delta, (list, tuple)) or len(delta) < 2:
+        return "unknown"
+    try:
+        dy = float(delta[0])
+        dx = float(delta[1])
+    except (TypeError, ValueError):
+        return "unknown"
+    if abs(dy) < 0.25 and abs(dx) < 0.25:
+        return "stationary"
+    if abs(dx) >= abs(dy) * 1.35:
+        return "right" if dx > 0.0 else "left"
+    if abs(dy) >= abs(dx) * 1.35:
+        return "down" if dy > 0.0 else "up"
+    vertical = "down" if dy > 0.0 else "up"
+    horizontal = "right" if dx > 0.0 else "left"
+    return f"{vertical}_{horizontal}"
+
+
+def _component_relation_delta_action_scopes(
+    action: str,
+    family: str,
+    target_relation: dict[str, Any],
+) -> dict[str, float]:
+    scopes: dict[str, float] = {f"family:{family}": 0.30}
+    relation_keys = _candidate_relation_keys(family, target_relation)
+    relation_key = relation_keys[0][0] if relation_keys else f"{family}:no_target"
+    template = _component_relation_action_template(action, family, relation_key, target_relation)
+    general_template = _general_component_action_template(template)
+    if general_template:
+        scopes[f"template:{general_template}"] = 1.0
+    for relation_key, weight in relation_keys:
+        general_relation = _general_component_relation_key(relation_key)
+        if general_relation:
+            scopes[f"relation:{general_relation}"] = max(scopes.get(f"relation:{general_relation}", 0.0), 0.70 * weight)
+    target_value = int(target_relation.get("value", 0) or 0)
+    if target_value:
+        scopes[f"target_value:{target_value}"] = 0.44
+        scopes[f"component_value:{target_value}"] = 0.38
+    return scopes
+
+
+def _component_relation_delta_tokens(hypothesis: dict[str, Any]) -> list[tuple[str, float]]:
+    if not hypothesis:
+        return []
+    family = str(hypothesis.get("action_family", "other"))
+    relation_key = _general_component_relation_key(str(hypothesis.get("relation_key", "")))
+    fallback_relation = _general_component_relation_key(str(hypothesis.get("fallback_relation", "")))
+    action_template = _general_component_action_template(str(hypothesis.get("action_template", "")))
+    target_relation = hypothesis.get("target_relation", {})
+    if not isinstance(target_relation, dict):
+        target_relation = {}
+    component_value = int(hypothesis.get("component_value", 0) or 0)
+    target_value = int(hypothesis.get("target_value", 0) or 0)
+    mechanism = str(hypothesis.get("mechanism", ""))
+
+    scopes: dict[str, float] = {f"family:{family}": 0.30}
+    if action_template:
+        scopes[f"template:{action_template}"] = 1.0
+    if relation_key:
+        scopes[f"relation:{relation_key}"] = max(scopes.get(f"relation:{relation_key}", 0.0), 0.82)
+    if fallback_relation and fallback_relation != relation_key:
+        scopes[f"relation:{fallback_relation}"] = max(scopes.get(f"relation:{fallback_relation}", 0.0), 0.56)
+    if target_value:
+        scopes[f"target_value:{target_value}"] = 0.42
+    if component_value:
+        scopes[f"component_value:{component_value}"] = 0.46
+
+    deltas: dict[str, float] = {}
+    if mechanism:
+        deltas[f"mechanism:{mechanism}"] = 1.0 if mechanism in PRODUCTIVE_COMPONENT_MECHANISMS else 0.58
+
+    for moved in list(hypothesis.get("moved_components", []) or [])[:3]:
+        if not isinstance(moved, dict):
+            continue
+        value = int(moved.get("value", component_value) or 0)
+        area = _area_bucket(int(moved.get("area", 0) or 0))
+        direction = _movement_direction_token(moved.get("delta", []))
+        deltas[f"move:dir:{direction}"] = max(deltas.get(f"move:dir:{direction}", 0.0), 0.70)
+        if value:
+            deltas[f"move:value:{value}:dir:{direction}"] = 1.00
+            deltas[f"move:value:{value}:area:{area}:dir:{direction}"] = 1.08
+
+    for item in list(hypothesis.get("transformed_components", []) or [])[:3]:
+        if not isinstance(item, dict):
+            continue
+        before_value = int(item.get("before_value", 0) or 0)
+        after_value = int(item.get("after_value", 0) or 0)
+        before_area = _area_bucket(int(item.get("before_area", 0) or 0))
+        after_area = _area_bucket(int(item.get("after_area", 0) or 0))
+        if before_value or after_value:
+            deltas[f"transform:{before_value}->{after_value}"] = 1.00
+            deltas[f"transform:{before_value}->{after_value}:area:{before_area}->{after_area}"] = 1.06
+        if after_value:
+            deltas[f"transform_to:{after_value}"] = max(deltas.get(f"transform_to:{after_value}", 0.0), 0.76)
+
+    for item in list(hypothesis.get("appeared_components", []) or [])[:3]:
+        if not isinstance(item, dict):
+            continue
+        value = int(item.get("value", 0) or 0)
+        area = _area_bucket(int(item.get("area", 0) or 0))
+        if value:
+            deltas[f"appear:value:{value}:area:{area}"] = 0.98
+            deltas[f"appear:value:{value}"] = max(deltas.get(f"appear:value:{value}", 0.0), 0.76)
+
+    for item in list(hypothesis.get("disappeared_components", []) or [])[:3]:
+        if not isinstance(item, dict):
+            continue
+        value = int(item.get("value", 0) or 0)
+        area = _area_bucket(int(item.get("area", 0) or 0))
+        if value:
+            deltas[f"remove:value:{value}:area:{area}"] = 0.98
+            deltas[f"remove:value:{value}"] = max(deltas.get(f"remove:value:{value}", 0.0), 0.76)
+
+    if mechanism == "component_visual_transform":
+        deltas["visual_transform"] = max(deltas.get("visual_transform", 0.0), 0.76)
+
+    token_weights: dict[str, float] = {}
+    for scope, scope_weight in scopes.items():
+        for delta, delta_weight in deltas.items():
+            token = f"{scope}|{delta}"
+            token_weights[token] = max(token_weights.get(token, 0.0), float(scope_weight) * float(delta_weight))
+    return sorted(token_weights.items(), key=lambda item: (-item[1], item[0]))[:36]
+
+
 def _component_prediction_key(relation_key: str, mechanism: str) -> str:
     return f"{str(relation_key)}=>{str(mechanism)}"
 
@@ -1891,6 +2181,7 @@ def _sequence_component_expectation(hypothesis: dict[str, Any]) -> dict[str, Any
         "mechanism": str(hypothesis.get("mechanism", "")),
         "target_value": int(hypothesis.get("target_value", 0) or hypothesis.get("component_value", 0) or 0),
         "changed_expected": int(hypothesis.get("changed_pixels", 0)) > 0,
+        "relation_delta_tokens": [str(token) for token in list(hypothesis.get("relation_delta_tokens", []))[:16]],
     }
 
 
@@ -1907,6 +2198,7 @@ def _relation_sequence_component_expectation(hypothesis: dict[str, Any]) -> dict
         "mechanism": str(hypothesis.get("mechanism", "")),
         "target_value": int(hypothesis.get("target_value", 0) or hypothesis.get("component_value", 0) or 0),
         "changed_expected": int(hypothesis.get("changed_pixels", 0)) > 0,
+        "relation_delta_tokens": [str(token) for token in list(hypothesis.get("relation_delta_tokens", []))[:16]],
     }
 
 

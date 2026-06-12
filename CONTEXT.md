@@ -5627,3 +5627,97 @@
   - Strongest remaining capability bottleneck is generic mechanic and goal inference from sparse public score events.
 - Exact next action:
   - Mine recurring public partial-score patterns as generic relation mechanisms, then rerun tests, official evaluation, audits, compaction, docs, and commit.
+
+## Step 0187 - Generic relation-delta event mechanism mining implemented, official result still negative
+
+- Files touched:
+  - `src\jepa_attempt_memory.py`
+  - `tests\test_video_jepa.py`
+  - `docs\jepa_attempt_report.json`
+  - `docs\generalization_audit_after_jepa.json`
+  - `docs\jepa_attempt_traces\`
+  - `RESEARCH_STATE.md`
+  - `METHODS_ATTEMPTED.md`
+  - `ARC_RESULTS.md`
+  - `FAILURE_ANALYSIS.md`
+  - `TODO_NEXT.md`
+  - `CONTEXT.md`
+- Commands run:
+  - Required doc/context reads: `GOAL.md`, `RESEARCH_STATE.md`, `METHODS_ATTEMPTED.md`, `ARC_RESULTS.md`, `FAILURE_ANALYSIS.md`, `TODO_NEXT.md`, `CONTEXT.md`
+  - targeted source/test reads over `src\jepa_attempt_memory.py` and `tests\test_video_jepa.py`
+  - trace summary mining over retained official public traces to identify generic useful-event component patterns
+  - `python -m py_compile src\jepa_attempt_memory.py tests\test_video_jepa.py`
+  - `pytest -q tests\test_video_jepa.py`
+  - `pytest -q`
+  - `python -m src.jepa_arc_eval --config external --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --jepa-checkpoint runs/video_jepa.pt --json-output docs/jepa_attempt_report.json --trace-dir docs/jepa_attempt_traces --device cuda`
+  - parsed `docs\jepa_attempt_report.json` for primary aggregate, attempt table, and gates
+  - generic anonymous-credential phrase scan over `docs`, `data`, `src`, `tests`, `frozen`, and state docs
+  - compacted `docs\jepa_attempt_traces\*.json`
+  - compact trace schema check for required step fields, relation-chain planner marker, relation-delta planner marker, relation summary keys, and component relation-delta tokens
+  - `python -m src.generalization_audit --json-output docs\generalization_audit_after_jepa.json`
+  - `python -m audit.leakage_scan`
+  - final `pytest -q`
+  - `Get-FileHash -Algorithm SHA256 -LiteralPath @('src\jepa_attempt_memory.py','src\jepa_arc_eval.py','tests\test_video_jepa.py','docs\jepa_attempt_report.json','docs\generalization_audit_after_jepa.json','docs\jepa_attempt_traces\_official_jepa_worker_report.json')`
+- Observed results/errors:
+  - Implemented generic public relation-delta event mechanism memory:
+    - creates scoped tokens for component movement direction, value transform, appearance, disappearance, visual transform, and blocked/no-effect outcomes;
+    - scopes evidence by generalized action template, generalized relation key, action family, target value, and affected component value;
+    - records counts, values, delayed public-event goal values, failures, contradictions, and scope-to-token indexes;
+    - scores legal actions by matching current public target relations to learned scopes;
+    - carries relation-delta tokens in live sequence expectations so public postcondition contradictions penalize stale mechanisms.
+  - Added focused tests:
+    - relation-delta event miner scores a shifted component movement after older exact/relation-chain memories are cleared;
+    - relation-delta contradiction accounting records a failed public postcondition.
+  - Syntax check: passed.
+  - Focused JEPA tests after patch: `24 passed in 2.56s`.
+  - Full tests before official rerun: `105 passed in 53.40s`.
+  - Official/external JEPA rerun completed on CUDA and still reported `NO IMPROVEMENT FOUND`.
+  - Latest official JEPA primary result:
+    - `jepa_plus_attempt_memory`: solve `0.0`, score `0.0013333333333333335`, useful events `0.013333333333333334`, repeat collapse `0.8493619977971841`, invalid actions `0.0`, action entropy `0.7934992704028386`.
+    - `official_score_gain`: `0.0`.
+    - `official_useful_event_gain`: `0.0`.
+    - `score_or_useful_gain_over_core`: `false`.
+    - `attempt_2_or_3_improves_over_attempt_1`: `false`.
+    - `repeat_collapse_drop_attempt_1_to_3`: `-0.007445330216133916`.
+    - `repeat_collapse_drop_gate`: `false`.
+    - `ablation_removes_improvement`: `false`.
+    - `jepa_beats_null_on_dev`: `true`.
+    - `jepa_causal_substrate_chain`: `true`.
+    - `non_arc_drop_within_limit`: `true`.
+    - `hidden_target_canary_diff_zero`: `true`.
+    - `jepa_emits_no_text`: `true`.
+    - `no_hack_passes`: `true`.
+  - Primary attempt table:
+    - attempt 1: mean normalized score `0.004`, useful events `0.04`, repeat collapse `0.8579215341806236`, action entropy `0.7487791837206761`;
+    - attempt 2: mean normalized score `0.0`, useful events `0.0`, repeat collapse `0.8247975948141715`, action entropy `0.9206747911567998`;
+    - attempt 3: mean normalized score `0.0`, useful events `0.0`, repeat collapse `0.8653668643967575`, action entropy `0.7110438363310402`.
+  - Best retained official public result remains `0/25` solved and mean normalized score `0.005` from `docs\arc_affordance_report.json` variant `state_graph_affordance`; this is not a success claim.
+  - Official runtime stdout included an anonymous ARC credential phrase. The generic phrase scan returned no matches, and no credential value was persisted in repository artifacts.
+  - JEPA trace compaction after rerun:
+    - compacted `651`
+    - skipped `1`
+    - non-worker bytes before `2366937374`
+    - non-worker bytes after `222709376`
+    - reduction `0.9059082092976407`
+    - total tree size after compaction, including the worker report: `246256539`
+  - Compact trace schema preserves `frame`, `next_frame`, legal actions, score/event deltas, terminal flags, compact JEPA policy diagnostics, transition-graph summaries, object causal hypotheses, component causal hypotheses with relation signatures/action templates, exact and relation component transition-goal chain summaries, relation-delta mechanism summaries/tokens, object/component memory summaries, and sequence plan summaries.
+  - Generalization audit after compaction: `EXTERNAL GENERALIZATION AUDIT PROVEN`.
+  - Leakage scan: `passes=true`, no findings.
+  - Final tests after docs/audits: `105 passed in 53.39s`.
+  - Artifact hashes:
+    - `src\jepa_attempt_memory.py`: `85D333185EAE1D238DBE2FF85288A46DA458A2EF954E5D9215070EC478A7510C`
+    - `src\jepa_arc_eval.py`: `0BBA29B725955CAEE6BFAA1EAC3E9D3573791DAB7713B5606AD52CD2A577430B`
+    - `tests\test_video_jepa.py`: `1901DCBBE506E93B35617D68537354C664A7A4E8A1C3EF3D50EFB5D659373FFA`
+    - `docs\jepa_attempt_report.json`: `395A7C8746B23F4A14F68B49C9E4E9A68A5D31A0151DBD343E39273C4EC4010F`
+    - `docs\generalization_audit_after_jepa.json`: `8051622036CE724F15DDFAAC7BCC3587DFD2A18E23E4324B082EBFE2445EB1E4`
+    - `docs\jepa_attempt_traces\_official_jepa_worker_report.json`: `0037444D44BC94EE8485579030B6B0FA40CCC97A1566ECB0856C74B007E4BCCC`
+- Active ARC objective advanced:
+  - Implemented the documented public partial-score pattern mining experiment as generic relation-delta mechanisms.
+  - Preserved no-hack constraints and verified with official runtime, audit, leakage scan, trace compaction, and tests.
+  - Preserved negative evidence and updated persistent state docs.
+- Current blockers:
+  - No completion for the active ARC objective. Current official completion remains `0/25`; target is at least `20/25`.
+  - Relation-delta mechanisms generalize in focused tests but do not improve official attempts 2 or 3 over attempt 1 on score or useful events.
+  - Strongest remaining capability bottleneck is plan-level goal inference from sparse public score events.
+- Exact next action:
+  - Ground sequence candidates in predicted public relation transitions, then rerun tests, official evaluation, audits, compaction, docs, and commit.

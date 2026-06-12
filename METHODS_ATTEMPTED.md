@@ -10,6 +10,14 @@ Last updated: 2026-06-12.
 - Result: syntax check passed, focused JEPA tests passed, full tests passed before official evaluation, compact trace schema remained valid after compaction, generalization/leakage audits passed, and official runtime still reported `NO IMPROVEMENT FOUND`. Primary `jepa_plus_attempt_memory` stayed at `0/25` solved, mean normalized score `0.0013333333333333335`, useful events `0.013333333333333334`, invalid action rate `0.0`, repeat collapse `0.8425362339951956`.
 - Status: retained as a legal public-evidence substrate and relation-generalization improvement in focused tests, not a performance success. Attempt 2 repeat collapse improved to `0.7925725948141715`, but attempts 2 and 3 still had zero score and zero useful events.
 
+## Generic Relation-Delta Event Mechanism Mining
+
+- Rationale: relation-level chain nodes generalize over position, but still hash whole relation states and do not directly reuse sparse score-linked mechanics such as movement direction, value transform, appearance, removal, or no-effect contradiction.
+- Code touched: `src/jepa_attempt_memory.py`, `tests/test_video_jepa.py`.
+- Mechanism: extract public component relation-delta tokens from before/after public frames; scope tokens by generalized action template, relation key, action family, target value, and affected component value; store counts, values, delayed public-event goal values, failures, contradiction counts, and scope-to-token indexes; score current legal actions when their public target relation matches learned scopes; carry delta tokens in sequence expectations so live public postcondition failures penalize stale mechanisms.
+- Result: syntax check passed, focused JEPA tests passed, full tests passed before official evaluation, compact trace schema preserved relation-delta fields after compaction, generalization/leakage audits passed, and official runtime still reported `NO IMPROVEMENT FOUND`. Primary `jepa_plus_attempt_memory` stayed at `0/25` solved, mean normalized score `0.0013333333333333335`, useful events `0.013333333333333334`, invalid action rate `0.0`, repeat collapse `0.8493619977971841`.
+- Status: retained as a legal public-evidence substrate and generic relation-delta generalization improvement in focused tests, not a performance success. Attempt 2 repeat collapse improved to `0.8247975948141715`, but attempts 2 and 3 still had zero score and zero useful events.
+
 ## Component Transition-Goal Chain Search
 
 - Rationale: predicted component transitions scored one action at a time. They did not search over public state transitions toward previously goal-linked component states or preserve expected postconditions across a multi-step experiment.
