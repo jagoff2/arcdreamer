@@ -77,6 +77,40 @@ def test_attempt_memory_bias_uses_prior_attempts_not_direct_jepa_action() -> Non
     legal_actions = records[0].steps[0].legal_actions
     scores = {action: memory.score_action(action) for action in legal_actions}
     assert all(isinstance(value, float) for value in scores.values())
+    assert summary["causal_chain"] == [
+        "attempt_video_action_history",
+        "jepa_temporal_representation",
+        "attempt_memory",
+        "rule_causal_hypothesis_update",
+        "changed_next_attempt_action_distribution",
+    ]
+
+
+def test_jepa_temporal_representation_changes_next_attempt_distribution() -> None:
+    records = synthetic_attempts(8, seed=50)
+    model = VideoJEPA()
+    memory_jepa = JEPAAttemptMemory(use_jepa_tokens=True)
+    memory_no_jepa = JEPAAttemptMemory(use_jepa_tokens=False)
+    jepa_entry = memory_jepa.ingest_attempt(records[0], model=model)
+    no_jepa_entry = memory_no_jepa.ingest_attempt(records[0], model=None)
+    legal_actions = tuple(records[0].steps[0].legal_actions)
+    jepa_distribution = memory_jepa.action_distribution(legal_actions)
+    no_jepa_distribution = memory_no_jepa.action_distribution(legal_actions)
+    distribution_l1 = sum(abs(jepa_distribution[action] - no_jepa_distribution[action]) for action in legal_actions)
+    plan_l1 = sum(
+        abs(float(jepa_entry.next_attempt_plan.get(action, 0.0)) - float(no_jepa_entry.next_attempt_plan.get(action, 0.0)))
+        for action in set(jepa_entry.next_attempt_plan) | set(no_jepa_entry.next_attempt_plan)
+    )
+
+    assert jepa_entry.causal_substrate_active is True
+    assert jepa_entry.token_mean
+    assert jepa_entry.jepa_action_evidence
+    assert jepa_entry.causal_hypotheses["jepa_causal_substrate_active"] == 1.0
+    assert jepa_entry.causal_hypotheses["jepa_action_effect_mean"] > 0.0
+    assert plan_l1 > 0.0
+    assert distribution_l1 > 0.0
+    assert memory_jepa.summary()["causal_substrate_active"] is True
+    assert memory_jepa.summary()["direct_action_source"] is False
 
 
 def test_minimal_report_schema_for_audit(tmp_path: Path) -> None:

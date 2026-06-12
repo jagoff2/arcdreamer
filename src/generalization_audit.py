@@ -608,6 +608,7 @@ def jepa_report_checks(report_path: str | Path = "docs/jepa_attempt_report.json"
     outcome = report.get("terminal_outcome")
     gates = report.get("gates", {})
     no_hack = report.get("no_hack_proof", {})
+    causal = report.get("causal_substrate_proof", {})
     official = report.get("official", {})
     non_arc = report.get("non_arc", {})
     attempt_rows = official.get("attempt_table", [])
@@ -635,6 +636,7 @@ def jepa_report_checks(report_path: str | Path = "docs/jepa_attempt_report.json"
             "repeat_collapse_drop_gate",
             "ablation_removes_improvement",
             "jepa_beats_null_on_dev",
+            "jepa_causal_substrate_chain",
             "non_arc_drop_within_limit",
             "hidden_target_canary_diff_zero",
             "jepa_emits_no_text",
@@ -648,6 +650,14 @@ def jepa_report_checks(report_path: str | Path = "docs/jepa_attempt_report.json"
     cuda_available = bool(torch.cuda.is_available())
     non_arc_baseline = non_arc.get("aggregate_by_variant", {}).get("baseline_core", {})
     non_arc_primary = non_arc.get("aggregate_by_variant", {}).get("jepa_plus_attempt_memory", {})
+    expected_causal_chain = [
+        "attempt_video_action_history",
+        "jepa_temporal_representation",
+        "attempt_memory",
+        "rule_causal_hypothesis_update",
+        "changed_next_attempt_action_distribution",
+    ]
+    causal_checks = causal.get("checks", {})
     checks = {
         "jepa_report_present": True,
         "jepa_outcome_valid": outcome in {"JEPA IMPROVEMENT FOUND", "NO IMPROVEMENT FOUND"},
@@ -668,6 +678,10 @@ def jepa_report_checks(report_path: str | Path = "docs/jepa_attempt_report.json"
         "jepa_cuda_available_recorded": bool(device_runtime.get("torch_cuda_available")) == cuda_available,
         "jepa_cuda_runtime": (not cuda_available) or str(device_runtime.get("resolved_device", "")).startswith("cuda"),
         "jepa_non_arc_aggregates_present": bool(non_arc_baseline) and bool(non_arc_primary),
+        "jepa_causal_substrate_chain": bool(causal.get("passes")) and bool(gates.get("jepa_causal_substrate_chain")),
+        "jepa_causal_chain_complete": causal.get("causal_chain") == expected_causal_chain,
+        "jepa_rule_update_uses_temporal_representation": bool(causal_checks.get("rule_causal_hypothesis_uses_jepa")),
+        "jepa_plan_distribution_changed_by_tokens": bool(causal_checks.get("action_distribution_changed_by_jepa")),
     }
     return {
         "present": True,

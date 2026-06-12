@@ -4865,3 +4865,93 @@
   - Need run required full test suite, leakage scan, and generalization audit.
 - Exact next action:
   - Run `pytest -q`.
+
+## Step 0178 - JEPA causal substrate verified, no official improvement found
+
+- Files touched:
+  - `src\jepa_attempt_memory.py`
+  - `src\jepa_arc_eval.py`
+  - `src\generalization_audit.py`
+  - `tests\test_video_jepa.py`
+  - `docs\jepa_attempt_report.json`
+  - `docs\generalization_audit_after_jepa.json`
+  - `docs\jepa_attempt_traces\`
+  - `CONTEXT.md`
+- Commands run:
+  - `python -m py_compile src\jepa_attempt_memory.py src\jepa_arc_eval.py src\generalization_audit.py`
+  - `pytest -q tests\test_video_jepa.py`
+  - `python -m src.jepa_arc_eval --config causal_probe --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --jepa-checkpoint runs/video_jepa.pt --json-output docs/jepa_attempt_report.json --trace-dir docs/jepa_attempt_traces --device cuda`
+  - `python -m src.jepa_arc_eval --config external --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --jepa-checkpoint runs/video_jepa.pt --json-output docs/jepa_attempt_report.json --trace-dir docs/jepa_attempt_traces --device cuda`
+  - `python -m src.generalization_audit --json-output docs/generalization_audit_after_jepa.json`
+  - `pytest -q`
+- Observed results/errors:
+  - JEPA is now causal in the attempt loop: attempt video/action history produces JEPA temporal evidence, the evidence is stored in attempt memory, causal hypotheses are updated, and the next-attempt action distribution changes.
+  - Causal probe passed:
+    - `distribution_l1`: `0.022479256131681006`
+    - `plan_l1`: `2.092053500557625`
+    - `probe_attempt_steps`: `11`
+  - Focused JEPA tests passed: `6 passed in 2.58s`.
+  - Full test suite passed: `87 passed in 52.11s`.
+  - Generalization audit passed with JEPA causal checks true:
+    - `jepa_causal_substrate_chain`
+    - `jepa_causal_chain_complete`
+    - `jepa_rule_update_uses_temporal_representation`
+    - `jepa_plan_distribution_changed_by_tokens`
+  - Full official rerun completed on CUDA:
+    - Torch `2.11.0+cu128`
+    - CUDA runtime `12.8`
+    - Resolved device `cuda`
+    - Two `NVIDIA GeForce RTX 5060 Ti` devices visible.
+  - Official aggregate result remains `NO IMPROVEMENT FOUND`.
+  - Final official aggregate by variant:
+    - `baseline_core`: solve `0.0`, score `0.0`, useful events `0.0`, repeat collapse `0.833294177107705`, invalid actions `0.0`.
+    - `attempt_memory_no_jepa`: solve `0.0`, score `0.002666666666666667`, useful events `0.02666666666666667`, repeat collapse `0.8774651795772449`, invalid actions `0.0`.
+    - `jepa_random_init`: solve `0.0`, score `0.0013333333333333335`, useful events `0.013333333333333334`, repeat collapse `0.8771184385194891`, invalid actions `0.0`.
+    - `jepa_plus_attempt_memory`: solve `0.0`, score `0.0013333333333333335`, useful events `0.013333333333333334`, repeat collapse `0.8812799139293251`, invalid actions `0.0`.
+    - `jepa_pretrained_frozen_if_available`: solve `0.0`, score `0.0`, useful events `0.0`, repeat collapse `0.833294177107705`, invalid actions `0.0`.
+    - `jepa_trained_dev`: solve `0.0`, score `0.0`, useful events `0.0`, repeat collapse `0.833294177107705`, invalid actions `0.0`.
+    - `null_control`: solve `0.0`, score `0.0`, useful events `0.0`, repeat collapse `0.833294177107705`, invalid actions `0.0`.
+  - Final JEPA gates:
+    - `attempt_2_or_3_improves_over_attempt_1`: `false`
+    - `score_or_useful_gain_over_core`: `false`
+    - `official_score_gain`: `0.0`
+    - `official_useful_event_gain`: `0.0`
+    - `repeat_collapse_drop_attempt_1_to_3`: `-0.05311750710721985`
+    - `repeat_collapse_drop_gate`: `false`
+    - `jepa_beats_null_on_dev`: `true`
+    - `jepa_causal_substrate_chain`: `true`
+    - `non_arc_drop_within_limit`: `true`
+    - `hidden_target_canary_diff_zero`: `true`
+    - `jepa_emits_no_text`: `true`
+    - `no_hack_passes`: `true`
+- GOAL.md requirement advanced:
+  - The JEPA attempt-level mechanism is now a causal perceptual substrate rather than a sidecar scalar.
+  - The no-retraining adapter comparison against the same baselines is complete and verified.
+- Current blockers:
+  - No Terminal Outcome A for the larger GOAL.md objective is reached by this JEPA experiment.
+  - The no-retraining JEPA adapter does not improve official ARC-AGI-3 public-game performance.
+- Exact next action:
+  - Commit the verified JEPA causal-substrate change and evidence artifacts atomically.
+
+## Step 0179 - JEPA traces compacted after final rerun
+
+- Files touched:
+  - `docs\jepa_attempt_traces\`
+  - `CONTEXT.md`
+- Commands run:
+  - `Get-ChildItem docs\jepa_attempt_traces -Recurse -File | Measure-Object Length -Sum`
+  - One-off Python compaction over `docs\jepa_attempt_traces\*.json`
+- Observed results/errors:
+  - The final official rerun regenerated raw JEPA traces at `2219954487` bytes across `652` JSON files.
+  - Compacted `651` trace files and skipped `1` worker report file.
+  - Post-compaction trace tree size is `173807627` bytes.
+  - Reduction ratio is `0.92170667100708`.
+  - Compact trace format preserved the audit-required structure:
+    - top-level `attempt`
+    - `attempt.steps`
+    - per-step `frame`, `action`, `legal_actions`, `score_delta`, `event_delta`, and `terminal`
+    - observation hashes, next observation hashes, invalid-action flags, and compact JEPA policy diagnostics.
+- Current blockers:
+  - Need rerun generalization audit after compaction and context update.
+- Exact next action:
+  - Run `python -m src.generalization_audit --json-output docs/generalization_audit_after_jepa.json`.
