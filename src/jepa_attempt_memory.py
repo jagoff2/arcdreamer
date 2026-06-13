@@ -43,6 +43,51 @@ PLANNER_DIAGNOSTIC_EVENTS = (
     "stale_penalties",
 )
 RELATION_SCORING_ACTION_LIMIT = 96
+EXPERIMENT_CLASS_RETIRE_FAILURES = 2
+
+
+@dataclass(frozen=True)
+class TransitionUsefulness:
+    visible_effect: bool
+    useful_effect: bool
+    nuisance_effect: bool
+    no_effect: bool
+    progress_effect: bool
+    terminal_win: bool
+    controllability_effect: bool
+    reachable_state_class_effect: bool
+    reasons: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "visible_effect": self.visible_effect,
+            "useful_effect": self.useful_effect,
+            "nuisance_effect": self.nuisance_effect,
+            "no_effect": self.no_effect,
+            "progress_effect": self.progress_effect,
+            "terminal_win": self.terminal_win,
+            "controllability_effect": self.controllability_effect,
+            "reachable_state_class_effect": self.reachable_state_class_effect,
+            "reasons": list(self.reasons),
+        }
+
+
+@dataclass(frozen=True)
+class Experiment:
+    hypothesis_ids: list[str]
+    action: str
+    predicted_outcomes: dict[str, str]
+    useful_if: list[str]
+    max_repeats: int
+    retire_if: str
+    action_class: str
+    coordinate_equiv_class: str
+    abstract_state_class: str
+    repeat_count: int = 0
+    retired: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 def _empty_planner_activation_stats() -> dict[str, dict[str, int]]:
@@ -68,6 +113,7 @@ class AttemptMemoryEntry:
     sequence_plan_summary: dict[str, Any] = field(default_factory=dict)
     jepa_action_evidence: dict[str, dict[str, float]] = field(default_factory=dict)
     jepa_planner_state: dict[str, Any] = field(default_factory=dict)
+    sidecar_action_priors: dict[str, float] = field(default_factory=dict)
     action_distribution_delta: dict[str, float] = field(default_factory=dict)
     causal_substrate_active: bool = False
 
@@ -92,13 +138,18 @@ class JEPAAttemptMemory:
         self.transition_effects: dict[tuple[str, str], int] = {}
         self.transition_failures: dict[tuple[str, str], int] = {}
         self.transition_events: dict[tuple[str, str], int] = {}
+        self.transition_useful: dict[tuple[str, str], int] = {}
+        self.transition_nuisance: dict[tuple[str, str], int] = {}
+        self.reachable_state_classes: set[str] = set()
         self.state_seen_actions: dict[str, set[str]] = {}
         self.action_counts: dict[str, int] = {}
         self.action_values: dict[str, float] = {}
         self.action_failures: dict[str, int] = {}
         self.action_events: dict[str, int] = {}
+        self.action_nuisance: dict[str, int] = {}
         self.family_counts: dict[str, int] = {}
         self.family_values: dict[str, float] = {}
+        self.family_nuisance: dict[str, int] = {}
         self.region_counts: dict[tuple[int, int], int] = {}
         self.region_values: dict[tuple[int, int], float] = {}
         self.region_failures: dict[tuple[int, int], int] = {}
@@ -155,6 +206,15 @@ class JEPAAttemptMemory:
         self.phase_action_counts: dict[tuple[int, str], int] = {}
         self.phase_family_counts: dict[tuple[int, str], int] = {}
         self.phase_state_seen_actions: dict[tuple[int, str], set[str]] = {}
+        self.experiment_counts: dict[str, int] = {}
+        self.experiment_failures: dict[str, int] = {}
+        self.experiment_retired: set[str] = set()
+        self.experiment_class_failures: dict[str, int] = {}
+        self.experiment_class_retired: set[str] = set()
+        self.pending_experiment: dict[str, Any] | None = None
+        self.experiment_history: list[dict[str, Any]] = []
+        self.last_transition_nontrivial = False
+        self.undo_probe_state_classes: set[str] = set()
         self.planner_activation_stats = _empty_planner_activation_stats()
 
     def reset(self) -> None:
@@ -164,13 +224,18 @@ class JEPAAttemptMemory:
         self.transition_effects.clear()
         self.transition_failures.clear()
         self.transition_events.clear()
+        self.transition_useful.clear()
+        self.transition_nuisance.clear()
+        self.reachable_state_classes.clear()
         self.state_seen_actions.clear()
         self.action_counts.clear()
         self.action_values.clear()
         self.action_failures.clear()
         self.action_events.clear()
+        self.action_nuisance.clear()
         self.family_counts.clear()
         self.family_values.clear()
+        self.family_nuisance.clear()
         self.region_counts.clear()
         self.region_values.clear()
         self.region_failures.clear()
@@ -227,49 +292,101 @@ class JEPAAttemptMemory:
         self.phase_action_counts.clear()
         self.phase_family_counts.clear()
         self.phase_state_seen_actions.clear()
+        self.experiment_counts.clear()
+        self.experiment_failures.clear()
+        self.experiment_retired.clear()
+        self.experiment_class_failures.clear()
+        self.experiment_class_retired.clear()
+        self.pending_experiment = None
+        self.experiment_history.clear()
+        self.last_transition_nontrivial = False
+        self.undo_probe_state_classes.clear()
         self.planner_activation_stats = _empty_planner_activation_stats()
 
     def ingest_attempt(self, record: AttemptRecord, model: VideoJEPA | None = None) -> AttemptMemoryEntry:
         failed: dict[str, int] = {}
         effects: dict[str, int] = {}
+        useful_actions: dict[str, int] = {}
         events: dict[str, float] = {}
         action_counts: dict[str, int] = {}
         transition_outcomes: list[dict[str, Any]] = []
         no_effect = 0
         visible_effect = 0
+        useful_effect = 0
+        nuisance_effect = 0
+        controllability_effect = 0
+        reachable_state_class_effect = 0
         positive = 0
-        for step in record.steps:
+        attempt_family_counts: dict[str, int] = {}
+        for index, step in enumerate(record.steps):
             action = str(step.action)
+            family = _action_family(action)
+            prior_action_count = action_counts.get(action, 0)
+            prior_family_count = attempt_family_counts.get(family, 0)
             action_counts[action] = action_counts.get(action, 0) + 1
+            attempt_family_counts[family] = attempt_family_counts.get(family, 0) + 1
             event_hit = bool(POSITIVE_EVENTS.intersection(step.event_delta)) or float(step.score_delta) > 0.0
             changed = step.obs_hash != step.next_obs_hash
             no_effect_event = _is_no_effect_event(step.event_delta)
+            after_frame = _step_after_frame(record, index)
+            next_state_class = _abstract_frame_state_class(after_frame) if after_frame is not None else ""
+            state_class_seen = bool(next_state_class and next_state_class in self.reachable_state_classes)
+            label = _classify_transition_usefulness(
+                visible_effect=changed,
+                events=step.event_delta,
+                score_delta=float(step.score_delta),
+                terminal=bool(step.terminal),
+                no_effect_event=no_effect_event,
+                invalid_action=bool(step.invalid_action),
+                prior_action_count=prior_action_count,
+                prior_family_count=prior_family_count,
+                prior_useful_action_count=int(useful_actions.get(action, 0)),
+                state_class_seen=state_class_seen,
+            )
             outcome_value = _transition_credit(
-                event_hit=event_hit,
-                changed=changed,
+                useful=label,
                 no_effect_event=no_effect_event,
                 invalid_action=bool(step.invalid_action),
                 score_delta=float(step.score_delta),
                 terminal=bool(step.terminal),
             )
+            if next_state_class:
+                self.reachable_state_classes.add(next_state_class)
             transition_outcomes.append(
                 {
                     "edge": (str(step.obs_hash), action),
                     "action": action,
                     "value": outcome_value,
                     "event_hit": event_hit,
-                    "changed": changed,
-                    "no_effect": (not changed) or no_effect_event or bool(step.invalid_action),
+                    "changed": label.visible_effect,
+                    "visible_effect": label.visible_effect,
+                    "useful_effect": label.useful_effect,
+                    "nuisance_effect": label.nuisance_effect,
+                    "no_effect": label.no_effect,
+                    "progress_effect": label.progress_effect,
+                    "controllability_effect": label.controllability_effect,
+                    "reachable_state_class_effect": label.reachable_state_class_effect,
+                    "usefulness_reasons": list(label.reasons),
                 }
             )
             if event_hit:
                 positive += 1
                 events[action] = events.get(action, 0.0) + max(1.0, float(step.score_delta))
-            elif not changed or no_effect_event:
+            if label.no_effect:
                 no_effect += 1
                 failed[action] = failed.get(action, 0) + 1
-            elif changed:
+            if label.visible_effect:
                 visible_effect += 1
+            if label.useful_effect:
+                useful_effect += 1
+                useful_actions[action] = useful_actions.get(action, 0) + 1
+            if label.nuisance_effect:
+                nuisance_effect += 1
+            if label.controllability_effect:
+                controllability_effect += 1
+            if label.reachable_state_class_effect:
+                reachable_state_class_effect += 1
+            if label.visible_effect and not label.no_effect:
                 effects[action] = effects.get(action, 0) + 1
         object_hypotheses = _object_hypotheses_from_record(record, transition_outcomes)
         component_hypotheses = _component_hypotheses_from_record(record, transition_outcomes)
@@ -308,6 +425,10 @@ class JEPAAttemptMemory:
         causal = {
             "no_effect_rate": float(no_effect / total),
             "visible_effect_rate": float(visible_effect / total),
+            "useful_effect_rate": float(useful_effect / total),
+            "nuisance_effect_rate": float(nuisance_effect / total),
+            "controllability_effect_rate": float(controllability_effect / total),
+            "reachable_state_class_effect_rate": float(reachable_state_class_effect / total),
             "positive_event_rate": float(positive / total),
             "terminal_seen": float(any(step.terminal for step in record.steps)),
             "max_repeated_action_fraction": float(max(repeated.values(), default=0.0)),
@@ -323,7 +444,7 @@ class JEPAAttemptMemory:
             next_plan[action] = next_plan.get(action, 0.0) + min(float(value), 3.0)
         for action, count in failed.items():
             next_plan[action] = next_plan.get(action, 0.0) - min(float(count), 4.0) * 0.25
-        for action, count in effects.items():
+        for action, count in useful_actions.items():
             if positive > 0 and action not in failed and action not in events:
                 next_plan[action] = next_plan.get(action, 0.0) + min(float(count), 4.0) * 0.05
         if positive == 0:
@@ -353,6 +474,8 @@ class JEPAAttemptMemory:
                 "transition_graph_edges": float(graph_summary["observed_edges"]),
                 "transition_graph_positive_edges": float(graph_summary["positive_edges"]),
                 "transition_graph_no_effect_edges": float(graph_summary["no_effect_edges"]),
+                "transition_graph_useful_edges": float(graph_summary["useful_edges"]),
+                "transition_graph_nuisance_edges": float(graph_summary["nuisance_edges"]),
                 "transition_graph_delayed_credit_edges": float(delayed_credit_edges),
                 "object_changed_region_count": float(object_summary["observed_regions"]),
                 "object_changed_color_count": float(object_summary["observed_colors"]),
@@ -400,12 +523,15 @@ class JEPAAttemptMemory:
                     latent_rule_bias -= 0.20 * min(float(failed[action]), 4.0)
                 if positive == 0 and action not in events:
                     latent_rule_bias = min(latent_rule_bias, 0.0)
-                next_plan[action] = next_plan.get(action, 0.0) + latent_rule_bias
                 jepa_planner_biases[action] = float(latent_rule_bias)
-            causal["jepa_planner_bias_l1"] = float(sum(abs(value) for value in jepa_planner_biases.values()))
-            causal["jepa_planner_consumed_actions"] = float(sum(1 for value in jepa_planner_biases.values() if abs(value) > 1.0e-9))
+            causal["jepa_proposer_prior_l1"] = float(sum(abs(value) for value in jepa_planner_biases.values()))
+            causal["jepa_proposer_actions"] = float(sum(1 for value in jepa_planner_biases.values() if abs(value) > 1.0e-9))
+            causal["jepa_planner_bias_l1"] = 0.0
+            causal["jepa_planner_consumed_actions"] = 0.0
         else:
             jepa_planner_biases = {}
+            causal["jepa_proposer_prior_l1"] = 0.0
+            causal["jepa_proposer_actions"] = 0.0
             causal["jepa_planner_bias_l1"] = 0.0
             causal["jepa_planner_consumed_actions"] = 0.0
         action_distribution_delta = _centered_distribution_delta(next_plan)
@@ -425,14 +551,18 @@ class JEPAAttemptMemory:
             jepa_action_evidence=jepa_action_evidence,
             jepa_planner_state={
                 "mode": self.jepa_token_mode,
-                "consumed_by_planner": bool(jepa_planner_biases),
-                "bias_l1": float(sum(abs(value) for value in jepa_planner_biases.values())),
-                "action_biases": {action: round(float(value), 6) for action, value in sorted(jepa_planner_biases.items())},
+                "planner_role": "proposer_read_only",
+                "consumed_by_planner": False,
+                "bias_l1": 0.0,
+                "proposal_l1": float(sum(abs(value) for value in jepa_planner_biases.values())),
+                "action_biases": {},
+                "action_priors": {action: round(float(value), 6) for action, value in sorted(jepa_planner_biases.items())},
                 "evidence": {
                     action: {key: round(float(value), 6) for key, value in sorted(values.items())}
                     for action, values in sorted(jepa_action_evidence.items())
                 },
             },
+            sidecar_action_priors={action: float(value) for action, value in jepa_planner_biases.items()},
             action_distribution_delta=action_distribution_delta,
             causal_substrate_active=jepa_active,
         )
@@ -612,20 +742,23 @@ class JEPAAttemptMemory:
         if self.action_events.get(action, 0) > 0:
             return 1.0
         count = int(self.action_counts.get(action, 0))
+        family = _action_family(action)
         if count <= 0:
-            family = _action_family(action)
             family_count = int(self.family_counts.get(family, 0))
             if family_count >= 24:
                 family_mean = self.family_values.get(family, 0.0) / max(family_count, 1)
-                if family_mean <= 0.0:
+                nuisance_rate = float(self.family_nuisance.get(family, 0)) / max(float(family_count), 1.0)
+                if family_mean <= 0.0 or nuisance_rate >= 0.25:
                     evidence_scale = min(max((float(family_count) - 24.0) / 24.0, 0.0), 1.0)
-                    return float(max(0.05, 0.55 + 0.70 * evidence_scale * family_mean))
-            return 0.55
+                    nuisance_penalty = 0.45 * evidence_scale * nuisance_rate
+                    return float(max(0.02, 0.18 + 0.37 * (1.0 - evidence_scale) + 0.70 * evidence_scale * family_mean - nuisance_penalty))
+            return 0.18
         mean_value = self.action_values.get(action, 0.0) / max(count, 1)
-        if mean_value > 0.0:
+        nuisance = min(float(self.action_nuisance.get(action, 0)), 8.0)
+        if mean_value > 0.0 and nuisance <= 0.0:
             return 0.85
         failures = min(float(self.action_failures.get(action, 0)), 8.0)
-        return float(max(0.0, 0.55 - 0.075 * failures))
+        return float(max(0.0, 0.35 - 0.075 * failures - 0.070 * nuisance))
 
     def discovery_action_counts(self, action: str) -> tuple[int, int]:
         action = str(action)
@@ -665,6 +798,207 @@ class JEPAAttemptMemory:
             pool = sorted(pool, key=lambda action: (float(scores.get(action, 0.0)), -index.get(action, 0)), reverse=True)
         return pool[: max(int(limit), 1)]
 
+    def select_experiment(
+        self,
+        observation: Any,
+        legal_actions: list[str] | tuple[str, ...],
+        *,
+        scores: dict[str, float] | None = None,
+    ) -> Experiment | None:
+        legal = [str(action) for action in legal_actions]
+        if not legal:
+            return None
+        score_map = scores or {}
+
+        def score_for_action(action: str) -> float:
+            try:
+                value = float(score_map.get(action, 0.0))
+            except (TypeError, ValueError):
+                return 0.0
+            return value if math.isfinite(value) else 0.0
+
+        frame = _public_frame(observation)
+        abstract_state = _abstract_frame_state_class(frame)
+        if not abstract_state:
+            abstract_state = _observation_key(observation)
+        candidates: list[tuple[tuple[float, float, float, int, float, int], Experiment]] = []
+        contact_by_coordinate_class: dict[
+            str,
+            tuple[tuple[float, int], tuple[float, float, float, int, float, int], Experiment],
+        ] = {}
+        for legal_index, action in enumerate(legal):
+            experiment = self._build_experiment(action, frame, abstract_state)
+            if experiment is None:
+                continue
+            key = self._experiment_key(experiment)
+            if key in self.experiment_retired:
+                continue
+            class_key = self._experiment_class_key(experiment)
+            if class_key in self.experiment_class_retired:
+                continue
+            repeat_count = int(self.experiment_counts.get(key, 0))
+            if repeat_count >= int(experiment.max_repeats):
+                continue
+            family = _action_family(action)
+            phase_family_count = int(self.phase_family_counts.get((self.discovery_phase, family), 0))
+            phase_action_count = int(self.phase_action_counts.get((self.discovery_phase, action), 0))
+            priority = _experiment_action_priority(action)
+            remaining = int(experiment.max_repeats) - repeat_count
+            action_score = score_for_action(action)
+            candidate_key = (
+                float(phase_family_count),
+                float(priority),
+                float(phase_action_count),
+                -remaining,
+                -action_score,
+                legal_index,
+            )
+            if family == "contact":
+                representative_key = (-action_score, legal_index)
+                current = contact_by_coordinate_class.get(experiment.coordinate_equiv_class)
+                if current is None or representative_key < current[0]:
+                    contact_by_coordinate_class[experiment.coordinate_equiv_class] = (
+                        representative_key,
+                        candidate_key,
+                        experiment,
+                    )
+                continue
+            candidates.append((candidate_key, experiment))
+        candidates.extend((candidate_key, experiment) for _, candidate_key, experiment in contact_by_coordinate_class.values())
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[0])
+        experiment = candidates[0][1]
+        repeat_count = int(self.experiment_counts.get(self._experiment_key(experiment), 0))
+        return Experiment(
+            hypothesis_ids=list(experiment.hypothesis_ids),
+            action=str(experiment.action),
+            predicted_outcomes=dict(experiment.predicted_outcomes),
+            useful_if=list(experiment.useful_if),
+            max_repeats=int(experiment.max_repeats),
+            retire_if=str(experiment.retire_if),
+            action_class=str(experiment.action_class),
+            coordinate_equiv_class=str(experiment.coordinate_equiv_class),
+            abstract_state_class=str(experiment.abstract_state_class),
+            repeat_count=repeat_count,
+            retired=False,
+        )
+
+    def experiment_for_action(
+        self,
+        observation: Any,
+        action: str,
+        *,
+        respect_limits: bool = True,
+    ) -> Experiment | None:
+        frame = _public_frame(observation)
+        abstract_state = _abstract_frame_state_class(frame)
+        if not abstract_state:
+            abstract_state = _observation_key(observation)
+        experiment = self._build_experiment(str(action), frame, abstract_state)
+        if experiment is None:
+            return None
+        key = self._experiment_key(experiment)
+        class_key = self._experiment_class_key(experiment)
+        repeat_count = int(self.experiment_counts.get(key, 0))
+        if respect_limits:
+            if key in self.experiment_retired:
+                return None
+            if class_key in self.experiment_class_retired:
+                return None
+            if repeat_count >= int(experiment.max_repeats):
+                return None
+        return Experiment(
+            hypothesis_ids=list(experiment.hypothesis_ids),
+            action=str(experiment.action),
+            predicted_outcomes=dict(experiment.predicted_outcomes),
+            useful_if=list(experiment.useful_if),
+            max_repeats=int(experiment.max_repeats),
+            retire_if=str(experiment.retire_if),
+            action_class=str(experiment.action_class),
+            coordinate_equiv_class=str(experiment.coordinate_equiv_class),
+            abstract_state_class=str(experiment.abstract_state_class),
+            repeat_count=repeat_count,
+            retired=bool(key in self.experiment_retired),
+        )
+
+    def begin_experiment(self, experiment: Experiment) -> None:
+        payload = experiment.to_dict()
+        key = self._experiment_key(experiment)
+        class_key = self._experiment_class_key(experiment)
+        self.experiment_counts[key] = int(self.experiment_counts.get(key, 0)) + 1
+        payload["experiment_key"] = key
+        payload["experiment_class_key"] = class_key
+        payload["started_count"] = int(self.experiment_counts[key])
+        payload["class_failure_count"] = int(self.experiment_class_failures.get(class_key, 0))
+        self.pending_experiment = payload
+
+    def experiment_protocol_summary(self) -> dict[str, Any]:
+        return {
+            "schema": "arc_explicit_experiment_protocol_v1",
+            "pending_experiment": dict(self.pending_experiment or {}),
+            "experiments_started": int(sum(self.experiment_counts.values())),
+            "retired_experiment_count": int(len(self.experiment_retired)),
+            "retired_experiment_class_count": int(len(self.experiment_class_retired)),
+            "retired_experiment_classes": sorted(self.experiment_class_retired)[-16:],
+            "recent_results": list(self.experiment_history[-8:]),
+        }
+
+    def _build_experiment(self, action: str, frame: np.ndarray | None, abstract_state: str) -> Experiment | None:
+        family = _action_family(action)
+        if family == "wait" and str(action) != "7":
+            return None
+        if str(action) == "7":
+            if not self.last_transition_nontrivial or abstract_state in self.undo_probe_state_classes:
+                return None
+        action_class = _experiment_action_class(action)
+        coordinate_class = _experiment_coordinate_equiv_class(action, frame)
+        hypothesis_ids = _experiment_hypothesis_ids(action, frame)
+        if not hypothesis_ids:
+            return None
+        predicted_outcomes = _experiment_predicted_outcomes(action, family, coordinate_class)
+        if len(set(predicted_outcomes.values())) < 2:
+            return None
+        useful_if = [
+            "score_delta > 0",
+            "level_changed",
+            "posterior_entropy_drops",
+            "new_controllable_object_found",
+            "new_reachable_state_class_found",
+        ]
+        return Experiment(
+            hypothesis_ids=hypothesis_ids,
+            action=str(action),
+            predicted_outcomes=predicted_outcomes,
+            useful_if=useful_if,
+            max_repeats=1,
+            retire_if="nuisance_or_noop_without_entropy_drop",
+            action_class=action_class,
+            coordinate_equiv_class=coordinate_class,
+            abstract_state_class=str(abstract_state),
+        )
+
+    def _experiment_key(self, experiment: Experiment | dict[str, Any]) -> str:
+        getter = experiment.get if isinstance(experiment, dict) else lambda name, default=None: getattr(experiment, name, default)
+        return "|".join(
+            [
+                str(self.discovery_phase),
+                str(getter("abstract_state_class", "")),
+                str(getter("action_class", "")),
+                str(getter("coordinate_equiv_class", "")),
+            ]
+        )
+
+    def _experiment_class_key(self, experiment: Experiment | dict[str, Any]) -> str:
+        getter = experiment.get if isinstance(experiment, dict) else lambda name, default=None: getattr(experiment, name, default)
+        return "|".join(
+            [
+                str(self.discovery_phase),
+                str(getter("action_class", "")),
+                str(getter("coordinate_equiv_class", "")),
+            ]
+        )
+
     def public_no_effect_suppresses_action(self, action: str) -> bool:
         if self._has_public_goal_evidence():
             return False
@@ -673,7 +1007,8 @@ class JEPAAttemptMemory:
         if family_count < 48:
             return False
         family_mean = self.family_values.get(family, 0.0) / max(family_count, 1)
-        return bool(family_mean <= -0.35)
+        nuisance_rate = float(self.family_nuisance.get(family, 0)) / max(float(family_count), 1.0)
+        return bool(family_mean <= -0.35 or nuisance_rate >= 0.35)
 
     def transition_graph_summary(self) -> dict[str, Any]:
         return {
@@ -681,6 +1016,8 @@ class JEPAAttemptMemory:
             "observed_states": len(self.state_seen_actions),
             "positive_edges": sum(1 for value in self.transition_events.values() if value > 0),
             "effect_edges": sum(1 for value in self.transition_effects.values() if value > 0),
+            "useful_edges": sum(1 for value in self.transition_useful.values() if value > 0),
+            "nuisance_edges": sum(1 for value in self.transition_nuisance.values() if value > 0),
             "no_effect_edges": sum(1 for value in self.transition_failures.values() if value > 0),
             "observed_actions": len(self.action_counts),
             "negative_actions": sum(
@@ -750,6 +1087,15 @@ class JEPAAttemptMemory:
         self.phase_action_counts.clear()
         self.phase_family_counts.clear()
         self.phase_state_seen_actions.clear()
+        self.experiment_counts.clear()
+        self.experiment_failures.clear()
+        self.experiment_retired.clear()
+        self.experiment_class_failures.clear()
+        self.experiment_class_retired.clear()
+        self.pending_experiment = None
+        self.experiment_history.clear()
+        self.last_transition_nontrivial = False
+        self.undo_probe_state_classes.clear()
         if self.best_event_prefix:
             self.active_sequence = list(self.best_event_prefix[:128])
             self.active_sequence_expectations = [{} for _ in self.active_sequence]
@@ -829,6 +1175,27 @@ class JEPAAttemptMemory:
         no_effect_event = _is_no_effect_event(events)
         changed = bool(before is not None and after is not None and before.shape == after.shape and np.any(before != after))
         obs_key = _observation_key(before_observation)
+        family = _action_family(action)
+        label = _classify_transition_usefulness(
+            visible_effect=changed,
+            events=events,
+            score_delta=float(getattr(result, "reward", 0.0)),
+            terminal=bool(getattr(result, "terminated", False) or getattr(result, "truncated", False)),
+            no_effect_event=no_effect_event,
+            invalid_action=any("invalid" in event.lower() for event in events),
+            prior_action_count=int(self.action_counts.get(action, 0)),
+            prior_family_count=int(self.family_counts.get(family, 0)),
+            prior_useful_action_count=int(self.action_events.get(action, 0)),
+            state_class_seen=(
+                _abstract_frame_state_class(after) in self.reachable_state_classes
+                if after is not None and after.size
+                else True
+            ),
+        )
+        if after is not None and after.size:
+            state_class = _abstract_frame_state_class(after)
+            if state_class:
+                self.reachable_state_classes.add(state_class)
         self._record_phase_action(obs_key, action)
         if obs_key:
             self._update_transition_graph(
@@ -837,19 +1204,26 @@ class JEPAAttemptMemory:
                         "edge": (obs_key, action),
                         "action": action,
                         "value": _transition_credit(
-                            event_hit=event_hit,
-                            changed=changed,
+                            useful=label,
                             no_effect_event=no_effect_event,
                             invalid_action=any("invalid" in event.lower() for event in events),
                             score_delta=float(getattr(result, "reward", 0.0)),
                             terminal=bool(getattr(result, "terminated", False) or getattr(result, "truncated", False)),
                         ),
                         "event_hit": event_hit,
-                        "changed": changed,
-                        "no_effect": (not changed) or no_effect_event,
+                        "changed": label.visible_effect,
+                        "visible_effect": label.visible_effect,
+                        "useful_effect": label.useful_effect,
+                        "nuisance_effect": label.nuisance_effect,
+                        "no_effect": label.no_effect,
+                        "progress_effect": label.progress_effect,
+                        "controllability_effect": label.controllability_effect,
+                        "reachable_state_class_effect": label.reachable_state_class_effect,
+                        "usefulness_reasons": list(label.reasons),
                     }
                 ]
             )
+        self._complete_pending_experiment(action, label)
         if not self.active_sequence or self.sequence_cursor >= len(self.active_sequence):
             if level_completed:
                 self._enter_next_discovery_phase()
@@ -871,7 +1245,7 @@ class JEPAAttemptMemory:
             return
         if before is not None and after is not None and bool(np.any(before != after)):
             self._record_planner_event(source, "visible_changes")
-        if event_hit:
+        if label.useful_effect:
             self._record_planner_event(source, "useful_events")
         if expected and before is not None and after is not None:
             actual = _component_hypothesis_from_frames(
@@ -881,7 +1255,12 @@ class JEPAAttemptMemory:
                 step_index=-1,
                 event_hit=event_hit,
                 score_delta=float(getattr(result, "reward", 0.0)),
-                no_effect=not bool(np.any(before != after)),
+                no_effect=label.no_effect,
+                useful_effect=label.useful_effect,
+                nuisance_effect=label.nuisance_effect,
+                progress_effect=label.progress_effect,
+                controllability_effect=label.controllability_effect,
+                reachable_state_class_effect=label.reachable_state_class_effect,
             )
             if not _component_expectation_matches(expected, actual) and not event_hit:
                 self.sequence_contradictions += 1
@@ -908,6 +1287,45 @@ class JEPAAttemptMemory:
             key = (phase, obs_key)
             self.phase_state_seen_actions.setdefault(key, set()).add(action)
 
+    def _complete_pending_experiment(self, action: str, label: TransitionUsefulness) -> None:
+        pending = dict(self.pending_experiment or {})
+        self.pending_experiment = None
+        if not pending or str(pending.get("action", "")) != str(action):
+            self.last_transition_nontrivial = bool(label.visible_effect and not label.no_effect)
+            return
+        key = str(pending.get("experiment_key", ""))
+        class_key = str(pending.get("experiment_class_key", ""))
+        classification = _experiment_result_class(label)
+        posthoc_useful = bool(label.useful_effect)
+        posthoc_progress = bool(label.progress_effect or label.terminal_win)
+        failed = classification in {"nuisance", "no_op", "loop"} and not posthoc_useful
+        if failed and key:
+            self.experiment_failures[key] = int(self.experiment_failures.get(key, 0)) + 1
+            if int(self.experiment_failures[key]) >= int(pending.get("max_repeats", 1)):
+                self.experiment_retired.add(key)
+        if failed and class_key:
+            self.experiment_class_failures[class_key] = int(self.experiment_class_failures.get(class_key, 0)) + 1
+            if int(self.experiment_class_failures[class_key]) >= EXPERIMENT_CLASS_RETIRE_FAILURES:
+                self.experiment_class_retired.add(class_key)
+        if str(pending.get("action", "")) == "7" and posthoc_useful:
+            self.undo_probe_state_classes.add(str(pending.get("abstract_state_class", "")))
+        result = {
+            "experiment_key": key,
+            "experiment_class_key": class_key,
+            "action": str(action),
+            "predicted_outcomes": dict(pending.get("predicted_outcomes", {})),
+            "classification": classification,
+            "posthoc_useful": posthoc_useful,
+            "posthoc_progress": posthoc_progress,
+            "posthoc_entropy_drop": 0.0,
+            "retired": bool(key in self.experiment_retired),
+            "class_retired": bool(class_key in self.experiment_class_retired),
+            "usefulness_reasons": list(label.reasons),
+        }
+        self.experiment_history.append(result)
+        self.experiment_history = self.experiment_history[-64:]
+        self.last_transition_nontrivial = bool(label.visible_effect and not label.no_effect)
+
     def _enter_next_discovery_phase(self) -> None:
         self.discovery_phase += 1
         self.active_sequence = []
@@ -915,6 +1333,7 @@ class JEPAAttemptMemory:
         self.sequence_cursor = 0
         self.active_sequence_source = "post_level_discovery"
         self.positive_prefix_completed = True
+        self.pending_experiment = None
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -929,7 +1348,8 @@ class JEPAAttemptMemory:
                 "jepa_temporal_representation",
                 "attempt_memory",
                 "rule_causal_hypothesis_update",
-                "changed_next_attempt_action_distribution",
+                "sidecar_action_prior_proposals",
+                "symbolic_causal_controller_approval",
             ],
             "planner_chain": [
                 "public_observation_hash",
@@ -950,6 +1370,7 @@ class JEPAAttemptMemory:
             "transition_graph": self.transition_graph_summary(),
             "object_memory": self.object_memory_summary(),
             "planner_activation": self.planner_activation_summary(),
+            "experiment_protocol": self.experiment_protocol_summary(),
             "jepa_evidence_state": [entry.jepa_planner_state for entry in self.entries[-3:]],
             "causal_substrate_active": any(entry.causal_substrate_active for entry in self.entries),
         }
@@ -973,6 +1394,12 @@ class JEPAAttemptMemory:
                 self.action_events[action] = self.action_events.get(action, 0) + 1
             if outcome["changed"]:
                 self.transition_effects[edge] = self.transition_effects.get(edge, 0) + 1
+            if outcome.get("useful_effect", False):
+                self.transition_useful[edge] = self.transition_useful.get(edge, 0) + 1
+            if outcome.get("nuisance_effect", False):
+                self.transition_nuisance[edge] = self.transition_nuisance.get(edge, 0) + 1
+                self.action_nuisance[action] = self.action_nuisance.get(action, 0) + 1
+                self.family_nuisance[family] = self.family_nuisance.get(family, 0) + 1
             if outcome["no_effect"]:
                 self.transition_failures[edge] = self.transition_failures.get(edge, 0) + 1
                 self.action_failures[action] = self.action_failures.get(action, 0) + 1
@@ -1878,10 +2305,88 @@ def _is_no_effect_event(events: list[str]) -> bool:
     return False
 
 
+def _is_terminal_win_event(events: list[str]) -> bool:
+    positive_tokens = ("win", "won", "solved", "success", "all_levels_completed")
+    negative_tokens = ("game_over", "step_limit", "timeout", "failed", "loss", "lose")
+    for event in events:
+        lowered = str(event).lower()
+        if any(token in lowered for token in negative_tokens):
+            continue
+        if any(token in lowered for token in positive_tokens):
+            return True
+    return False
+
+
+def _classify_transition_usefulness(
+    *,
+    visible_effect: bool,
+    events: list[str],
+    score_delta: float,
+    terminal: bool,
+    no_effect_event: bool,
+    invalid_action: bool,
+    prior_action_count: int = 0,
+    prior_family_count: int = 0,
+    prior_useful_action_count: int = 0,
+    state_class_seen: bool = True,
+) -> TransitionUsefulness:
+    progress_effect = bool(POSITIVE_EVENTS.intersection(str(event) for event in events)) or float(score_delta) > 0.0
+    terminal_win = bool(terminal and _is_terminal_win_event(events))
+    no_effect = bool((not visible_effect) or no_effect_event or invalid_action)
+    has_prior_public_usefulness = bool(prior_useful_action_count > 0)
+    controllability_effect = bool(
+        visible_effect
+        and not no_effect
+        and not progress_effect
+        and has_prior_public_usefulness
+        and prior_action_count > 0
+        and not state_class_seen
+        and prior_family_count < 8
+    )
+    reachable_state_class_effect = bool(
+        visible_effect
+        and not no_effect
+        and not progress_effect
+        and has_prior_public_usefulness
+        and not state_class_seen
+        and prior_family_count < 4
+    )
+    useful_effect = bool(
+        progress_effect
+        or terminal_win
+        or controllability_effect
+        or reachable_state_class_effect
+    )
+    nuisance_effect = bool(visible_effect and not useful_effect)
+    reasons: list[str] = []
+    if progress_effect:
+        reasons.append("progress")
+    if terminal_win:
+        reasons.append("terminal_win")
+    if controllability_effect:
+        reasons.append("publicly_supported_controllability")
+    if reachable_state_class_effect:
+        reasons.append("publicly_supported_reachable_state_class")
+    if nuisance_effect:
+        reasons.append("visible_without_useful_effect")
+    if no_effect:
+        reasons.append("no_effect")
+    return TransitionUsefulness(
+        visible_effect=bool(visible_effect),
+        useful_effect=useful_effect,
+        nuisance_effect=nuisance_effect,
+        no_effect=no_effect,
+        progress_effect=progress_effect,
+        terminal_win=terminal_win,
+        controllability_effect=controllability_effect,
+        reachable_state_class_effect=reachable_state_class_effect,
+        reasons=tuple(reasons),
+    )
+
+
 def _transition_credit(
     *,
-    event_hit: bool,
-    changed: bool,
+    useful: TransitionUsefulness,
     no_effect_event: bool,
     invalid_action: bool,
     score_delta: float,
@@ -1889,10 +2394,12 @@ def _transition_credit(
 ) -> float:
     if invalid_action:
         return -1.0
-    if event_hit:
+    if useful.progress_effect or useful.terminal_win:
         return 1.15 + min(max(float(score_delta), 0.0), 2.0)
-    if no_effect_event or not changed:
+    if no_effect_event or useful.no_effect:
         return -0.65
+    if useful.nuisance_effect:
+        return min(float(score_delta), 0.0) - 0.18
     if terminal:
         return -0.65
     return min(float(score_delta), 0.0) - 0.04
@@ -1903,6 +2410,39 @@ def _observation_key(observation: Any) -> str:
         return stable_hash(public_observation_key_payload(observation))
     except Exception:
         return ""
+
+
+def _abstract_frame_state_class(frame: np.ndarray | None) -> str:
+    if frame is None:
+        return ""
+    arr = np.asarray(frame, dtype=np.int64)
+    if arr.size == 0:
+        return ""
+    nonzero = arr[arr != 0]
+    colors, counts = np.unique(nonzero, return_counts=True) if nonzero.size else (np.asarray([], dtype=np.int64), np.asarray([], dtype=np.int64))
+    components = _frame_components(arr)
+    bbox: list[int] | None = None
+    if nonzero.size:
+        coords = np.argwhere(arr != 0)
+        y0, x0 = coords.min(axis=0)
+        y1, x1 = coords.max(axis=0)
+        height = max(int(arr.shape[0]), 1)
+        width = max(int(arr.shape[1]), 1)
+        bbox = [
+            int(round(3.0 * float(y0) / float(height))),
+            int(round(3.0 * float(x0) / float(width))),
+            int(round(3.0 * float(y1) / float(height))),
+            int(round(3.0 * float(x1) / float(width))),
+        ]
+    payload = {
+        "shape": [int(arr.shape[0]), int(arr.shape[1])],
+        "nonzero_count_bucket": int(min(nonzero.size // 4, 32)),
+        "colors": [(int(color), int(min(count, 64))) for color, count in zip(colors.tolist(), counts.tolist())],
+        "component_count_bucket": int(min(len(components), 32)),
+        "component_areas": sorted(int(min(component.area, 64)) for component in components)[:16],
+        "bbox_bucket": bbox,
+    }
+    return stable_hash(payload)
 
 
 def _action_family(action: str) -> str:
@@ -1916,6 +2456,112 @@ def _action_family(action: str) -> str:
     if "toggle" in lowered or "use" in lowered or "pickup" in lowered or "drop" in lowered:
         return "object"
     return "other"
+
+
+def _experiment_action_class(action: str) -> str:
+    family = _action_family(action)
+    if family == "contact":
+        return "coordinate_contact"
+    if str(action) == "7":
+        return "undo_probe"
+    return f"{family}:{str(action)}"
+
+
+def _experiment_action_priority(action: str) -> int:
+    family = _action_family(action)
+    if family in {"move", "object"}:
+        return 0
+    if family == "contact":
+        return 1
+    if family == "other":
+        return 2
+    if str(action) == "7":
+        return 3
+    return 4
+
+
+def _experiment_coordinate_equiv_class(action: str, frame: np.ndarray | None) -> str:
+    family = _action_family(action)
+    if family != "contact":
+        return str(action)
+    if frame is None or not frame.size:
+        return "contact:unknown_frame"
+    target = _action_target_cell(action, frame)
+    relation = _component_target_relation(frame, target)
+    relation_keys = _candidate_relation_keys(family, relation)
+    relation_key = relation_keys[0][0] if relation_keys else "contact:no_relation"
+    if target is None:
+        return f"{relation_key}:no_target"
+    height = max(int(frame.shape[0]), 1)
+    width = max(int(frame.shape[1]), 1)
+    y, x = target
+    bucket_y = int(min(max(4 * int(y) // height, 0), 3))
+    bucket_x = int(min(max(4 * int(x) // width, 0), 3))
+    value = int(relation.get("value", 0))
+    if value == 0:
+        value_class = "background"
+    elif bool(relation.get("on_component")):
+        value_class = f"object:{value}"
+    else:
+        value_class = f"color:{value}"
+    local_cell = relation.get("component_local_cell")
+    component_suffix = ""
+    if isinstance(local_cell, list) and len(local_cell) >= 2 and str(relation.get("kind", "")) in {
+        "on_component",
+        "adjacent_component",
+    }:
+        component_suffix = f":component_cell:{int(local_cell[0])}:{int(local_cell[1])}"
+    return f"{relation_key}:{value_class}:bucket:{bucket_y}:{bucket_x}{component_suffix}"
+
+
+def _experiment_hypothesis_ids(action: str, frame: np.ndarray | None) -> list[str]:
+    family = _action_family(action)
+    ids = [
+        "h_progress",
+        f"h_{family}_visible_or_control",
+        "h_no_change",
+    ]
+    if family == "contact" and frame is not None and frame.size:
+        target = _action_target_cell(action, frame)
+        relation = _component_target_relation(frame, target)
+        ids.append(f"h_relation:{str(relation.get('relation_key', 'target'))}")
+    if str(action) == "7":
+        ids.append("h_reversibility")
+    return ids
+
+
+def _experiment_predicted_outcomes(action: str, family: str, coordinate_class: str) -> dict[str, str]:
+    if str(action) == "7":
+        return {
+            "h_progress": "undo_recovers_from_harm_or_deadend",
+            "h_reversibility": "state_reverts_to_previous_public_class",
+            "h_no_change": "no_change_or_noop",
+        }
+    if family == "contact":
+        return {
+            "h_progress": "score_delta>0 or level_changed",
+            "h_contact_visible_or_control": f"target_equiv_class_changes:{coordinate_class}",
+            "h_no_change": "no_change_or_bad_click",
+        }
+    return {
+        "h_progress": "score_delta>0 or level_changed",
+        f"h_{family}_visible_or_control": f"{family}_action_changes_public_state",
+        "h_no_change": "no_change_or_blocked",
+    }
+
+
+def _experiment_result_class(label: TransitionUsefulness) -> str:
+    if label.progress_effect or label.terminal_win:
+        return "progress"
+    if label.controllability_effect:
+        return "controllability"
+    if label.reachable_state_class_effect:
+        return "reachable_state_class"
+    if label.nuisance_effect:
+        return "nuisance"
+    if label.no_effect:
+        return "no_op"
+    return "discriminating_evidence"
 
 
 def _object_hypotheses_from_record(record: AttemptRecord, outcomes: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1934,6 +2580,11 @@ def _object_hypotheses_from_record(record: AttemptRecord, outcomes: list[dict[st
             event_hit=bool(outcome.get("event_hit", False)),
             score_delta=float(step.score_delta),
             no_effect=bool(outcome.get("no_effect", False)),
+            useful_effect=bool(outcome.get("useful_effect", False)),
+            nuisance_effect=bool(outcome.get("nuisance_effect", False)),
+            progress_effect=bool(outcome.get("progress_effect", False)),
+            controllability_effect=bool(outcome.get("controllability_effect", False)),
+            reachable_state_class_effect=bool(outcome.get("reachable_state_class_effect", False)),
         )
         if hypothesis is not None:
             hypotheses.append(hypothesis)
@@ -1978,6 +2629,11 @@ def _component_hypotheses_from_record(record: AttemptRecord, outcomes: list[dict
             event_hit=bool(outcome.get("event_hit", False)),
             score_delta=float(step.score_delta),
             no_effect=bool(outcome.get("no_effect", False)),
+            useful_effect=bool(outcome.get("useful_effect", False)),
+            nuisance_effect=bool(outcome.get("nuisance_effect", False)),
+            progress_effect=bool(outcome.get("progress_effect", False)),
+            controllability_effect=bool(outcome.get("controllability_effect", False)),
+            reachable_state_class_effect=bool(outcome.get("reachable_state_class_effect", False)),
         )
         if hypothesis is not None:
             hypotheses.append(hypothesis)
@@ -1993,6 +2649,11 @@ def _component_hypothesis_from_frames(
     event_hit: bool,
     score_delta: float,
     no_effect: bool,
+    useful_effect: bool = False,
+    nuisance_effect: bool = False,
+    progress_effect: bool = False,
+    controllability_effect: bool = False,
+    reachable_state_class_effect: bool = False,
 ) -> dict[str, Any] | None:
     if before.shape != after.shape:
         size_y = min(before.shape[0], after.shape[0])
@@ -2086,6 +2747,11 @@ def _component_hypothesis_from_frames(
         "target_value": int(target_relation.get("value", 0)),
         "component_value": int(affected or 0),
         "event_linked": bool(event_hit),
+        "useful_effect": bool(useful_effect),
+        "nuisance_effect": bool(nuisance_effect),
+        "progress_effect": bool(progress_effect),
+        "controllability_effect": bool(controllability_effect),
+        "reachable_state_class_effect": bool(reachable_state_class_effect),
         "score_delta": float(score_delta),
     }
     hypothesis["relation_delta_tokens"] = [token for token, _weight in _component_relation_delta_tokens(hypothesis)[:16]]
@@ -2306,11 +2972,14 @@ def _component_target_relation(
         return {"kind": "out_of_bounds", "value": 0, "area_bucket": 0, "component_count": len(components)}
     for component in components:
         if (y, x) in component.cells:
+            y0, x0, _y1, _x1 = component.bbox
             return {
                 "kind": "on_component",
                 "value": int(component.value),
                 "area_bucket": _area_bucket(component.area),
                 "component_id": int(component.component_id),
+                "component_bbox": [int(item) for item in component.bbox],
+                "component_local_cell": [int(y - y0), int(x - x0)],
                 "component_count": len(components),
             }
     nearest: tuple[_FrameComponent, float] | None = None
@@ -2320,11 +2989,14 @@ def _component_target_relation(
             nearest = (component, distance)
     if nearest is not None and nearest[1] <= 1.75:
         component = nearest[0]
+        y0, x0, _y1, _x1 = component.bbox
         return {
             "kind": "adjacent_component",
             "value": int(component.value),
             "area_bucket": _area_bucket(component.area),
             "component_id": int(component.component_id),
+            "component_bbox": [int(item) for item in component.bbox],
+            "component_local_cell": [int(y - y0), int(x - x0)],
             "component_count": len(components),
         }
     return {
@@ -2654,11 +3326,17 @@ def _component_hypothesis_value(hypothesis: dict[str, Any]) -> float:
     mechanism = str(hypothesis.get("mechanism", ""))
     changed_pixels = int(hypothesis.get("changed_pixels", 0))
     value = 0.0
+    progress_linked = bool(hypothesis.get("event_linked")) or bool(hypothesis.get("progress_effect"))
+    nuisance = bool(hypothesis.get("nuisance_effect"))
     if bool(hypothesis.get("event_linked")):
         value += 1.12 + min(max(float(hypothesis.get("score_delta", 0.0)), 0.0), 2.0)
-    if changed_pixels:
+    if changed_pixels and progress_linked:
         value += 0.16 + min(float(changed_pixels), 32.0) * 0.007
-    if mechanism in {
+    elif changed_pixels and bool(hypothesis.get("useful_effect")) and not nuisance:
+        value += 0.035
+    elif changed_pixels and nuisance:
+        value -= 0.18 + min(float(changed_pixels), 32.0) * 0.004
+    if progress_linked and mechanism in {
         "component_movement",
         "component_appearance",
         "component_disappearance",
@@ -2799,6 +3477,11 @@ def _frame_diff_hypothesis(
     event_hit: bool,
     score_delta: float,
     no_effect: bool,
+    useful_effect: bool = False,
+    nuisance_effect: bool = False,
+    progress_effect: bool = False,
+    controllability_effect: bool = False,
+    reachable_state_class_effect: bool = False,
 ) -> dict[str, Any] | None:
     if before.shape != after.shape:
         size_y = min(before.shape[0], after.shape[0])
@@ -2869,6 +3552,11 @@ def _frame_diff_hypothesis(
         "click_cell": list(click_cell) if click_cell is not None else None,
         "click_contacts_change": contact,
         "event_linked": bool(event_hit),
+        "useful_effect": bool(useful_effect),
+        "nuisance_effect": bool(nuisance_effect),
+        "progress_effect": bool(progress_effect),
+        "controllability_effect": bool(controllability_effect),
+        "reachable_state_class_effect": bool(reachable_state_class_effect),
         "score_delta": float(score_delta),
     }
 
@@ -2902,13 +3590,19 @@ def _object_hypothesis_value(hypothesis: dict[str, Any]) -> float:
     mechanism = str(hypothesis.get("mechanism", ""))
     changed_pixels = int(hypothesis.get("changed_pixels", 0))
     value = 0.0
+    progress_linked = bool(hypothesis.get("event_linked")) or bool(hypothesis.get("progress_effect"))
+    nuisance = bool(hypothesis.get("nuisance_effect"))
     if bool(hypothesis.get("event_linked")):
         value += 1.05 + min(max(float(hypothesis.get("score_delta", 0.0)), 0.0), 2.0)
-    if changed_pixels:
+    if changed_pixels and progress_linked:
         value += 0.18 + min(float(changed_pixels), 16.0) * 0.012
-    if mechanism in {"movement", "spawn", "removal", "toggle_or_transform"}:
+    elif changed_pixels and bool(hypothesis.get("useful_effect")) and not nuisance:
+        value += 0.035
+    elif changed_pixels and nuisance:
+        value -= 0.18 + min(float(changed_pixels), 16.0) * 0.006
+    if progress_linked and mechanism in {"movement", "spawn", "removal", "toggle_or_transform"}:
         value += 0.06
-    if bool(hypothesis.get("click_contacts_change")):
+    if progress_linked and bool(hypothesis.get("click_contacts_change")):
         value += 0.08
     if mechanism == "blocked_or_no_effect":
         value -= 0.42

@@ -660,7 +660,8 @@ def jepa_report_checks(report_path: str | Path = "docs/jepa_attempt_report.json"
         "jepa_temporal_representation",
         "attempt_memory",
         "rule_causal_hypothesis_update",
-        "changed_next_attempt_action_distribution",
+        "sidecar_action_prior_proposals",
+        "symbolic_causal_controller_approval",
     ]
     causal_checks = causal.get("checks", {})
     checks = {
@@ -686,7 +687,8 @@ def jepa_report_checks(report_path: str | Path = "docs/jepa_attempt_report.json"
         "jepa_causal_substrate_chain": bool(causal.get("passes")) and bool(gates.get("jepa_causal_substrate_chain")),
         "jepa_causal_chain_complete": causal.get("causal_chain") == expected_causal_chain,
         "jepa_rule_update_uses_temporal_representation": bool(causal_checks.get("rule_causal_hypothesis_uses_jepa")),
-        "jepa_plan_distribution_changed_by_tokens": bool(causal_checks.get("action_distribution_changed_by_jepa")),
+        "jepa_sidecar_records_action_priors": bool(causal_checks.get("jepa_action_priors_recorded")),
+        "jepa_plan_distribution_quarantined": bool(causal_checks.get("action_distribution_not_changed_by_jepa")),
     }
     return {
         "present": True,

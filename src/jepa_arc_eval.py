@@ -15,13 +15,14 @@ from .arcagi3_eval import aggregate_rows, collect_hashes, state_signature
 from .arcagi3_official import OfficialArcAGI3Env, default_max_steps, discover_official_games, make_arcade
 from .arcagi3_trace import action_entropy, repeat_collapse
 from .attempt_buffer import AttemptBuffer, AttemptRecord, action_id, observation_frame
+from .anti_attractor import HardAntiAttractorGate
 from .base_world_model import ACTION_FEATURE_DIM, action_to_features
 from .base_eval import make_base_controller
 from .device import AUTO_DEVICE, resolve_device
 from .external_collapse_experiment import adapter_device_summary, cuda_runtime_info, official_baseline_rows
 from .external_eval import GymnasiumExternalEnv, json_safe
 from .external_registry import discover_external_suites
-from .jepa_attempt_memory import JEPAAttemptMemory, _action_family
+from .jepa_attempt_memory import JEPAAttemptMemory, POSITIVE_EVENTS, _action_family
 from .jepa_train import synthetic_attempts
 from .video_jepa import VideoJEPA, load_video_jepa
 
@@ -79,6 +80,18 @@ FOCUSED_CAUSALITY_VARIANT_IDS = (
     "jepa_trained_shuffled",
     "jepa_plus_attempt_memory",
 )
+JEPA_ACTION_MODES = ("propose_only", "approved", "legacy")
+SIDECAR_RECENT_WINDOW = 16
+SIDECAR_OVERRIDE_THRESHOLD = 8
+SIDECAR_USEFULNESS_BASELINE = 0.0
+BEHAVIORAL_OFFLINE_GATE_THRESHOLDS = {
+    "loop_attempt_rate": 0.05,
+    "button_loop_attempt_rate": 0.02,
+    "coordinate_loop_attempt_rate": 0.02,
+    "mean_useful_events_per_attempt": 0.25,
+    "zero_useful_attempt_rate": 0.25,
+    "sidecar_changed_action_ratio": 0.05,
+}
 
 
 def variant_by_id(variant_id: str) -> JEPAVariant:
@@ -148,6 +161,10 @@ class JEPAAugmentedController:
         explorer_checkpoint: str | Path,
         jepa_model: VideoJEPA | None,
         device: torch.device,
+        jepa_action_mode: str = "propose_only",
+        jepa_max_action_bias: float = 0.05,
+        disable_jepa_direct_override: bool = True,
+        enable_hard_anti_attractor: bool = True,
     ) -> None:
         self.variant = variant
         self.base = make_base_controller(
@@ -160,6 +177,12 @@ class JEPAAugmentedController:
         self.memory = JEPAAttemptMemory(use_jepa_tokens=variant.use_jepa_tokens, device=device, jepa_token_mode=token_mode)
         self.jepa_model = jepa_model
         self.device = device
+        self.jepa_action_mode = str(jepa_action_mode)
+        if self.jepa_action_mode not in JEPA_ACTION_MODES:
+            raise ValueError(f"unsupported jepa_action_mode={self.jepa_action_mode!r}")
+        self.jepa_max_action_bias = float(max(jepa_max_action_bias, 0.0))
+        self.disable_jepa_direct_override = bool(disable_jepa_direct_override)
+        self.enable_hard_anti_attractor = bool(enable_hard_anti_attractor)
         self.changed_actions = 0
         self.frames = 0
         self.last_base_action: str | None = None
@@ -168,9 +191,12 @@ class JEPAAugmentedController:
         self.bridge_history_action_ids: list[int] = []
         self.bridge_history_action_features: list[list[float]] = []
         self.bridge_history_legal_counts: list[float] = []
+        self.anti_attractor = HardAntiAttractorGate()
         self.rng = random.Random(0)
         self.post_prefix_rng = random.Random(0)
         self.attempt_counter = 0
+        self.sidecar_override_ledger: list[dict[str, Any]] = []
+        self.pending_sidecar_override: dict[str, Any] | None = None
 
     @property
     def name(self) -> str:
@@ -187,9 +213,12 @@ class JEPAAugmentedController:
         self.bridge_history_action_ids.clear()
         self.bridge_history_action_features.clear()
         self.bridge_history_legal_counts.clear()
+        self.anti_attractor = HardAntiAttractorGate()
         self.rng.seed(0)
         self.post_prefix_rng.seed(0)
         self.attempt_counter = 0
+        self.sidecar_override_ledger.clear()
+        self.pending_sidecar_override = None
 
     def reset_attempt(self, seed: int) -> None:
         self.attempt_counter += 1
@@ -202,10 +231,14 @@ class JEPAAugmentedController:
         self.bridge_history_action_ids.clear()
         self.bridge_history_action_features.clear()
         self.bridge_history_legal_counts.clear()
+        self.anti_attractor.reset()
         self.rng.seed(9173 + int(seed))
         self.post_prefix_rng.seed(9173 + (1009 * int(seed)) + (104729 * self.attempt_counter))
+        self.pending_sidecar_override = None
 
     def choose_action(self, observation: Any) -> tuple[str, dict[str, Any]]:
+        if not hasattr(self, "anti_attractor"):
+            self.anti_attractor = HardAntiAttractorGate()
         base_action, diagnostics = self.base.choose_action(observation)
         legal = tuple(observation.available_actions)
         raw_scores = diagnostics.get("action_scores", {})
@@ -216,10 +249,15 @@ class JEPAAugmentedController:
         memory_scores = {action: 0.0 for action in legal}
         memory_distribution = {action: 1.0 / max(len(legal), 1) for action in legal}
         jepa_bridge_scores = {action: 0.0 for action in legal}
+        applied_jepa_bridge_scores = {action: 0.0 for action in legal}
         jepa_bridge_diagnostics: dict[str, Any] = {"active": False}
         bridge_public_support = {action: 0.0 for action in legal}
+        sidecar_override: dict[str, Any] = self._sidecar_override_placeholder(base_action)
         prefix_replay = False
         post_prefix_exploration = False
+        experiment_candidate = None
+        experiment_selected = False
+        experiment_by_action: dict[str, Any] = {}
         if self.variant.use_memory and not self.variant.null_control:
             memory_scores = self.memory.plan_scores_for_observation(observation)
             memory_distribution = self.memory.action_distribution_from_scores(memory_scores)
@@ -238,8 +276,13 @@ class JEPAAugmentedController:
                 "top_scores": top_scores(jepa_bridge_scores),
                 "public_support_weights": top_scores(bridge_public_support),
             }
+            sidecar_override, applied_jepa_bridge_scores = self._evaluate_sidecar_override(
+                base_action=base_action,
+                bridge_scores=jepa_bridge_scores,
+                bridge_public_support=bridge_public_support,
+            )
             for action in legal:
-                adjusted[action] += jepa_bridge_scores.get(action, 0.0)
+                adjusted[action] += applied_jepa_bridge_scores.get(action, 0.0)
         if self.variant.null_control or not self.variant.use_memory:
             chosen = base_action
         else:
@@ -247,6 +290,7 @@ class JEPAAugmentedController:
             eligible = [action for action in legal if not self.memory.public_no_effect_suppresses_action(action)]
             if not eligible:
                 eligible = list(legal)
+            experiment_eligible = list(eligible)
             count_balanced = False
             random_balanced = False
             if not self.memory._has_public_goal_evidence():
@@ -262,6 +306,11 @@ class JEPAAugmentedController:
                     prefix_replay = True
                 else:
                     chosen = ""
+                if not chosen and hasattr(self.memory, "select_experiment"):
+                    experiment_candidate = self.memory.select_experiment(observation, experiment_eligible, scores=adjusted)
+                    if experiment_candidate is not None and experiment_candidate.action in experiment_eligible:
+                        chosen = str(experiment_candidate.action)
+                        experiment_selected = True
                 if not chosen and self.memory.positive_prefix_completed and self.memory.best_event_prefix:
                     discovery_pool = [
                         action
@@ -277,7 +326,12 @@ class JEPAAugmentedController:
                         post_prefix_exploration = True
             else:
                 chosen = ""
-                if self.memory.positive_prefix_completed:
+                if hasattr(self.memory, "select_experiment"):
+                    experiment_candidate = self.memory.select_experiment(observation, experiment_eligible, scores=adjusted)
+                    if experiment_candidate is not None and experiment_candidate.action in experiment_eligible:
+                        chosen = str(experiment_candidate.action)
+                        experiment_selected = True
+                if not chosen and self.memory.positive_prefix_completed:
                     discovery_pool = [
                         action
                         for action in self.memory.discovery_exploration_candidates(
@@ -299,6 +353,75 @@ class JEPAAugmentedController:
                 random_balanced = True
             elif not chosen:
                 chosen = max(eligible, key=lambda action: (adjusted.get(action, -1.0e9), -legal.index(action)))
+        pre_veto_chosen = str(chosen)
+        if self.variant.use_memory and not self.variant.null_control and hasattr(self.memory, "experiment_for_action"):
+            for action in legal:
+                experiment = self.memory.experiment_for_action(observation, str(action))
+                if experiment is not None:
+                    experiment_by_action[str(action)] = experiment
+        ranked_for_veto = sorted(
+            [str(action) for action in legal],
+            key=lambda action: (
+                1 if action in experiment_by_action else 0,
+                adjusted.get(action, -1.0e9),
+                -legal.index(action),
+            ),
+            reverse=True,
+        )
+        chosen, anti_attractor_diagnostics = self.anti_attractor.select_action(
+            pre_veto_chosen,
+            ranked_for_veto,
+            observation,
+        ) if bool(getattr(self, "enable_hard_anti_attractor", True)) else (
+            pre_veto_chosen,
+            {
+                "schema": "hard_anti_attractor_gate_v1",
+                "active": False,
+                "disabled": True,
+                "selected_action": pre_veto_chosen,
+                "changed_action": False,
+                "vetoed_actions": [],
+                "fail_open_reasons": ["disabled_for_ablation"],
+            },
+        )
+        sidecar_override = self._finalize_sidecar_override_for_selection(
+            sidecar_override,
+            chosen_action=chosen,
+            pre_veto_chosen_action=pre_veto_chosen,
+        )
+        self.pending_sidecar_override = dict(sidecar_override) if sidecar_override.get("active") else None
+        experiment_diagnostics: dict[str, Any] = {"active": False}
+        executed_experiment = None
+        if experiment_candidate is not None and str(chosen) == str(experiment_candidate.action):
+            executed_experiment = experiment_candidate
+        elif experiment_by_action:
+            executed_experiment = experiment_by_action.get(str(chosen))
+        if executed_experiment is not None:
+            experiment_diagnostics = {
+                "active": True,
+                "selected": True,
+                "selected_before_veto": bool(experiment_selected),
+                "executed": True,
+                "schema": "arc_explicit_experiment_protocol_v1",
+                "experiment": executed_experiment.to_dict(),
+                "hard_veto_replacement": bool(
+                    experiment_candidate is not None and str(executed_experiment.action) != str(experiment_candidate.action)
+                ),
+            }
+            if experiment_candidate is not None and str(executed_experiment.action) != str(experiment_candidate.action):
+                experiment_diagnostics["pre_veto_experiment"] = experiment_candidate.to_dict()
+            if hasattr(self.memory, "begin_experiment"):
+                self.memory.begin_experiment(executed_experiment)
+        elif experiment_candidate is not None:
+            experiment_diagnostics = {
+                "active": True,
+                "selected": bool(experiment_selected),
+                "selected_before_veto": bool(experiment_selected),
+                "executed": False,
+                "schema": "arc_explicit_experiment_protocol_v1",
+                "experiment": experiment_candidate.to_dict(),
+                "hard_veto_replacement": bool(str(chosen) != str(experiment_candidate.action)),
+            }
         changed = chosen != base_action
         self.changed_actions += int(changed)
         self.frames += 1
@@ -310,18 +433,23 @@ class JEPAAugmentedController:
             "base_core_action": base_action,
             "chosen_action": chosen,
             "changed_action": changed,
+            "pre_veto_chosen_action": pre_veto_chosen,
+            "hard_anti_attractor": anti_attractor_diagnostics,
             "memory_scores": top_scores(memory_scores),
             "memory_action_distribution": top_scores(memory_distribution),
             "jepa_bridge_scores": top_scores(jepa_bridge_scores),
+            "jepa_applied_action_bias": top_scores(applied_jepa_bridge_scores),
             "jepa_bridge": jepa_bridge_diagnostics,
+            "sidecar_override": sidecar_override,
             "top_adjusted_scores": top_scores(adjusted),
             "public_no_effect_suppressed_count": int(suppressed_count) if self.variant.use_memory else 0,
             "public_count_balanced_exploration": bool(count_balanced) if self.variant.use_memory else False,
             "public_random_balanced_exploration": bool(random_balanced) if self.variant.use_memory else False,
             "public_prefix_replay": bool(prefix_replay) if self.variant.use_memory else False,
             "public_post_prefix_exploration": bool(post_prefix_exploration) if self.variant.use_memory else False,
-            "action_source": "existing_core_plus_attempt_memory_and_jepa_bridge"
-            if jepa_bridge_diagnostics.get("active")
+            "experiment_protocol": experiment_diagnostics,
+            "action_source": "existing_core_plus_attempt_memory_with_approved_sidecar_bias"
+            if sidecar_override.get("approved") and sidecar_override.get("executed")
             else "existing_core_plus_attempt_memory",
             "jepa_direct_action": False,
             "emits_text": False,
@@ -339,6 +467,162 @@ class JEPAAugmentedController:
             },
         }
         return chosen, diagnostics
+
+    def _sidecar_override_placeholder(self, base_action: str) -> dict[str, Any]:
+        state = self._sidecar_authority_state()
+        return {
+            "schema": "sidecar_override_ledger_v1",
+            "active": False,
+            "proposed_action": "",
+            "base_action": str(base_action),
+            "approved": False,
+            "executed": False,
+            "reason": "no_sidecar_proposal",
+            "mode": self._jepa_action_mode(),
+            "sidecar_can_override": bool(state["sidecar_can_override"]),
+            "action_weight": float(state["action_weight"]),
+            "posthoc_useful": None,
+            "posthoc_progress": None,
+            "posthoc_entropy_drop": None,
+        }
+
+    def _jepa_action_mode(self) -> str:
+        mode = str(getattr(self, "jepa_action_mode", "propose_only"))
+        return mode if mode in JEPA_ACTION_MODES else "propose_only"
+
+    def _sidecar_authority_state(self) -> dict[str, Any]:
+        recent = list(getattr(self, "sidecar_override_ledger", [])[-SIDECAR_RECENT_WINDOW:])
+        recent_overrides = sum(
+            1
+            for item in recent
+            if bool(item.get("approved")) and bool(item.get("executed"))
+        )
+        recent_useful = sum(
+            1
+            for item in recent
+            if bool(item.get("approved")) and bool(item.get("executed")) and bool(item.get("posthoc_useful"))
+        )
+        quarantined = bool(
+            recent_overrides > SIDECAR_OVERRIDE_THRESHOLD
+            and float(recent_useful) <= SIDECAR_USEFULNESS_BASELINE
+        )
+        mode = self._jepa_action_mode()
+        direct_disabled = bool(getattr(self, "disable_jepa_direct_override", True))
+        max_bias = float(max(getattr(self, "jepa_max_action_bias", 0.05), 0.0))
+        action_weight = max_bias * (0.1 if quarantined else 1.0)
+        return {
+            "schema": "sidecar_authority_state_v1",
+            "mode": mode,
+            "recent_overrides": int(recent_overrides),
+            "recent_useful": int(recent_useful),
+            "quarantined": quarantined,
+            "direct_override_disabled": direct_disabled,
+            "action_weight": float(action_weight),
+            "sidecar_can_override": bool(mode in {"approved", "legacy"} and not direct_disabled and not quarantined),
+        }
+
+    def _evaluate_sidecar_override(
+        self,
+        *,
+        base_action: str,
+        bridge_scores: dict[str, float],
+        bridge_public_support: dict[str, float],
+    ) -> tuple[dict[str, Any], dict[str, float]]:
+        if not bridge_scores:
+            return self._sidecar_override_placeholder(base_action), {}
+        proposed_action = max(bridge_scores, key=lambda action: (bridge_scores.get(action, -1.0e9), str(action)))
+        proposed_score = float(bridge_scores.get(proposed_action, 0.0))
+        authority = self._sidecar_authority_state()
+        applied = {action: 0.0 for action in bridge_scores}
+        approved = False
+        reason = "propose_only_read_only"
+        if proposed_score <= 0.0:
+            reason = "nonpositive_sidecar_prior"
+        elif self._jepa_action_mode() == "propose_only":
+            reason = "propose_only_read_only"
+        elif not authority["sidecar_can_override"]:
+            reason = "sidecar_quarantined" if authority["quarantined"] else "direct_override_disabled"
+        elif self._jepa_action_mode() == "legacy":
+            approved = True
+            reason = "legacy_explicitly_enabled"
+        else:
+            support = float(bridge_public_support.get(proposed_action, 0.0))
+            action_has_progress = bool(getattr(self.memory, "action_events", {}).get(proposed_action, 0))
+            if support >= 0.50 or action_has_progress:
+                approved = True
+                reason = "approved_by_public_usefulness"
+            else:
+                reason = "missing_public_usefulness"
+        if approved:
+            limit = float(authority["action_weight"])
+            applied[proposed_action] = float(max(min(proposed_score, limit), -limit))
+        ledger = {
+            "schema": "sidecar_override_ledger_v1",
+            "active": True,
+            "proposed_action": str(proposed_action),
+            "base_action": str(base_action),
+            "approved": bool(approved),
+            "executed": False,
+            "reason": reason,
+            "mode": self._jepa_action_mode(),
+            "proposal_score": float(proposed_score),
+            "public_support": float(bridge_public_support.get(proposed_action, 0.0)),
+            "sidecar_can_override": bool(authority["sidecar_can_override"]),
+            "quarantined": bool(authority["quarantined"]),
+            "recent_overrides": int(authority["recent_overrides"]),
+            "recent_useful": int(authority["recent_useful"]),
+            "action_weight": float(authority["action_weight"]),
+            "applied_bias": float(applied.get(proposed_action, 0.0)),
+            "posthoc_useful": None,
+            "posthoc_progress": None,
+            "posthoc_entropy_drop": None,
+        }
+        return ledger, applied
+
+    def _finalize_sidecar_override_for_selection(
+        self,
+        ledger: dict[str, Any],
+        *,
+        chosen_action: str,
+        pre_veto_chosen_action: str,
+    ) -> dict[str, Any]:
+        if not ledger.get("active"):
+            return ledger
+        finalized = dict(ledger)
+        finalized["pre_veto_chosen_action"] = str(pre_veto_chosen_action)
+        finalized["chosen_action"] = str(chosen_action)
+        finalized["executed"] = bool(
+            finalized.get("approved") and str(chosen_action) == str(finalized.get("proposed_action", ""))
+        )
+        if finalized["approved"] and not finalized["executed"]:
+            finalized["reason"] = "approved_but_vetoed_or_superseded"
+        return finalized
+
+    def _complete_pending_sidecar_override(self, action: str, result: Any) -> None:
+        pending = dict(getattr(self, "pending_sidecar_override", None) or {})
+        self.pending_sidecar_override = None
+        if not pending:
+            return
+        events = [str(item) for item in getattr(result, "info", {}).get("events", [])]
+        score_delta = float(getattr(result, "reward", 0.0))
+        event_progress = bool(POSITIVE_EVENTS.intersection(events))
+        terminal_text_win = any(
+            any(token in event.lower() for token in ("win", "won", "solved", "success", "level_completed"))
+            and not any(token in event.lower() for token in ("game_over", "timeout", "failed", "loss", "lose"))
+            for event in events
+        )
+        executed = bool(str(action) == str(pending.get("proposed_action", "")) and pending.get("executed"))
+        posthoc_progress = bool(executed and (score_delta > 0.0 or event_progress or terminal_text_win))
+        pending["posthoc_useful"] = bool(posthoc_progress)
+        pending["posthoc_progress"] = bool(posthoc_progress)
+        pending["posthoc_entropy_drop"] = 0.0
+        pending["observed_action"] = str(action)
+        pending["score_delta"] = float(score_delta)
+        pending["events"] = events
+        if not hasattr(self, "sidecar_override_ledger"):
+            self.sidecar_override_ledger = []
+        self.sidecar_override_ledger.append(pending)
+        self.sidecar_override_ledger = self.sidecar_override_ledger[-128:]
 
     def jepa_action_bridge_scores(self, observation: Any, legal: tuple[str, ...]) -> tuple[dict[str, float], dict[str, Any]]:
         if self.jepa_model is None or not legal:
@@ -425,11 +709,16 @@ class JEPAAugmentedController:
         }
 
     def observe_transition(self, action: str, result: Any) -> None:
+        if not hasattr(self, "anti_attractor"):
+            self.anti_attractor = HardAntiAttractorGate()
         self.base.observe_transition(action, result)
+        if self.last_observation is not None and bool(getattr(self, "enable_hard_anti_attractor", True)):
+            self.anti_attractor.observe_transition(self.last_observation, action, result)
         if self.variant.use_memory and self.variant.use_jepa_tokens and self.jepa_model is not None and self.last_observation is not None:
             self._append_bridge_history(self.last_observation, action)
         if self.variant.use_memory and not self.variant.null_control and self.last_observation is not None:
             self.memory.observe_live_transition(self.last_observation, action, result)
+        self._complete_pending_sidecar_override(action, result)
 
     def _append_bridge_history(self, observation: Any, action: str) -> None:
         try:
@@ -467,6 +756,8 @@ class JEPAAugmentedController:
             self.memory.ingest_attempt(record, model=model)
 
     def summary(self) -> dict[str, Any]:
+        if not hasattr(self, "anti_attractor"):
+            self.anti_attractor = HardAntiAttractorGate()
         return {
             "variant": self.variant.variant_id,
             "changed_actions": self.changed_actions,
@@ -474,6 +765,15 @@ class JEPAAugmentedController:
             "jepa_bridge_history_len": len(self.bridge_history_frames),
             "base": self.base.summary(),
             "attempt_memory": self.memory.summary(),
+            "hard_anti_attractor": self.anti_attractor.summary()
+            if bool(getattr(self, "enable_hard_anti_attractor", True))
+            else {
+                "schema": "hard_anti_attractor_gate_v1",
+                "active": False,
+                "disabled": True,
+            },
+            "sidecar_control": self._sidecar_authority_state(),
+            "sidecar_override_ledger": list(getattr(self, "sidecar_override_ledger", [])[-8:]),
             "jepa_direct_action": False,
             "device": adapter_device_summary(self.base.adapter),
         }
@@ -494,6 +794,42 @@ def compact_scorecard(scorecard: Any) -> dict[str, Any]:
         for key in ["id", "score", "state", "levels_completed", "win_levels", "total_levels_completed", "total_levels"]
         if key in scorecard
     }
+
+
+def _extras_level_count(extras: dict[str, Any]) -> int:
+    for key in ("levels_completed", "total_levels_completed", "win_levels"):
+        if key not in extras:
+            continue
+        try:
+            return int(extras.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def _events_have_progress(events: Sequence[Any]) -> bool:
+    event_texts = [str(event) for event in events or []]
+    if POSITIVE_EVENTS.intersection(event_texts):
+        return True
+    return any(
+        any(token in event.lower() for token in ("win", "won", "solved", "success", "level_completed"))
+        and not any(token in event.lower() for token in ("game_over", "timeout", "failed", "loss", "lose"))
+        for event in event_texts
+    )
+
+
+def _result_has_progress_event(before_observation: Any, result: Any) -> bool:
+    if float(getattr(result, "reward", 0.0) or 0.0) > 0.0:
+        return True
+    info = getattr(result, "info", {}) or {}
+    if _events_have_progress(info.get("events", []) or []):
+        return True
+    before_extras = getattr(before_observation, "extras", {}) or {}
+    after_extras = getattr(getattr(result, "observation", None), "extras", {}) or {}
+    if _extras_level_count(after_extras) > _extras_level_count(before_extras):
+        return True
+    game_state = str(info.get("game_state", after_extras.get("game_state", ""))).lower()
+    return bool(game_state in {"win", "won", "solved", "success"})
 
 
 def run_attempt(
@@ -532,7 +868,7 @@ def run_attempt(
             result = env.step(action)
             actions.append(action)
             states.add(state_signature(result.observation))
-            useful_events += int(float(result.reward) > 0.0)
+            useful_events += int(_result_has_progress_event(before, result))
             controller.observe_transition(action, result)
             buffer.append_transition(
                 before,
@@ -623,6 +959,10 @@ def make_controller_for_variant(
     explorer_checkpoint: str | Path,
     jepa_checkpoint: str | Path,
     device: torch.device,
+    jepa_action_mode: str = "propose_only",
+    jepa_max_action_bias: float = 0.05,
+    disable_jepa_direct_override: bool = True,
+    enable_hard_anti_attractor: bool = True,
 ) -> tuple[JEPAAugmentedController, dict[str, Any]]:
     jepa_model, model_info = make_jepa_for_variant(variant, jepa_checkpoint, device)
     external_checkpoint = resolve_external_base_checkpoint(checkpoint)
@@ -633,6 +973,10 @@ def make_controller_for_variant(
         explorer_checkpoint=explorer_checkpoint,
         jepa_model=jepa_model,
         device=device,
+        jepa_action_mode=jepa_action_mode,
+        jepa_max_action_bias=jepa_max_action_bias,
+        disable_jepa_direct_override=disable_jepa_direct_override,
+        enable_hard_anti_attractor=enable_hard_anti_attractor,
     )
     model_info["external_base_checkpoint"] = str(external_checkpoint)
     return controller, model_info
@@ -655,6 +999,10 @@ def run_official_worker(
     attempts: int = 3,
     environments_dir: str | Path = "runs/arcagi3_official_envs",
     recordings_dir: str | Path = "runs/arcagi3_official_recordings",
+    jepa_action_mode: str = "propose_only",
+    jepa_max_action_bias: float = 0.05,
+    disable_jepa_direct_override: bool = True,
+    enable_hard_anti_attractor: bool = True,
 ) -> dict[str, Any]:
     target_device = resolve_device(device)
     requested = manifest_game_ids(requested_ids=game_ids, limit=limit)
@@ -677,6 +1025,10 @@ def run_official_worker(
             explorer_checkpoint=explorer_checkpoint,
             jepa_checkpoint=jepa_checkpoint,
             device=target_device,
+            jepa_action_mode=jepa_action_mode,
+            jepa_max_action_bias=jepa_max_action_bias,
+            disable_jepa_direct_override=disable_jepa_direct_override,
+            enable_hard_anti_attractor=enable_hard_anti_attractor,
         )
         model_info[variant.variant_id] = info
         for index, spec in enumerate(specs):
@@ -712,6 +1064,7 @@ def run_official_worker(
         "rows": rows,
         "aggregate_by_variant": aggregate_by_variant(rows),
         "attempt_table": attempt_table(rows),
+        "behavioral_offline_gates": behavioral_offline_gates(rows),
         "official_baselines": official_baseline_rows(),
         "trace_paths": [row["trace_path"] for row in rows],
         "device_runtime": cuda_runtime_info(target_device),
@@ -719,6 +1072,148 @@ def run_official_worker(
         "operation_mode": operation_mode,
         "selected_game_ids": [spec.game_id for spec in specs],
         "variant_ids": [variant.variant_id for variant in variants],
+        "attempts": max(int(attempts), 1),
+    }
+    Path(json_output).parent.mkdir(parents=True, exist_ok=True)
+    Path(json_output).write_text(json.dumps(json_safe(report), indent=2), encoding="utf-8")
+    return report
+
+
+def run_behavioral_ablation_report(
+    *,
+    checkpoint: str | Path,
+    explorer_checkpoint: str | Path,
+    jepa_checkpoint: str | Path,
+    trace_dir: str | Path,
+    json_output: str | Path,
+    core_arm: str,
+    device: str | torch.device,
+    max_click_actions: int = 192,
+    operation_mode: str = "offline",
+    game_ids: Sequence[str] | None = None,
+    limit: int | None = None,
+    attempts: int = 1,
+    environments_dir: str | Path = "runs/arcagi3_official_envs",
+    recordings_dir: str | Path = "runs/arcagi3_official_recordings",
+) -> dict[str, Any]:
+    target_device = resolve_device(device)
+    requested = manifest_game_ids(requested_ids=game_ids, limit=limit)
+    arcade = make_arcade(
+        operation_mode=operation_mode,
+        environments_dir=environments_dir,
+        recordings_dir=recordings_dir,
+    )
+    discovered = discover_official_games(arcade, game_ids=requested, limit=None)
+    by_id = {spec.game_id: spec for spec in discovered}
+    specs = [by_id[item] for item in requested if item in by_id]
+    arms = [
+        {
+            "ablation_id": "base_only",
+            "variant": variant_by_id("baseline_core"),
+            "enable_hard_anti_attractor": False,
+            "jepa_action_mode": "propose_only",
+            "disable_jepa_direct_override": True,
+        },
+        {
+            "ablation_id": "base_plus_hard_loop_gate",
+            "variant": variant_by_id("baseline_core"),
+            "enable_hard_anti_attractor": True,
+            "jepa_action_mode": "propose_only",
+            "disable_jepa_direct_override": True,
+        },
+        {
+            "ablation_id": "base_plus_hard_loop_gate_jepa_readonly",
+            "variant": variant_by_id("jepa_plus_attempt_memory"),
+            "enable_hard_anti_attractor": True,
+            "jepa_action_mode": "propose_only",
+            "disable_jepa_direct_override": True,
+        },
+        {
+            "ablation_id": "full_jepa_plus_attempt_memory",
+            "variant": variant_by_id("jepa_plus_attempt_memory"),
+            "enable_hard_anti_attractor": True,
+            "jepa_action_mode": "approved",
+            "disable_jepa_direct_override": False,
+        },
+    ]
+    rows: list[dict[str, Any]] = []
+    model_info: dict[str, Any] = {}
+    for arm in arms:
+        variant = arm["variant"]
+        ablation_id = str(arm["ablation_id"])
+        controller, info = make_controller_for_variant(
+            variant=variant,
+            core_arm=core_arm,
+            checkpoint=checkpoint,
+            explorer_checkpoint=explorer_checkpoint,
+            jepa_checkpoint=jepa_checkpoint,
+            device=target_device,
+            jepa_action_mode=str(arm["jepa_action_mode"]),
+            jepa_max_action_bias=0.05,
+            disable_jepa_direct_override=bool(arm["disable_jepa_direct_override"]),
+            enable_hard_anti_attractor=bool(arm["enable_hard_anti_attractor"]),
+        )
+        model_info[ablation_id] = {
+            **info,
+            "source_variant": variant.variant_id,
+            "enable_hard_anti_attractor": bool(arm["enable_hard_anti_attractor"]),
+            "jepa_action_mode": str(arm["jepa_action_mode"]),
+            "disable_jepa_direct_override": bool(arm["disable_jepa_direct_override"]),
+        }
+        for index, spec in enumerate(specs):
+            controller.reset_all()
+            for attempt_index in range(1, max(int(attempts), 1) + 1):
+                env = OfficialArcAGI3Env(
+                    arcade,
+                    spec,
+                    seed=index,
+                    max_steps=default_max_steps(spec),
+                    max_click_actions=max_click_actions,
+                )
+                row = run_attempt(
+                    env,
+                    controller,
+                    suite_id="official_arcagi3",
+                    variant_id=ablation_id,
+                    split="sealed_eval",
+                    seed=index,
+                    attempt_index=attempt_index,
+                    trace_path=Path(trace_dir)
+                    / "official_arcagi3"
+                    / "sealed_eval"
+                    / ablation_id
+                    / f"attempt_{attempt_index}"
+                    / f"{spec.game_id}.json",
+                )
+                row["game_id"] = spec.game_id
+                row["source_variant"] = variant.variant_id
+                rows.append(row)
+    report = {
+        "suite_id": "official_arcagi3_behavioral_ablation",
+        "split": "sealed_eval",
+        "rows": rows,
+        "aggregate_by_variant": aggregate_by_variant(rows),
+        "attempt_table": attempt_table(rows),
+        "behavioral_offline_gates": behavioral_offline_gates(
+            rows,
+            primary_variant="full_jepa_plus_attempt_memory",
+            baseline_variant="base_only",
+        ),
+        "ablation_arms": [
+            {
+                "ablation_id": str(arm["ablation_id"]),
+                "source_variant": arm["variant"].variant_id,
+                "enable_hard_anti_attractor": bool(arm["enable_hard_anti_attractor"]),
+                "jepa_action_mode": str(arm["jepa_action_mode"]),
+                "disable_jepa_direct_override": bool(arm["disable_jepa_direct_override"]),
+            }
+            for arm in arms
+        ],
+        "trace_paths": [row["trace_path"] for row in rows],
+        "device_runtime": cuda_runtime_info(target_device),
+        "variant_model_info": model_info,
+        "operation_mode": operation_mode,
+        "selected_game_ids": [spec.game_id for spec in specs],
         "attempts": max(int(attempts), 1),
     }
     Path(json_output).parent.mkdir(parents=True, exist_ok=True)
@@ -741,6 +1236,10 @@ def dispatch_official_worker(
     attempts: int = 3,
     environments_dir: str | Path = "runs/arcagi3_official_envs",
     recordings_dir: str | Path = "runs/arcagi3_official_recordings",
+    jepa_action_mode: str = "propose_only",
+    jepa_max_action_bias: float = 0.05,
+    disable_jepa_direct_override: bool = True,
+    enable_hard_anti_attractor: bool = True,
 ) -> dict[str, Any]:
     temp = Path(trace_dir) / "_official_jepa_worker_report.json"
     try:
@@ -762,6 +1261,10 @@ def dispatch_official_worker(
             attempts=attempts,
             environments_dir=environments_dir,
             recordings_dir=recordings_dir,
+            jepa_action_mode=jepa_action_mode,
+            jepa_max_action_bias=jepa_max_action_bias,
+            disable_jepa_direct_override=disable_jepa_direct_override,
+            enable_hard_anti_attractor=enable_hard_anti_attractor,
         )
     except Exception:
         venv_python = Path(".venv/Scripts/python.exe")
@@ -795,7 +1298,15 @@ def dispatch_official_worker(
             str(environments_dir),
             "--recordings-dir",
             str(recordings_dir),
+            "--jepa-action-mode",
+            str(jepa_action_mode),
+            "--jepa-max-action-bias",
+            str(jepa_max_action_bias),
         ]
+        if disable_jepa_direct_override:
+            cmd.append("--disable-jepa-direct-override")
+        if not enable_hard_anti_attractor:
+            cmd.append("--disable-hard-anti-attractor")
         if limit is not None:
             cmd.extend(["--limit", str(limit)])
         for item in expand_cli_values(game_ids):
@@ -835,6 +1346,10 @@ def run_non_arc(
     trace_dir: str | Path,
     core_arm: str,
     device: torch.device,
+    jepa_action_mode: str = "propose_only",
+    jepa_max_action_bias: float = 0.05,
+    disable_jepa_direct_override: bool = True,
+    enable_hard_anti_attractor: bool = True,
 ) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     for suite in discover_external_suites():
@@ -848,6 +1363,10 @@ def run_non_arc(
                 explorer_checkpoint=explorer_checkpoint,
                 jepa_checkpoint=jepa_checkpoint,
                 device=device,
+                jepa_action_mode=jepa_action_mode,
+                jepa_max_action_bias=jepa_max_action_bias,
+                disable_jepa_direct_override=disable_jepa_direct_override,
+                enable_hard_anti_attractor=enable_hard_anti_attractor,
             )
             for task_id in suite.tasks:
                 for seed in [100, 101, 102]:
@@ -899,6 +1418,203 @@ def attempt_table(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             aggregate = aggregate_rows(subset)
             table.append({"variant": variant, "attempt_index": attempt_index, **aggregate})
     return table
+
+
+def behavioral_offline_gates(
+    rows: list[dict[str, Any]],
+    *,
+    primary_variant: str = "jepa_plus_attempt_memory",
+    baseline_variant: str = "attempt_memory_no_jepa",
+) -> dict[str, Any]:
+    variants = sorted({str(row.get("variant", "")) for row in rows if str(row.get("variant", ""))})
+    per_variant = {variant: _behavioral_metrics_for_rows([row for row in rows if row.get("variant") == variant]) for variant in variants}
+    primary = per_variant.get(primary_variant) or (next(iter(per_variant.values())) if per_variant else _empty_behavioral_metrics())
+    baseline = per_variant.get(baseline_variant)
+    sidecar_override_usefulness = float(primary.get("sidecar_override_usefulness", 0.0))
+    base_usefulness = float(baseline.get("mean_useful_events_per_attempt", 0.0)) if baseline else 0.0
+    sidecar_overrides = int(primary.get("sidecar_approved_executed", 0))
+    sidecar_usefulness_gate = bool(sidecar_overrides == 0 or sidecar_override_usefulness >= base_usefulness)
+    sidecar_changed_ratio = float(primary.get("sidecar_changed_action_ratio", 0.0))
+    sidecar_changed_gate = bool(
+        sidecar_changed_ratio <= BEHAVIORAL_OFFLINE_GATE_THRESHOLDS["sidecar_changed_action_ratio"]
+        or sidecar_override_usefulness >= base_usefulness
+    )
+    baseline_progress = float(baseline.get("progress_discovery_rate", 0.0)) if baseline else None
+    progress_discovery_rate = float(primary.get("progress_discovery_rate", 0.0))
+    progress_gate = bool(baseline is not None and progress_discovery_rate > float(baseline_progress))
+    gates = {
+        "loop_attempt_rate": float(primary.get("loop_attempt_rate", 1.0))
+        <= BEHAVIORAL_OFFLINE_GATE_THRESHOLDS["loop_attempt_rate"],
+        "button_loop_attempt_rate": float(primary.get("button_loop_attempt_rate", 1.0))
+        <= BEHAVIORAL_OFFLINE_GATE_THRESHOLDS["button_loop_attempt_rate"],
+        "coordinate_loop_attempt_rate": float(primary.get("coordinate_loop_attempt_rate", 1.0))
+        <= BEHAVIORAL_OFFLINE_GATE_THRESHOLDS["coordinate_loop_attempt_rate"],
+        "mean_useful_events_per_attempt": float(primary.get("mean_useful_events_per_attempt", 0.0))
+        >= BEHAVIORAL_OFFLINE_GATE_THRESHOLDS["mean_useful_events_per_attempt"],
+        "attempts_with_zero_useful_events": float(primary.get("zero_useful_attempt_rate", 1.0))
+        <= BEHAVIORAL_OFFLINE_GATE_THRESHOLDS["zero_useful_attempt_rate"],
+        "sidecar_override_usefulness": sidecar_usefulness_gate,
+        "sidecar_changed_action_ratio": sidecar_changed_gate,
+        "progress_discovery_rate_beats_baseline": progress_gate,
+    }
+    return {
+        "schema": "arc_offline_behavioral_gates_v1",
+        "primary_variant": primary_variant,
+        "baseline_variant": baseline_variant,
+        "thresholds": dict(BEHAVIORAL_OFFLINE_GATE_THRESHOLDS),
+        "baseline_available": bool(baseline is not None),
+        "per_variant": per_variant,
+        "primary_metrics": primary,
+        "baseline_metrics": baseline or {},
+        "gates": gates,
+        "passes": bool(gates and all(gates.values())),
+    }
+
+
+def _empty_behavioral_metrics() -> dict[str, Any]:
+    return {
+        "attempts": 0,
+        "steps": 0,
+        "loop_attempts": 0,
+        "button_loop_attempts": 0,
+        "coordinate_loop_attempts": 0,
+        "loop_attempt_rate": 0.0,
+        "button_loop_attempt_rate": 0.0,
+        "coordinate_loop_attempt_rate": 0.0,
+        "mean_useful_events_per_attempt": 0.0,
+        "zero_useful_attempt_rate": 0.0,
+        "progress_discovery_rate": 0.0,
+        "sidecar_approved_executed": 0,
+        "sidecar_useful_overrides": 0,
+        "sidecar_override_usefulness": 0.0,
+        "sidecar_changed_actions": 0,
+        "sidecar_changed_action_ratio": 0.0,
+    }
+
+
+def _behavioral_metrics_for_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    metrics = _empty_behavioral_metrics()
+    if not rows:
+        return metrics
+    metrics["attempts"] = len(rows)
+    metrics["mean_useful_events_per_attempt"] = float(
+        sum(float(row.get("useful_events", 0.0) or 0.0) for row in rows) / max(len(rows), 1)
+    )
+    metrics["zero_useful_attempt_rate"] = float(
+        sum(1 for row in rows if float(row.get("useful_events", 0.0) or 0.0) <= 0.0) / max(len(rows), 1)
+    )
+    for row in rows:
+        trace_metrics = _behavioral_metrics_from_trace_path(row.get("trace_path", ""))
+        for key in [
+            "steps",
+            "loop_attempts",
+            "button_loop_attempts",
+            "coordinate_loop_attempts",
+            "progress_events",
+            "sidecar_approved_executed",
+            "sidecar_useful_overrides",
+            "sidecar_changed_actions",
+        ]:
+            metrics[key] = int(metrics.get(key, 0)) + int(trace_metrics.get(key, 0))
+    steps = max(int(metrics.get("steps", 0)), 1)
+    metrics["loop_attempt_rate"] = float(metrics.get("loop_attempts", 0) / steps)
+    metrics["button_loop_attempt_rate"] = float(metrics.get("button_loop_attempts", 0) / steps)
+    metrics["coordinate_loop_attempt_rate"] = float(metrics.get("coordinate_loop_attempts", 0) / steps)
+    metrics["progress_discovery_rate"] = float(metrics.get("progress_events", 0) / steps)
+    sidecar_executed = max(int(metrics.get("sidecar_approved_executed", 0)), 1)
+    metrics["sidecar_override_usefulness"] = float(metrics.get("sidecar_useful_overrides", 0) / sidecar_executed)
+    metrics["sidecar_changed_action_ratio"] = float(metrics.get("sidecar_changed_actions", 0) / steps)
+    return metrics
+
+
+def _behavioral_metrics_from_trace_path(path_text: Any) -> dict[str, int]:
+    path = Path(str(path_text))
+    if not path.exists():
+        return {
+            "steps": 0,
+            "loop_attempts": 0,
+            "button_loop_attempts": 0,
+            "coordinate_loop_attempts": 0,
+            "progress_events": 0,
+            "sidecar_approved_executed": 0,
+            "sidecar_useful_overrides": 0,
+            "sidecar_changed_actions": 0,
+        }
+    try:
+        trace = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return _behavioral_metrics_from_steps([])
+    attempt = trace.get("attempt", {}) if isinstance(trace.get("attempt"), dict) else {}
+    steps = [step for step in attempt.get("steps", []) if isinstance(step, dict)]
+    return _behavioral_metrics_from_steps(steps)
+
+
+def _behavioral_metrics_from_steps(steps: list[dict[str, Any]]) -> dict[str, int]:
+    actions = [str(step.get("action", "")) for step in steps]
+    progress = [_step_has_progress_event(step) for step in steps]
+    loop_attempts = 0
+    button_loop_attempts = 0
+    coordinate_loop_attempts = 0
+    for index in range(len(actions)):
+        if any(progress[max(0, index - 12) : index + 1]):
+            continue
+        loop_window = _cycle_window(actions, index)
+        if not loop_window:
+            continue
+        loop_attempts += 1
+        if all(_is_coordinate_action(action) for action in loop_window):
+            coordinate_loop_attempts += 1
+        elif all(_is_button_action(action) for action in loop_window):
+            button_loop_attempts += 1
+    sidecar_approved_executed = 0
+    sidecar_useful_overrides = 0
+    sidecar_changed_actions = 0
+    for step in steps:
+        policy = (step.get("diagnostics") or {}).get("jepa_policy", {})
+        sidecar = policy.get("sidecar_override", {}) if isinstance(policy, dict) else {}
+        if not bool(sidecar.get("approved")) or not bool(sidecar.get("executed")):
+            continue
+        sidecar_approved_executed += 1
+        if str(sidecar.get("proposed_action", "")) != str(sidecar.get("base_action", "")):
+            sidecar_changed_actions += 1
+        if _step_has_progress_event(step):
+            sidecar_useful_overrides += 1
+    return {
+        "steps": len(steps),
+        "loop_attempts": loop_attempts,
+        "button_loop_attempts": button_loop_attempts,
+        "coordinate_loop_attempts": coordinate_loop_attempts,
+        "progress_events": sum(1 for item in progress if item),
+        "sidecar_approved_executed": sidecar_approved_executed,
+        "sidecar_useful_overrides": sidecar_useful_overrides,
+        "sidecar_changed_actions": sidecar_changed_actions,
+    }
+
+
+def _cycle_window(actions: list[str], index: int) -> list[str]:
+    for period in range(1, 7):
+        start = index - (2 * period) + 1
+        mid = index - period + 1
+        if start < 0:
+            continue
+        if actions[start:mid] == actions[mid : index + 1]:
+            return actions[mid : index + 1]
+    return []
+
+
+def _is_coordinate_action(action: str) -> bool:
+    return str(action).startswith("click:")
+
+
+def _is_button_action(action: str) -> bool:
+    action = str(action)
+    return bool(action and not _is_coordinate_action(action))
+
+
+def _step_has_progress_event(step: dict[str, Any]) -> bool:
+    if float(step.get("score_delta", 0.0) or 0.0) > 0.0:
+        return True
+    return _events_have_progress(step.get("event_delta", []) or [])
 
 
 def lookup_attempt(table: list[dict[str, Any]], variant: str, attempt_index: int) -> dict[str, Any]:
@@ -983,13 +1699,15 @@ def causal_substrate_self_check(jepa_checkpoint: str | Path, device: torch.devic
         abs(float(jepa_entry.next_attempt_plan.get(action, 0.0)) - float(no_jepa_entry.next_attempt_plan.get(action, 0.0)))
         for action in set(jepa_entry.next_attempt_plan) | set(no_jepa_entry.next_attempt_plan)
     )
+    proposal_l1 = float(sum(abs(float(value)) for value in jepa_entry.sidecar_action_priors.values()))
     checks = {
         "attempt_video_action_history_present": bool(probe_record.steps),
         "jepa_temporal_representation_present": bool(jepa_entry.token_mean) and bool(jepa_entry.jepa_action_evidence),
         "attempt_memory_stores_jepa_tokens": bool(jepa_memory.summary().get("causal_substrate_active")),
         "rule_causal_hypothesis_uses_jepa": float(jepa_entry.causal_hypotheses.get("jepa_action_effect_span", 0.0)) > 0.0,
-        "next_attempt_plan_changed_by_jepa": plan_diff > 1.0e-9,
-        "action_distribution_changed_by_jepa": distribution_l1 > 1.0e-9,
+        "jepa_action_priors_recorded": proposal_l1 > 1.0e-9,
+        "next_attempt_plan_not_changed_by_jepa": plan_diff <= 1.0e-9,
+        "action_distribution_not_changed_by_jepa": distribution_l1 <= 1.0e-9,
         "jepa_not_direct_action_source": bool(jepa_memory.summary().get("direct_action_source") is False),
         "jepa_emits_no_text": bool(payload.get("emits_text") is False),
     }
@@ -1001,17 +1719,20 @@ def causal_substrate_self_check(jepa_checkpoint: str | Path, device: torch.devic
             "jepa_temporal_representation",
             "attempt_memory",
             "rule_causal_hypothesis_update",
-            "changed_next_attempt_action_distribution",
+            "sidecar_action_prior_proposals",
+            "symbolic_causal_controller_approval",
         ],
         "probe_attempt_steps": len(probe_record.steps),
         "jepa_action_evidence": jepa_entry.jepa_action_evidence,
         "jepa_causal_hypotheses": jepa_entry.causal_hypotheses,
         "jepa_next_attempt_plan": jepa_entry.next_attempt_plan,
         "no_jepa_next_attempt_plan": no_jepa_entry.next_attempt_plan,
+        "jepa_sidecar_action_priors": jepa_entry.sidecar_action_priors,
         "jepa_action_distribution": jepa_distribution,
         "no_jepa_action_distribution": no_jepa_distribution,
         "distribution_l1": float(distribution_l1),
         "plan_l1": float(plan_diff),
+        "proposal_l1": float(proposal_l1),
     }
 
 
@@ -1035,6 +1756,10 @@ def build_report(
     trace_dir: str | Path,
     json_output: str | Path,
     device: torch.device,
+    jepa_action_mode: str = "propose_only",
+    jepa_max_action_bias: float = 0.05,
+    disable_jepa_direct_override: bool = True,
+    enable_hard_anti_attractor: bool = True,
 ) -> dict[str, Any]:
     core = load_core_choice()
     core_arm = str(core["selected_core"])
@@ -1045,6 +1770,10 @@ def build_report(
         trace_dir=trace_dir,
         core_arm=core_arm,
         device=device,
+        jepa_action_mode=jepa_action_mode,
+        jepa_max_action_bias=jepa_max_action_bias,
+        disable_jepa_direct_override=disable_jepa_direct_override,
+        enable_hard_anti_attractor=enable_hard_anti_attractor,
     )
     non_arc = run_non_arc(
         checkpoint=checkpoint,
@@ -1053,6 +1782,10 @@ def build_report(
         trace_dir=trace_dir,
         core_arm=core_arm,
         device=device,
+        jepa_action_mode=jepa_action_mode,
+        jepa_max_action_bias=jepa_max_action_bias,
+        disable_jepa_direct_override=disable_jepa_direct_override,
+        enable_hard_anti_attractor=enable_hard_anti_attractor,
     )
     jepa_payload = torch.load(jepa_checkpoint, map_location="cpu", weights_only=False)
     causal_substrate = causal_substrate_self_check(jepa_checkpoint, device=device)
@@ -1176,6 +1909,10 @@ def build_focused_official_report(
     attempts: int = 3,
     environments_dir: str | Path = "runs/arcagi3_official_envs",
     recordings_dir: str | Path = "runs/arcagi3_official_recordings",
+    jepa_action_mode: str = "propose_only",
+    jepa_max_action_bias: float = 0.05,
+    disable_jepa_direct_override: bool = True,
+    enable_hard_anti_attractor: bool = True,
 ) -> dict[str, Any]:
     core = load_core_choice()
     selected_variants = focused_variant_ids(variant_ids)
@@ -1195,6 +1932,10 @@ def build_focused_official_report(
         attempts=attempts,
         environments_dir=environments_dir,
         recordings_dir=recordings_dir,
+        jepa_action_mode=jepa_action_mode,
+        jepa_max_action_bias=jepa_max_action_bias,
+        disable_jepa_direct_override=disable_jepa_direct_override,
+        enable_hard_anti_attractor=enable_hard_anti_attractor,
     )
     primary = selected_variants[0]
     primary_aggregate = official["aggregate_by_variant"].get(primary, {})
@@ -1358,8 +2099,9 @@ def jepa_causality_audit(official: dict[str, Any], *, primary: str = "jepa_plus_
         _l1_dict(trained_bridge, shuffled_bridge),
     )
     trained_attempt_change_l1 = _l1_dict(trained_action_dist_a1, trained_action_dist_a2)
-    evidence_bias_l1 = float(memory_state.get("bias_l1", 0.0) or 0.0)
-    evidence_present = bool(memory_state.get("evidence")) and bool(memory_state.get("consumed_by_planner")) and evidence_bias_l1 > 1.0e-9
+    evidence_bias_l1 = float(memory_state.get("proposal_l1", memory_state.get("bias_l1", 0.0)) or 0.0)
+    evidence_present = bool(memory_state.get("evidence")) and bool(memory_state.get("action_priors")) and evidence_bias_l1 > 1.0e-9
+    read_only_state = bool(memory_state.get("planner_role") == "proposer_read_only" and not memory_state.get("consumed_by_planner"))
     claimed_improvement = trained_score > max(no_jepa_score, shuffled_score) or trained_useful > max(no_jepa_useful, shuffled_useful)
     shuffled_degrades = bool(claimed_improvement and (shuffled_score < trained_score or shuffled_useful < trained_useful))
     bridge_active = bool(trained_policy_a2.get("jepa_bridge", {}).get("active")) if isinstance(trained_policy_a2.get("jepa_bridge"), dict) else False
@@ -1367,7 +2109,7 @@ def jepa_causality_audit(official: dict[str, Any], *, primary: str = "jepa_plus_
         "trained_jepa_alters_next_attempt_vs_no_jepa": trained_vs_no_jepa_l1 >= 0.05,
         "random_jepa_does_not_reproduce_trained_behavior": trained_vs_random_l1 >= 0.05,
         "shuffled_jepa_degrades_claimed_improvement": shuffled_degrades,
-        "explicit_jepa_memory_state_consumed_by_planner": evidence_present,
+        "explicit_jepa_memory_state_proposes_to_planner": bool(evidence_present and read_only_state),
         "official_trace_attempt1_evidence_to_attempt2_strategy": bool(
             evidence_present and (trained_attempt_change_l1 >= 0.05 or trained_vs_no_jepa_l1 >= 0.05 or bridge_active)
         ),
@@ -1414,6 +2156,10 @@ def build_focused_causality_report(
     attempts: int = 3,
     environments_dir: str | Path = "runs/arcagi3_official_envs",
     recordings_dir: str | Path = "runs/arcagi3_official_recordings",
+    jepa_action_mode: str = "propose_only",
+    jepa_max_action_bias: float = 0.05,
+    disable_jepa_direct_override: bool = True,
+    enable_hard_anti_attractor: bool = True,
 ) -> dict[str, Any]:
     core = load_core_choice()
     selected_variants = focused_causality_variant_ids(variant_ids)
@@ -1432,6 +2178,10 @@ def build_focused_causality_report(
         attempts=attempts,
         environments_dir=environments_dir,
         recordings_dir=recordings_dir,
+        jepa_action_mode=jepa_action_mode,
+        jepa_max_action_bias=jepa_max_action_bias,
+        disable_jepa_direct_override=disable_jepa_direct_override,
+        enable_hard_anti_attractor=enable_hard_anti_attractor,
     )
     causality = jepa_causality_audit(official)
     primary_aggregate = official["aggregate_by_variant"].get("jepa_plus_attempt_memory", {})
@@ -1490,7 +2240,14 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config",
-        choices=["external", "official_worker", "focused_official", "focused_causality", "causal_probe"],
+        choices=[
+            "external",
+            "official_worker",
+            "focused_official",
+            "focused_causality",
+            "causal_probe",
+            "behavioral_ablation",
+        ],
         default="external",
     )
     parser.add_argument("--checkpoint", default="frozen/recurrent_latent_fast.pt")
@@ -1507,6 +2264,11 @@ def main() -> None:
     parser.add_argument("--attempts", type=int, default=3)
     parser.add_argument("--environments-dir", default="runs/arcagi3_official_envs")
     parser.add_argument("--recordings-dir", default="runs/arcagi3_official_recordings")
+    parser.add_argument("--jepa-action-mode", choices=JEPA_ACTION_MODES, default="propose_only")
+    parser.add_argument("--jepa-max-action-bias", type=float, default=0.05)
+    parser.add_argument("--disable-jepa-direct-override", action="store_true", default=True)
+    parser.add_argument("--enable-jepa-direct-override", action="store_false", dest="disable_jepa_direct_override")
+    parser.add_argument("--disable-hard-anti-attractor", action="store_true", default=False)
     args = parser.parse_args()
     device = resolve_device(args.device)
     if args.config == "causal_probe":
@@ -1543,8 +2305,40 @@ def main() -> None:
             attempts=args.attempts,
             environments_dir=args.environments_dir,
             recordings_dir=args.recordings_dir,
+            jepa_action_mode=args.jepa_action_mode,
+            jepa_max_action_bias=args.jepa_max_action_bias,
+            disable_jepa_direct_override=args.disable_jepa_direct_override,
+            enable_hard_anti_attractor=not args.disable_hard_anti_attractor,
         )
         print(json.dumps({"suite_id": report["suite_id"], "variants": sorted(report["aggregate_by_variant"])}, indent=2))
+        return
+    if args.config == "behavioral_ablation":
+        core_arm = args.core_arm or load_core_choice()["selected_core"]
+        report = run_behavioral_ablation_report(
+            checkpoint=args.checkpoint,
+            explorer_checkpoint=args.explorer_checkpoint,
+            jepa_checkpoint=args.jepa_checkpoint,
+            trace_dir=args.trace_dir,
+            json_output=args.json_output,
+            core_arm=core_arm,
+            device=device,
+            operation_mode=args.operation_mode or "offline",
+            game_ids=args.game_id,
+            limit=args.limit,
+            attempts=args.attempts,
+            environments_dir=args.environments_dir,
+            recordings_dir=args.recordings_dir,
+        )
+        print(
+            json.dumps(
+                {
+                    "suite_id": report["suite_id"],
+                    "ablation_arms": [arm["ablation_id"] for arm in report["ablation_arms"]],
+                    "behavioral_passes": bool(report["behavioral_offline_gates"]["passes"]),
+                },
+                indent=2,
+            )
+        )
         return
     if args.config == "focused_official":
         report = build_focused_official_report(
@@ -1561,6 +2355,10 @@ def main() -> None:
             attempts=args.attempts,
             environments_dir=args.environments_dir,
             recordings_dir=args.recordings_dir,
+            jepa_action_mode=args.jepa_action_mode,
+            jepa_max_action_bias=args.jepa_max_action_bias,
+            disable_jepa_direct_override=args.disable_jepa_direct_override,
+            enable_hard_anti_attractor=not args.disable_hard_anti_attractor,
         )
         print(json.dumps({"terminal_outcome": report["terminal_outcome"], "focused_metrics": report["focused_metrics"]}, indent=2))
         return
@@ -1579,6 +2377,10 @@ def main() -> None:
             attempts=args.attempts,
             environments_dir=args.environments_dir,
             recordings_dir=args.recordings_dir,
+            jepa_action_mode=args.jepa_action_mode,
+            jepa_max_action_bias=args.jepa_max_action_bias,
+            disable_jepa_direct_override=args.disable_jepa_direct_override,
+            enable_hard_anti_attractor=not args.disable_hard_anti_attractor,
         )
         print(
             json.dumps(
@@ -1598,6 +2400,10 @@ def main() -> None:
         trace_dir=args.trace_dir,
         json_output=args.json_output,
         device=device,
+        jepa_action_mode=args.jepa_action_mode,
+        jepa_max_action_bias=args.jepa_max_action_bias,
+        disable_jepa_direct_override=args.disable_jepa_direct_override,
+        enable_hard_anti_attractor=not args.disable_hard_anti_attractor,
     )
     print(json.dumps({"terminal_outcome": report["terminal_outcome"], "gates": report["gates"]}, indent=2))
 

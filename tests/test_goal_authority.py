@@ -12,12 +12,15 @@ def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_goal_file_exists_and_has_cassi_acceptance_content() -> None:
+def test_goal_file_exists_and_has_current_arc_failure_acceptance_content() -> None:
     assert GOAL_PATH.exists(), f"Missing {GOAL_PATH}"
     content = _read_text(GOAL_PATH)
 
-    assert "CASSI" in content
-    assert "Continuous Analog State Scientist Intelligence" in content
+    assert "closed-loop ARC behavior" in content
+    assert "hard anti-attractor gate" in content
+    assert "visible_effect" in content
+    assert "useful_effect" in content
+    assert "JEPA" in content
 
 
 def test_tracker_declares_goal_markdown_as_source_of_truth() -> None:
