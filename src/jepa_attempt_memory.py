@@ -214,6 +214,7 @@ class JEPAAttemptMemory:
         self.pending_experiment: dict[str, Any] | None = None
         self.experiment_history: list[dict[str, Any]] = []
         self.last_transition_nontrivial = False
+        self.last_transition_usefulness: TransitionUsefulness | None = None
         self.undo_probe_state_classes: set[str] = set()
         self.planner_activation_stats = _empty_planner_activation_stats()
 
@@ -300,6 +301,7 @@ class JEPAAttemptMemory:
         self.pending_experiment = None
         self.experiment_history.clear()
         self.last_transition_nontrivial = False
+        self.last_transition_usefulness = None
         self.undo_probe_state_classes.clear()
         self.planner_activation_stats = _empty_planner_activation_stats()
 
@@ -331,6 +333,7 @@ class JEPAAttemptMemory:
             after_frame = _step_after_frame(record, index)
             next_state_class = _abstract_frame_state_class(after_frame) if after_frame is not None else ""
             state_class_seen = bool(next_state_class and next_state_class in self.reachable_state_classes)
+            public_controllability = _public_controllability_evidence(step.frame, after_frame, action)
             label = _classify_transition_usefulness(
                 visible_effect=changed,
                 events=step.event_delta,
@@ -341,6 +344,8 @@ class JEPAAttemptMemory:
                 prior_action_count=prior_action_count,
                 prior_family_count=prior_family_count,
                 prior_useful_action_count=int(useful_actions.get(action, 0)),
+                public_controllability_evidence=public_controllability,
+                public_reachable_state_evidence=bool(public_controllability and not state_class_seen),
                 state_class_seen=state_class_seen,
             )
             outcome_value = _transition_credit(
@@ -1095,6 +1100,7 @@ class JEPAAttemptMemory:
         self.pending_experiment = None
         self.experiment_history.clear()
         self.last_transition_nontrivial = False
+        self.last_transition_usefulness = None
         self.undo_probe_state_classes.clear()
         if self.best_event_prefix:
             self.active_sequence = list(self.best_event_prefix[:128])
@@ -1165,7 +1171,7 @@ class JEPAAttemptMemory:
             if self.active_sequence_source == "positive_public_control_prefix" and self.sequence_cursor >= len(self.active_sequence):
                 self.positive_prefix_completed = True
 
-    def observe_live_transition(self, before_observation: Any, action: str, result: Any) -> None:
+    def observe_live_transition(self, before_observation: Any, action: str, result: Any) -> TransitionUsefulness | None:
         action = str(action)
         before = _public_frame(before_observation)
         after = _public_frame(getattr(result, "observation", None))
@@ -1176,6 +1182,12 @@ class JEPAAttemptMemory:
         changed = bool(before is not None and after is not None and before.shape == after.shape and np.any(before != after))
         obs_key = _observation_key(before_observation)
         family = _action_family(action)
+        state_class_seen = (
+            _abstract_frame_state_class(after) in self.reachable_state_classes
+            if after is not None and after.size
+            else True
+        )
+        public_controllability = _public_controllability_evidence(before, after, action)
         label = _classify_transition_usefulness(
             visible_effect=changed,
             events=events,
@@ -1186,12 +1198,11 @@ class JEPAAttemptMemory:
             prior_action_count=int(self.action_counts.get(action, 0)),
             prior_family_count=int(self.family_counts.get(family, 0)),
             prior_useful_action_count=int(self.action_events.get(action, 0)),
-            state_class_seen=(
-                _abstract_frame_state_class(after) in self.reachable_state_classes
-                if after is not None and after.size
-                else True
-            ),
+            public_controllability_evidence=public_controllability,
+            public_reachable_state_evidence=bool(public_controllability and not state_class_seen),
+            state_class_seen=state_class_seen,
         )
+        self.last_transition_usefulness = label
         if after is not None and after.size:
             state_class = _abstract_frame_state_class(after)
             if state_class:
@@ -1227,7 +1238,7 @@ class JEPAAttemptMemory:
         if not self.active_sequence or self.sequence_cursor >= len(self.active_sequence):
             if level_completed:
                 self._enter_next_discovery_phase()
-            return
+            return label
         source = self.active_sequence_source
         expected = (
             self.active_sequence_expectations[self.sequence_cursor]
@@ -1242,7 +1253,7 @@ class JEPAAttemptMemory:
             before,
         )
         if action != expected_action and (resolved_expected_action is None or action != resolved_expected_action):
-            return
+            return label
         if before is not None and after is not None and bool(np.any(before != after)):
             self._record_planner_event(source, "visible_changes")
         if label.useful_effect:
@@ -1271,12 +1282,13 @@ class JEPAAttemptMemory:
                 self.active_sequence_expectations = []
                 self.sequence_cursor = 0
                 self.active_sequence_source = "aborted_by_public_component_contradiction"
-                return
+                return label
         self.sequence_cursor += 1
         if source == "positive_public_control_prefix" and self.sequence_cursor >= len(self.active_sequence):
             self.positive_prefix_completed = True
         if level_completed:
             self._enter_next_discovery_phase()
+        return label
 
     def _record_phase_action(self, obs_key: str, action: str) -> None:
         phase = int(self.discovery_phase)
@@ -2328,6 +2340,8 @@ def _classify_transition_usefulness(
     prior_action_count: int = 0,
     prior_family_count: int = 0,
     prior_useful_action_count: int = 0,
+    public_controllability_evidence: bool = False,
+    public_reachable_state_evidence: bool = False,
     state_class_seen: bool = True,
 ) -> TransitionUsefulness:
     progress_effect = bool(POSITIVE_EVENTS.intersection(str(event) for event in events)) or float(score_delta) > 0.0
@@ -2338,16 +2352,14 @@ def _classify_transition_usefulness(
         visible_effect
         and not no_effect
         and not progress_effect
-        and has_prior_public_usefulness
-        and prior_action_count > 0
-        and not state_class_seen
+        and (public_controllability_evidence or has_prior_public_usefulness)
         and prior_family_count < 8
     )
     reachable_state_class_effect = bool(
         visible_effect
         and not no_effect
         and not progress_effect
-        and has_prior_public_usefulness
+        and public_reachable_state_evidence
         and not state_class_seen
         and prior_family_count < 4
     )
@@ -3574,6 +3586,44 @@ def _movement_colors(before: np.ndarray, after: np.ndarray) -> list[int]:
         if float(np.linalg.norm(after_centroid - before_centroid)) >= 0.75:
             moved.append(color)
     return moved[:8]
+
+
+def _public_controllability_evidence(before: Any, after: Any, action: str) -> bool:
+    if before is None or after is None:
+        return False
+    try:
+        before_arr = np.asarray(before, dtype=np.int64)
+        after_arr = np.asarray(after, dtype=np.int64)
+    except Exception:
+        return False
+    if before_arr.ndim != 2 or after_arr.ndim != 2 or before_arr.shape != after_arr.shape:
+        return False
+    if before_arr.size == 0 or after_arr.size == 0 or not bool(np.any(before_arr != after_arr)):
+        return False
+    family = _action_family(action)
+    if family not in {"move", "object"}:
+        return False
+    if _movement_colors(before_arr, after_arr):
+        return True
+    component = _component_hypothesis_from_frames(
+        before=before_arr,
+        after=after_arr,
+        action=str(action),
+        step_index=-1,
+        event_hit=False,
+        score_delta=0.0,
+        no_effect=False,
+    )
+    mechanism = str((component or {}).get("mechanism", ""))
+    if family == "move":
+        return mechanism == "component_movement"
+    return mechanism in {
+        "component_movement",
+        "component_color_transform",
+        "component_appearance",
+        "component_disappearance",
+        "component_split_merge",
+    }
 
 
 def _hypothesis_region(hypothesis: dict[str, Any]) -> tuple[int, int] | None:

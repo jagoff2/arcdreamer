@@ -315,10 +315,12 @@ def test_attempt_memory_separates_visible_effect_from_failed_action() -> None:
     assert entry.effect_actions["down"] == 1
     assert entry.causal_hypotheses["no_effect_rate"] == 0.0
     assert entry.causal_hypotheses["visible_effect_rate"] == 1.0
-    assert entry.causal_hypotheses["useful_effect_rate"] == 0.0
-    assert entry.causal_hypotheses["nuisance_effect_rate"] == 1.0
-    assert entry.transition_graph_summary["useful_edges"] == 0
-    assert entry.transition_graph_summary["nuisance_edges"] == 1
+    assert entry.causal_hypotheses["useful_effect_rate"] == 1.0
+    assert entry.causal_hypotheses["nuisance_effect_rate"] == 0.0
+    assert entry.causal_hypotheses["controllability_effect_rate"] == 1.0
+    assert entry.causal_hypotheses["reachable_state_class_effect_rate"] == 1.0
+    assert entry.transition_graph_summary["useful_edges"] == 1
+    assert entry.transition_graph_summary["nuisance_edges"] == 0
     assert memory.score_action("down") == 0.0
     assert entry.next_attempt_plan.get("down", 0.0) == 0.0
 
@@ -413,11 +415,11 @@ def test_visible_delta_without_progress_is_not_macro() -> None:
     for step in range(10):
         before_grid = np.zeros((8, 8), dtype=np.int64)
         after_grid = np.zeros((8, 8), dtype=np.int64)
-        before_grid[2, 2 + (step % 2)] = 4
-        after_grid[2, 3 - (step % 2)] = 4
+        before_grid[2, 2] = 4
+        after_grid[2, 2] = 5
         before = _obs_grid(step, before_grid, actions)
         after = _obs_grid(step + 1, after_grid, actions)
-        buffer.append_transition(before, "4", ArcAGI3StepResult(after, -0.001, False, False, {"events": ["move"]}))
+        buffer.append_transition(before, "4", ArcAGI3StepResult(after, -0.001, False, False, {"events": ["toggle"]}))
     memory = JEPAAttemptMemory(use_jepa_tokens=False)
     entry = memory.ingest_attempt(buffer.to_record())
     memory.start_attempt()
@@ -525,6 +527,30 @@ def test_object_causal_hypothesis_detects_public_movement() -> None:
     assert entry.object_causal_hypotheses[0]["movement_colors"] == [4]
     assert entry.causal_hypotheses["object_changed_region_count"] >= 1.0
     assert memory.summary()["object_memory"]["observed_colors"] == 1
+
+
+def test_public_movement_creates_controllability_usefulness_without_progress() -> None:
+    before_grid = np.zeros((8, 8), dtype=np.int64)
+    before_grid[2, 2] = 4
+    after_grid = np.zeros((8, 8), dtype=np.int64)
+    after_grid[2, 3] = 4
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    memory.start_attempt()
+    before = _obs_grid(0, before_grid, ("right", "left", "wait"))
+    after = _obs_grid(1, after_grid, ("right", "left", "wait"))
+    experiment = memory.experiment_for_action(before, "right")
+
+    assert experiment is not None
+    memory.begin_experiment(experiment)
+    memory.observe_live_transition(before, "right", ArcAGI3StepResult(after, -0.001, False, False, {"events": ["move"]}))
+    summary = memory.transition_graph_summary()
+    recent = memory.summary()["experiment_protocol"]["recent_results"][-1]
+
+    assert summary["useful_edges"] == 1
+    assert summary["nuisance_edges"] == 0
+    assert recent["classification"] == "controllability"
+    assert recent["posthoc_useful"] is True
+    assert recent["retired"] is False
 
 
 def test_object_region_memory_scores_contact_clicks_from_public_frame_diff() -> None:
@@ -842,7 +868,7 @@ def test_no_experiment_repeated_after_nuisance_classification() -> None:
     after = _obs_grid(1, after_grid, ("1", "2", "wait"))
 
     first_action, first_diagnostics = controller.choose_action(observation)
-    controller.observe_transition(first_action, ArcAGI3StepResult(after, -0.001, False, False, {"events": ["move"]}))
+    controller.observe_transition(first_action, ArcAGI3StepResult(after, -0.001, False, False, {"events": ["toggle"]}))
     second_action, second_diagnostics = controller.choose_action(observation)
 
     assert first_action == "1"
@@ -1152,6 +1178,79 @@ def test_run_attempt_counts_event_and_level_progress_without_positive_reward(tmp
     assert trace["summary"]["useful_events"] == 2
     assert jepa_arc_eval._step_has_progress_event(steps[0]) is True
     assert steps[0]["score_delta"] == 0.0
+
+
+def test_run_attempt_counts_posthoc_public_usefulness_without_reward_progress(tmp_path: Path) -> None:
+    class UsefulController:
+        def reset_attempt(self, seed: int) -> None:
+            self.seed = seed
+
+        def choose_action(self, observation: ArcAGI3Observation):
+            del observation
+            return "right", {"policy": {}, "jepa_policy": {}}
+
+        def observe_transition(self, action: str, result: ArcAGI3StepResult) -> dict[str, object]:
+            del action, result
+            return {
+                "visible_effect": True,
+                "useful_effect": True,
+                "nuisance_effect": False,
+                "progress_effect": False,
+                "terminal_win": False,
+                "controllability_effect": True,
+                "reachable_state_class_effect": True,
+                "reasons": ["publicly_supported_controllability"],
+            }
+
+        def finish_attempt(self, record) -> None:
+            self.record = record
+
+        def summary(self) -> dict[str, object]:
+            return {}
+
+    class UsefulEnv:
+        max_steps = 1
+        task_id = "public-useful"
+        score = 0.0
+
+        def reset(self, seed: int) -> ArcAGI3Observation:
+            del seed
+            grid = np.zeros((8, 8), dtype=np.int64)
+            grid[2, 2] = 4
+            return _obs_grid(0, grid, ("right",))
+
+        def step(self, action: str) -> ArcAGI3StepResult:
+            del action
+            grid = np.zeros((8, 8), dtype=np.int64)
+            grid[2, 3] = 4
+            return ArcAGI3StepResult(_obs_grid(1, grid, ("right",)), -0.001, False, False, {"events": ["move"]})
+
+        def close(self) -> dict[str, object]:
+            return {}
+
+        def normalized_score(self) -> float:
+            return 0.0
+
+    row = jepa_arc_eval.run_attempt(
+        UsefulEnv(),
+        UsefulController(),
+        suite_id="unit",
+        variant_id="jepa_plus_attempt_memory",
+        split="sealed_eval",
+        seed=5,
+        attempt_index=1,
+        trace_path=tmp_path / "trace.json",
+    )
+    trace = json.loads((tmp_path / "trace.json").read_text(encoding="utf-8"))
+    step = trace["attempt"]["steps"][0]
+    policy = step["diagnostics"]["jepa_policy"]
+
+    assert row["useful_events"] == 1
+    assert trace["summary"]["useful_events"] == 1
+    assert policy["posthoc_useful"] is True
+    assert policy["posthoc_progress"] is False
+    assert jepa_arc_eval._step_has_progress_event(step) is False
+    assert jepa_arc_eval._step_has_useful_event(step) is True
 
 
 def test_component_causal_graph_detects_public_component_movement() -> None:

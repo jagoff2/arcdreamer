@@ -197,6 +197,7 @@ class JEPAAugmentedController:
         self.attempt_counter = 0
         self.sidecar_override_ledger: list[dict[str, Any]] = []
         self.pending_sidecar_override: dict[str, Any] | None = None
+        self.last_transition_usefulness: dict[str, Any] | None = None
 
     @property
     def name(self) -> str:
@@ -219,6 +220,7 @@ class JEPAAugmentedController:
         self.attempt_counter = 0
         self.sidecar_override_ledger.clear()
         self.pending_sidecar_override = None
+        self.last_transition_usefulness = None
 
     def reset_attempt(self, seed: int) -> None:
         self.attempt_counter += 1
@@ -232,6 +234,7 @@ class JEPAAugmentedController:
         self.bridge_history_action_features.clear()
         self.bridge_history_legal_counts.clear()
         self.anti_attractor.reset()
+        self.last_transition_usefulness = None
         self.rng.seed(9173 + int(seed))
         self.post_prefix_rng.seed(9173 + (1009 * int(seed)) + (104729 * self.attempt_counter))
         self.pending_sidecar_override = None
@@ -612,10 +615,22 @@ class JEPAAugmentedController:
             for event in events
         )
         executed = bool(str(action) == str(pending.get("proposed_action", "")) and pending.get("executed"))
-        posthoc_progress = bool(executed and (score_delta > 0.0 or event_progress or terminal_text_win))
-        pending["posthoc_useful"] = bool(posthoc_progress)
+        usefulness = getattr(self, "last_transition_usefulness", None) or {}
+        posthoc_progress = bool(
+            executed
+            and (
+                score_delta > 0.0
+                or event_progress
+                or terminal_text_win
+                or bool(usefulness.get("progress_effect"))
+                or bool(usefulness.get("terminal_win"))
+            )
+        )
+        posthoc_useful = bool(executed and (posthoc_progress or bool(usefulness.get("useful_effect"))))
+        pending["posthoc_useful"] = bool(posthoc_useful)
         pending["posthoc_progress"] = bool(posthoc_progress)
         pending["posthoc_entropy_drop"] = 0.0
+        pending["posthoc_usefulness_reasons"] = list(usefulness.get("reasons", []))
         pending["observed_action"] = str(action)
         pending["score_delta"] = float(score_delta)
         pending["events"] = events
@@ -708,17 +723,20 @@ class JEPAAugmentedController:
             "history_len": int(history_len),
         }
 
-    def observe_transition(self, action: str, result: Any) -> None:
+    def observe_transition(self, action: str, result: Any) -> dict[str, Any] | None:
         if not hasattr(self, "anti_attractor"):
             self.anti_attractor = HardAntiAttractorGate()
+        self.last_transition_usefulness = None
         self.base.observe_transition(action, result)
         if self.last_observation is not None and bool(getattr(self, "enable_hard_anti_attractor", True)):
             self.anti_attractor.observe_transition(self.last_observation, action, result)
         if self.variant.use_memory and self.variant.use_jepa_tokens and self.jepa_model is not None and self.last_observation is not None:
             self._append_bridge_history(self.last_observation, action)
         if self.variant.use_memory and not self.variant.null_control and self.last_observation is not None:
-            self.memory.observe_live_transition(self.last_observation, action, result)
+            label = self.memory.observe_live_transition(self.last_observation, action, result)
+            self.last_transition_usefulness = label.to_dict() if label is not None else None
         self._complete_pending_sidecar_override(action, result)
+        return self.last_transition_usefulness
 
     def _append_bridge_history(self, observation: Any, action: str) -> None:
         try:
@@ -868,8 +886,25 @@ def run_attempt(
             result = env.step(action)
             actions.append(action)
             states.add(state_signature(result.observation))
-            useful_events += int(_result_has_progress_event(before, result))
-            controller.observe_transition(action, result)
+            progress_event = _result_has_progress_event(before, result)
+            transition_usefulness = controller.observe_transition(action, result)
+            posthoc_useful = bool(
+                progress_event
+                or (
+                    isinstance(transition_usefulness, dict)
+                    and bool(transition_usefulness.get("useful_effect", False))
+                )
+            )
+            useful_events += int(posthoc_useful)
+            jepa_policy = diagnostics.setdefault("jepa_policy", {})
+            if isinstance(jepa_policy, dict):
+                jepa_policy["posthoc_transition_usefulness"] = transition_usefulness or {
+                    "useful_effect": bool(progress_event),
+                    "progress_effect": bool(progress_event),
+                    "reasons": ["progress"] if progress_event else [],
+                }
+                jepa_policy["posthoc_useful"] = bool(posthoc_useful)
+                jepa_policy["posthoc_progress"] = bool(progress_event)
             buffer.append_transition(
                 before,
                 action,
@@ -1577,7 +1612,7 @@ def _behavioral_metrics_from_steps(steps: list[dict[str, Any]]) -> dict[str, int
         sidecar_approved_executed += 1
         if str(sidecar.get("proposed_action", "")) != str(sidecar.get("base_action", "")):
             sidecar_changed_actions += 1
-        if _step_has_progress_event(step):
+        if _step_has_useful_event(step):
             sidecar_useful_overrides += 1
     return {
         "steps": len(steps),
@@ -1615,6 +1650,18 @@ def _step_has_progress_event(step: dict[str, Any]) -> bool:
     if float(step.get("score_delta", 0.0) or 0.0) > 0.0:
         return True
     return _events_have_progress(step.get("event_delta", []) or [])
+
+
+def _step_has_useful_event(step: dict[str, Any]) -> bool:
+    if _step_has_progress_event(step):
+        return True
+    policy = (step.get("diagnostics") or {}).get("jepa_policy", {})
+    if not isinstance(policy, dict):
+        return False
+    if bool(policy.get("posthoc_useful")):
+        return True
+    transition = policy.get("posthoc_transition_usefulness", {})
+    return bool(isinstance(transition, dict) and transition.get("useful_effect"))
 
 
 def lookup_attempt(table: list[dict[str, Any]], variant: str, attempt_index: int) -> dict[str, Any]:
