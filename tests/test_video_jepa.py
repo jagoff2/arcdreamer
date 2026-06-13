@@ -341,7 +341,8 @@ def test_scoreless_visible_action_return_penalizes_exact_repeat() -> None:
     scores = memory.plan_scores_for_observation(_obs_grid(20, np.zeros((8, 8), dtype=np.int64), actions))
 
     assert entry.transition_graph_summary["observed_actions"] == 1
-    assert entry.transition_graph_summary["negative_actions"] == 1
+    assert entry.transition_graph_summary["useful_edges"] >= 1
+    assert memory.action_useful["4"] >= 1
     assert scores["4"] < scores["1"]
 
 
@@ -492,6 +493,31 @@ def test_public_no_effect_family_can_suppress_contact_actions() -> None:
     assert memory.public_no_effect_suppresses_action("1") is False
 
 
+def test_contact_family_suppresses_earlier_after_public_control_evidence() -> None:
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    before_grid = np.zeros((8, 8), dtype=np.int64)
+    before_grid[2, 2] = 4
+    after_grid = np.zeros((8, 8), dtype=np.int64)
+    after_grid[2, 3] = 4
+    actions = ("1", "click:7:7")
+    before = _obs_grid(0, before_grid, actions)
+    after = _obs_grid(1, after_grid, actions)
+    no_effect = ArcAGI3StepResult(after, -0.001, False, False, {"events": ["no_effect"]})
+
+    for index in range(24):
+        memory.observe_live_transition(after, f"click:{index % 8}:{index // 8}", no_effect)
+    assert memory.public_no_effect_suppresses_action("click:7:7") is False
+
+    memory.observe_live_transition(
+        before,
+        "1",
+        ArcAGI3StepResult(after, -0.001, False, False, {"events": ["move"]}),
+    )
+
+    assert memory.public_no_effect_suppresses_action("click:7:7") is True
+    assert memory.public_no_effect_suppresses_action("1") is False
+
+
 def test_transition_graph_planner_credits_delayed_public_event_predecessor() -> None:
     buffer = AttemptBuffer(suite_id="suite", task_id="task", variant="v", split="dev", seed=5, attempt_index=1)
     start = _obs(0, 2, 2)
@@ -551,6 +577,32 @@ def test_public_movement_creates_controllability_usefulness_without_progress() -
     assert recent["classification"] == "controllability"
     assert recent["posthoc_useful"] is True
     assert recent["retired"] is False
+
+
+def test_public_controllability_scores_above_unproven_contact_without_progress() -> None:
+    before_grid = np.zeros((8, 8), dtype=np.int64)
+    before_grid[2, 2] = 4
+    after_grid = np.zeros((8, 8), dtype=np.int64)
+    after_grid[2, 3] = 4
+    actions = ("1", "2", "click:16:16")
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    before = _obs_grid(0, before_grid, actions)
+    after = _obs_grid(1, after_grid, actions)
+
+    memory.observe_live_transition(
+        before,
+        "1",
+        ArcAGI3StepResult(after, -0.001, False, False, {"events": ["move"]}),
+    )
+    scores = memory.plan_scores_for_observation(after)
+    summary = memory.transition_graph_summary()
+
+    assert summary["useful_edges"] == 1
+    assert memory.last_transition_usefulness is not None
+    assert memory.last_transition_usefulness.progress_effect is False
+    assert scores["1"] > 0.0
+    assert scores["2"] > scores["click:16:16"]
+    assert scores["1"] > scores["click:16:16"]
 
 
 def test_object_region_memory_scores_contact_clicks_from_public_frame_diff() -> None:
@@ -937,6 +989,37 @@ def test_select_experiment_uses_scores_for_contact_class_representative() -> Non
     assert selected is not None
     assert selected.action == "click:15:15"
     assert selected.coordinate_equiv_class == high.coordinate_equiv_class
+
+
+def test_select_experiment_prioritizes_useful_control_family_over_unproductive_contact() -> None:
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    memory.start_attempt()
+    before_grid = np.zeros((8, 8), dtype=np.int64)
+    before_grid[2, 2] = 4
+    after_grid = np.zeros((8, 8), dtype=np.int64)
+    after_grid[2, 3] = 4
+    before = _obs_grid(0, before_grid, ("1", "click:8:8"))
+    after = _obs_grid(1, after_grid, ("1", "click:8:8"))
+    experiment = memory.experiment_for_action(before, "1")
+    assert experiment is not None
+
+    memory.begin_experiment(experiment)
+    memory.observe_live_transition(before, "1", ArcAGI3StepResult(after, -0.001, False, False, {"events": ["move"]}))
+    no_effect = ArcAGI3StepResult(after, -0.001, False, False, {"events": ["no_effect"]})
+    for index in range(8):
+        memory.observe_live_transition(after, f"click:{index}:{index}", no_effect)
+    memory.phase_family_counts[(memory.discovery_phase, "move")] = 12
+    memory.phase_family_counts[(memory.discovery_phase, "contact")] = 0
+
+    selected = memory.select_experiment(
+        after,
+        ("1", "click:16:16"),
+        scores={"1": 0.0, "click:16:16": 0.0},
+    )
+
+    assert selected is not None
+    assert selected.action == "1"
+    assert memory.family_useful["move"] >= 1
 
 
 def test_coordinate_equiv_class_collapses_raw_clicks_but_separates_component_cells() -> None:

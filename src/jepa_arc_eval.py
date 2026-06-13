@@ -362,15 +362,30 @@ class JEPAAugmentedController:
                 experiment = self.memory.experiment_for_action(observation, str(action))
                 if experiment is not None:
                     experiment_by_action[str(action)] = experiment
-        ranked_for_veto = sorted(
-            [str(action) for action in legal],
-            key=lambda action: (
+        veto_ranked_actions = [str(action) for action in legal]
+
+        def veto_rank_key(action: str) -> tuple[int, float, int]:
+            return (
                 1 if action in experiment_by_action else 0,
                 adjusted.get(action, -1.0e9),
                 -legal.index(action),
-            ),
-            reverse=True,
-        )
+            )
+
+        if self.variant.use_memory and not self.variant.null_control:
+            unsuppressed_for_veto = [
+                action for action in veto_ranked_actions if not self.memory.public_no_effect_suppresses_action(action)
+            ]
+            unsuppressed_action_set = set(unsuppressed_for_veto)
+            suppressed_for_veto = [action for action in veto_ranked_actions if action not in unsuppressed_action_set]
+            if unsuppressed_for_veto:
+                ranked_for_veto = [
+                    *sorted(unsuppressed_for_veto, key=veto_rank_key, reverse=True),
+                    *sorted(suppressed_for_veto, key=veto_rank_key, reverse=True),
+                ]
+            else:
+                ranked_for_veto = sorted(veto_ranked_actions, key=veto_rank_key, reverse=True)
+        else:
+            ranked_for_veto = sorted(veto_ranked_actions, key=veto_rank_key, reverse=True)
         chosen, anti_attractor_diagnostics = self.anti_attractor.select_action(
             pre_veto_chosen,
             ranked_for_veto,

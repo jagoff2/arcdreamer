@@ -146,9 +146,11 @@ class JEPAAttemptMemory:
         self.action_values: dict[str, float] = {}
         self.action_failures: dict[str, int] = {}
         self.action_events: dict[str, int] = {}
+        self.action_useful: dict[str, int] = {}
         self.action_nuisance: dict[str, int] = {}
         self.family_counts: dict[str, int] = {}
         self.family_values: dict[str, float] = {}
+        self.family_useful: dict[str, int] = {}
         self.family_nuisance: dict[str, int] = {}
         self.region_counts: dict[tuple[int, int], int] = {}
         self.region_values: dict[tuple[int, int], float] = {}
@@ -233,9 +235,11 @@ class JEPAAttemptMemory:
         self.action_values.clear()
         self.action_failures.clear()
         self.action_events.clear()
+        self.action_useful.clear()
         self.action_nuisance.clear()
         self.family_counts.clear()
         self.family_values.clear()
+        self.family_useful.clear()
         self.family_nuisance.clear()
         self.region_counts.clear()
         self.region_values.clear()
@@ -635,6 +639,7 @@ class JEPAAttemptMemory:
         seen_here = self.state_seen_actions.get(obs_key, set()) if obs_key else set()
         phase_seen_here = self.phase_state_seen_actions.get((self.discovery_phase, obs_key), set()) if obs_key else set()
         stuck = self._recent_stuck()
+        useful_family_total = int(sum(max(int(value), 0) for value in self.family_useful.values()))
         for action in legal_actions:
             family = _action_family(action)
             edge = (obs_key, action)
@@ -673,6 +678,16 @@ class JEPAAttemptMemory:
                     scores[action] -= 0.030 * min(float(action_count), 24.0)
                 if self.action_events.get(action, 0):
                     scores[action] += 0.10
+            action_useful_count = int(self.action_useful.get(action, 0))
+            family_useful_count = int(self.family_useful.get(family, 0))
+            if action_useful_count > 0:
+                scores[action] += 0.34 / math.sqrt(float(action_count + 1))
+            elif family in {"move", "object"} and family_useful_count > 0:
+                scores[action] += 0.18 / math.sqrt(float(action_count + 1))
+            if useful_family_total > 0 and family == "contact" and family_useful_count <= 0:
+                family_count = int(self.family_counts.get(family, 0))
+                nuisance_rate = float(self.family_nuisance.get(family, 0)) / max(float(family_count), 1.0)
+                scores[action] -= 0.08 + 0.18 * min(max(nuisance_rate, 0.0), 1.0)
             if action in relation_action_set:
                 scores[action] += self._object_region_score(action, frame)
                 target_relation = component_relations.get(action)
@@ -709,7 +724,16 @@ class JEPAAttemptMemory:
             plan_support = self._sequence_plan_support(planned_action, frame, component_relations.get(planned_action))
             scores[planned_action] = scores.get(planned_action, 0.0) + (0.85 * plan_support)
         if not has_goal_evidence:
-            scores = {action: min(float(score), 0.0) for action, score in scores.items()}
+            capped_scores: dict[str, float] = {}
+            for action, score in scores.items():
+                family = _action_family(action)
+                has_public_control = bool(
+                    self.action_useful.get(action, 0) > 0
+                    or (family in {"move", "object"} and self.family_useful.get(family, 0) > 0)
+                )
+                upper_bound = 0.45 if has_public_control else 0.0
+                capped_scores[action] = min(float(score), upper_bound)
+            scores = capped_scores
         lower_bound = -1.75 if not has_goal_evidence else -0.75
         return {action: float(max(min(score, 0.75), lower_bound)) for action, score in scores.items()}
 
@@ -823,16 +847,21 @@ class JEPAAttemptMemory:
             return value if math.isfinite(value) else 0.0
 
         frame = _public_frame(observation)
-        abstract_state = _abstract_frame_state_class(frame)
-        if not abstract_state:
-            abstract_state = _observation_key(observation)
-        candidates: list[tuple[tuple[float, float, float, int, float, int], Experiment]] = []
+        fallback_abstract_state = _abstract_frame_state_class(frame)
+        if not fallback_abstract_state:
+            fallback_abstract_state = _observation_key(observation)
+        candidates: list[tuple[tuple[float, float, float, float, int, float, int], Experiment]] = []
         contact_by_coordinate_class: dict[
             str,
-            tuple[tuple[float, int], tuple[float, float, float, int, float, int], Experiment],
+            tuple[tuple[float, int], tuple[float, float, float, float, int, float, int], Experiment],
         ] = {}
+        useful_family_total = int(sum(max(int(value), 0) for value in self.family_useful.values()))
         for legal_index, action in enumerate(legal):
-            experiment = self._build_experiment(action, frame, abstract_state)
+            experiment = self._build_experiment(
+                action,
+                frame,
+                _experiment_abstract_state_class(action, frame, fallback_abstract_state),
+            )
             if experiment is None:
                 continue
             key = self._experiment_key(experiment)
@@ -850,7 +879,20 @@ class JEPAAttemptMemory:
             priority = _experiment_action_priority(action)
             remaining = int(experiment.max_repeats) - repeat_count
             action_score = score_for_action(action)
+            family_useful = int(self.family_useful.get(family, 0))
+            family_count = int(self.family_counts.get(family, 0))
+            family_mean = self.family_values.get(family, 0.0) / max(family_count, 1)
+            family_nuisance_rate = float(self.family_nuisance.get(family, 0)) / max(float(family_count), 1.0)
+            if useful_family_total <= 0:
+                useful_family_priority = 0.0
+            elif family_useful > 0:
+                useful_family_priority = 0.0
+            elif family_count >= 8 and (family_mean < -0.12 or family_nuisance_rate >= 0.25):
+                useful_family_priority = 2.0
+            else:
+                useful_family_priority = 1.0
             candidate_key = (
+                useful_family_priority,
                 float(phase_family_count),
                 float(priority),
                 float(phase_action_count),
@@ -897,10 +939,14 @@ class JEPAAttemptMemory:
         respect_limits: bool = True,
     ) -> Experiment | None:
         frame = _public_frame(observation)
-        abstract_state = _abstract_frame_state_class(frame)
-        if not abstract_state:
-            abstract_state = _observation_key(observation)
-        experiment = self._build_experiment(str(action), frame, abstract_state)
+        fallback_abstract_state = _abstract_frame_state_class(frame)
+        if not fallback_abstract_state:
+            fallback_abstract_state = _observation_key(observation)
+        experiment = self._build_experiment(
+            str(action),
+            frame,
+            _experiment_abstract_state_class(str(action), frame, fallback_abstract_state),
+        )
         if experiment is None:
             return None
         key = self._experiment_key(experiment)
@@ -1009,11 +1055,20 @@ class JEPAAttemptMemory:
             return False
         family = _action_family(str(action))
         family_count = int(self.family_counts.get(family, 0))
-        if family_count < 48:
+        useful_family_total = int(sum(max(int(value), 0) for value in self.family_useful.values()))
+        family_useful = int(self.family_useful.get(family, 0))
+        min_family_count = 48
+        mean_threshold = -0.35
+        nuisance_threshold = 0.35
+        if useful_family_total > family_useful and family == "contact":
+            min_family_count = 24
+            mean_threshold = -0.22
+            nuisance_threshold = 0.24
+        if family_count < min_family_count:
             return False
         family_mean = self.family_values.get(family, 0.0) / max(family_count, 1)
         nuisance_rate = float(self.family_nuisance.get(family, 0)) / max(float(family_count), 1.0)
-        return bool(family_mean <= -0.35 or nuisance_rate >= 0.35)
+        return bool(family_mean <= mean_threshold or nuisance_rate >= nuisance_threshold)
 
     def transition_graph_summary(self) -> dict[str, Any]:
         return {
@@ -1408,6 +1463,8 @@ class JEPAAttemptMemory:
                 self.transition_effects[edge] = self.transition_effects.get(edge, 0) + 1
             if outcome.get("useful_effect", False):
                 self.transition_useful[edge] = self.transition_useful.get(edge, 0) + 1
+                self.action_useful[action] = self.action_useful.get(action, 0) + 1
+                self.family_useful[family] = self.family_useful.get(family, 0) + 1
             if outcome.get("nuisance_effect", False):
                 self.transition_nuisance[edge] = self.transition_nuisance.get(edge, 0) + 1
                 self.action_nuisance[action] = self.action_nuisance.get(action, 0) + 1
@@ -2408,6 +2465,8 @@ def _transition_credit(
         return -1.0
     if useful.progress_effect or useful.terminal_win:
         return 1.15 + min(max(float(score_delta), 0.0), 2.0)
+    if useful.controllability_effect or useful.reachable_state_class_effect:
+        return 0.0
     if no_effect_event or useful.no_effect:
         return -0.65
     if useful.nuisance_effect:
@@ -2455,6 +2514,17 @@ def _abstract_frame_state_class(frame: np.ndarray | None) -> str:
         "bbox_bucket": bbox,
     }
     return stable_hash(payload)
+
+
+def _experiment_abstract_state_class(action: str, frame: np.ndarray | None, fallback: str) -> str:
+    family = _action_family(action)
+    if family not in {"move", "object"} or frame is None:
+        return str(fallback)
+    arr = np.asarray(frame, dtype=np.int64)
+    if arr.ndim != 2 or arr.size == 0:
+        return str(fallback)
+    signature = _component_state_signature(arr)
+    return f"component_state:{signature}" if signature else str(fallback)
 
 
 def _action_family(action: str) -> str:

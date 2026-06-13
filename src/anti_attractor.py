@@ -350,6 +350,11 @@ class HardAntiAttractorGate:
         reasons: list[str] = []
         for name, keys in checks.items():
             for period in range(1, min(self.max_period, len(keys) - 1) + 1):
+                local_start = len(keys) - (2 * period)
+                local_mid = len(keys) - period
+                if local_start >= 0 and keys[local_start:local_mid] == keys[local_mid:]:
+                    reasons.append(f"{name}:local_period_{period}:no_progress_window")
+                    break
                 recent_score = _cycle_score(keys[:-1], period)
                 cycle_members = set(keys[-period - 1 : -1])
                 if recent_score >= self.threshold and keys[-1] in cycle_members:
