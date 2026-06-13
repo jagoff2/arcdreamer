@@ -10,9 +10,14 @@ import numpy as np
 
 from .arcagi3_adapter import (
     CELL_AGENT,
+    CELL_DOOR,
     CELL_EMPTY,
     CELL_GOAL,
+    CELL_HAZARD,
+    CELL_KEY,
     CELL_RESOURCE,
+    CELL_UNKNOWN,
+    CELL_WALL,
     ArcAGI3Observation,
     ArcAGI3StepResult,
 )
@@ -20,6 +25,15 @@ from .arcagi3_adapter import (
 
 DEFAULT_ENVIRONMENTS_DIR = "runs/arcagi3_official_envs"
 DEFAULT_RECORDINGS_DIR = "runs/arcagi3_official_recordings"
+PUBLIC_RAW_VALUE_BUCKETS = (
+    CELL_WALL,
+    CELL_KEY,
+    CELL_DOOR,
+    CELL_GOAL,
+    CELL_HAZARD,
+    CELL_RESOURCE,
+    CELL_UNKNOWN,
+)
 
 
 @dataclass
@@ -353,10 +367,15 @@ def official_frame_to_grid(
         return grid, {"empty_frame": True}
     background = mode_value(frame)
     visible = frame != background
-    grid[visible] = CELL_RESOURCE
+    bucket_by_value = {
+        value: PUBLIC_RAW_VALUE_BUCKETS[index % len(PUBLIC_RAW_VALUE_BUCKETS)]
+        for index, value in enumerate(rare_values(frame, background))
+    }
+    for value, bucket in bucket_by_value.items():
+        grid[frame == int(value)] = int(bucket)
     candidates = click_candidates(response, max_click_actions=max_click_actions)
     for y, x in candidates:
-        if 0 <= y < grid.shape[0] and 0 <= x < grid.shape[1]:
+        if 0 <= y < grid.shape[0] and 0 <= x < grid.shape[1] and int(grid[y, x]) == CELL_EMPTY:
             grid[y, x] = CELL_GOAL
     if any(action_id in legal_ids for action_id in (1, 2, 3, 4, 5, 7)):
         y = min(grid.shape[0] - 1, max(0, grid.shape[0] // 2))
@@ -369,6 +388,11 @@ def official_frame_to_grid(
         "unique_values": int(len(values)),
         "non_background": int(np.count_nonzero(visible)),
         "click_candidates": len(candidates),
+        "raw_value_bucket_count": len(bucket_by_value),
+        "raw_value_bucket_head": [
+            {"raw_value": int(value), "cell": int(bucket)}
+            for value, bucket in list(bucket_by_value.items())[:10]
+        ],
         "value_histogram_head": [
             {"value": int(v), "count": int(c)}
             for v, c in sorted(zip(values.tolist(), counts.tolist()), key=lambda item: item[1], reverse=True)[:10]

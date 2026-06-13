@@ -34,26 +34,31 @@ def sha256_file(path: str | Path) -> str:
 def synthetic_attempts(count: int = 128, *, seed: int = 2027) -> list[AttemptRecord]:
     rng = random.Random(seed)
     records: list[AttemptRecord] = []
-    legal = ("up", "down", "left", "right", "wait", "click:2:2", "click:5:5")
     for attempt_index in range(count):
-        y = rng.randrange(1, 7)
-        x = rng.randrange(1, 7)
-        target = (rng.randrange(1, 7), rng.randrange(1, 7))
+        grid_size = 64 if attempt_index % 2 else 8
+        low = 1 if grid_size == 8 else 4
+        high = 7 if grid_size == 8 else 60
+        y = rng.randrange(low, high)
+        x = rng.randrange(low, high)
+        target = (rng.randrange(low, high), rng.randrange(low, high))
+        click_target = f"click:{target[1]}:{target[0]}"
+        click_decoy = f"click:{rng.randrange(0, grid_size)}:{rng.randrange(0, grid_size)}"
+        legal = ("1", "2", "3", "4", "5", click_target, click_decoy)
         steps = rng.randrange(10, 24)
         buffer = AttemptBuffer(
             suite_id="generated_jepa_dev",
-            task_id=f"synthetic_{attempt_index % 8}",
+            task_id=f"synthetic_{grid_size}_{attempt_index % 8}",
             variant="generated",
             split="dev",
             seed=seed + attempt_index,
             attempt_index=1,
         )
         for step in range(steps):
-            grid = np.zeros((8, 8), dtype=np.int64)
+            grid = np.zeros((grid_size, grid_size), dtype=np.int64)
             grid[y, x] = 2
             grid[target] = 7
             obs = ArcAGI3Observation(
-                task_id=f"generated_jepa_dev/synthetic_{attempt_index % 8}",
+                task_id=f"generated_jepa_dev/synthetic_{grid_size}_{attempt_index % 8}",
                 episode_id=f"generated/{attempt_index}",
                 step_index=step,
                 grid=grid,
@@ -61,30 +66,31 @@ def synthetic_attempts(count: int = 128, *, seed: int = 2027) -> list[AttemptRec
                 extras={"source": "generated_non_arc_dev"},
             )
             if abs(target[0] - y) > abs(target[1] - x):
-                action = "down" if target[0] > y else "up"
+                action = "2" if target[0] > y else "1"
             elif target[1] != x:
-                action = "right" if target[1] > x else "left"
+                action = "4" if target[1] > x else "3"
             else:
-                action = "wait" if rng.random() < 0.5 else "click:5:5"
+                action = "5" if rng.random() < 0.5 else click_target
             if rng.random() < 0.18:
                 action = rng.choice(legal)
             old_distance = abs(target[0] - y) + abs(target[1] - x)
-            if action == "up":
+            if action in {"up", "1"}:
                 y = max(0, y - 1)
-            elif action == "down":
-                y = min(7, y + 1)
-            elif action == "left":
+            elif action in {"down", "2"}:
+                y = min(grid_size - 1, y + 1)
+            elif action in {"left", "3"}:
                 x = max(0, x - 1)
-            elif action == "right":
-                x = min(7, x + 1)
-            new_grid = np.zeros((8, 8), dtype=np.int64)
+            elif action in {"right", "4"}:
+                x = min(grid_size - 1, x + 1)
+            new_grid = np.zeros((grid_size, grid_size), dtype=np.int64)
             new_grid[y, x] = 2
             new_grid[target] = 7
             new_distance = abs(target[0] - y) + abs(target[1] - x)
-            reward = 1.0 if new_distance == 0 else (0.05 if new_distance < old_distance else -0.01)
-            terminal = new_distance == 0 or step == steps - 1
+            clicked_target = action == click_target and new_distance <= 1
+            reward = 1.0 if new_distance == 0 or clicked_target else (0.05 if new_distance < old_distance else -0.01)
+            terminal = new_distance == 0 or clicked_target or step == steps - 1
             events = ["positive_reward"] if reward > 0.0 else []
-            if new_distance == 0:
+            if new_distance == 0 or clicked_target:
                 events.append("resource_collected")
             result = ArcAGI3StepResult(
                 ArcAGI3Observation(
@@ -121,18 +127,26 @@ def index_dev_traces() -> list[str]:
 
 def train_jepa(records: list[AttemptRecord], *, device: torch.device, seed: int) -> tuple[VideoJEPA, dict[str, Any]]:
     torch.manual_seed(seed)
-    split = max(8, int(len(records) * 0.8))
-    train_records = records[:split]
-    val_records = records[split:] or records[-8:]
+    shuffled_records = list(records)
+    random.Random(seed + 19).shuffle(shuffled_records)
+    split = max(8, int(len(shuffled_records) * 0.8))
+    train_records = shuffled_records[:split]
+    val_records = shuffled_records[split:] or shuffled_records[-8:]
     model = VideoJEPA(VideoJEPAConfig()).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=2.0e-3, weight_decay=1.0e-4)
     train_batch = tensors_from_attempts(train_records, max_steps=32, device=device)
     val_batch = tensors_from_attempts(val_records, max_steps=32, device=device)
     losses: list[float] = []
     model.train()
-    for _ in range(90):
+    for _ in range(140):
         optimizer.zero_grad(set_to_none=True)
-        output = model(train_batch["frames"], train_batch["action_ids"], train_batch["legal_counts"], train_batch["valid"])
+        output = model(
+            train_batch["frames"],
+            train_batch["action_ids"],
+            train_batch["legal_counts"],
+            train_batch["valid"],
+            train_batch.get("action_features"),
+        )
         loss = jepa_loss(output)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -140,8 +154,20 @@ def train_jepa(records: list[AttemptRecord], *, device: torch.device, seed: int)
         losses.append(float(loss.detach().cpu()))
     model.eval()
     with torch.no_grad():
-        train_out = model(train_batch["frames"], train_batch["action_ids"], train_batch["legal_counts"], train_batch["valid"])
-        val_out = model(val_batch["frames"], val_batch["action_ids"], val_batch["legal_counts"], val_batch["valid"])
+        train_out = model(
+            train_batch["frames"],
+            train_batch["action_ids"],
+            train_batch["legal_counts"],
+            train_batch["valid"],
+            train_batch.get("action_features"),
+        )
+        val_out = model(
+            val_batch["frames"],
+            val_batch["action_ids"],
+            val_batch["legal_counts"],
+            val_batch["valid"],
+            val_batch.get("action_features"),
+        )
         train_loss = float(jepa_loss(train_out).cpu())
         val_loss = float(jepa_loss(val_out).cpu())
         null_loss = float(null_future_loss(val_out).cpu())

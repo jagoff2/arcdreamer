@@ -10,11 +10,22 @@ import numpy as np
 import torch
 
 from .arcagi3_adapter import ArcAGI3Observation, ArcAGI3StepResult
-from .base_world_model import GRID_SIZE, grid_to_fixed
+from .base_world_model import ACTION_FEATURE_DIM, GRID_SIZE, action_to_features, grid_to_fixed
 from .external_eval import json_safe
 
 
 ACTION_BUCKETS = 512
+VOLATILE_EXTRA_KEYS = {
+    "score",
+    "normalized_score",
+    "game_state",
+    "levels_completed",
+    "win_levels",
+    "total_levels_completed",
+    "total_levels",
+    "terminated",
+    "truncated",
+}
 
 
 def stable_hash(value: Any) -> str:
@@ -25,6 +36,20 @@ def stable_hash(value: Any) -> str:
 def action_id(action: str, buckets: int = ACTION_BUCKETS) -> int:
     digest = hashlib.sha256(str(action).encode("utf-8")).digest()
     return int.from_bytes(digest[:4], "little") % int(buckets)
+
+
+def public_observation_key_payload(observation: ArcAGI3Observation) -> dict[str, Any]:
+    extras = getattr(observation, "extras", {}) or {}
+    stable_extras = {
+        str(key): value
+        for key, value in extras.items()
+        if str(key) not in VOLATILE_EXTRA_KEYS
+    }
+    return {
+        "grid": np.asarray(observation.grid, dtype=np.int64),
+        "extras": stable_extras,
+        "actions": getattr(observation, "available_actions", ()),
+    }
 
 
 def observation_frame(observation: ArcAGI3Observation, size: int = GRID_SIZE) -> np.ndarray:
@@ -124,20 +149,8 @@ class AttemptBuffer:
                 score_delta=float(result.reward),
                 event_delta=events,
                 terminal=bool(result.terminated or result.truncated),
-                obs_hash=stable_hash(
-                    {
-                        "grid": np.asarray(before.grid, dtype=np.int64),
-                        "extras": before.extras,
-                        "actions": before.available_actions,
-                    }
-                ),
-                next_obs_hash=stable_hash(
-                    {
-                        "grid": np.asarray(result.observation.grid, dtype=np.int64),
-                        "extras": result.observation.extras,
-                        "actions": result.observation.available_actions,
-                    }
-                ),
+                obs_hash=stable_hash(public_observation_key_payload(before)),
+                next_obs_hash=stable_hash(public_observation_key_payload(result.observation)),
                 next_frame=observation_frame(result.observation).astype(int).tolist(),
                 invalid_action=bool(invalid_action),
                 diagnostics=json_safe(diagnostics or {}),
@@ -171,6 +184,7 @@ def tensors_from_attempts(
     action_ids = torch.zeros(len(records), limit, dtype=torch.long, device=device)
     legal_counts = torch.zeros(len(records), limit, 1, dtype=torch.float32, device=device)
     legal_masks = torch.zeros(len(records), limit, buckets, dtype=torch.float32, device=device)
+    action_features = torch.zeros(len(records), limit, ACTION_FEATURE_DIM, dtype=torch.float32, device=device)
     terminals = torch.zeros(len(records), limit, 1, dtype=torch.float32, device=device)
     valid = torch.zeros(len(records), limit, 1, dtype=torch.float32, device=device)
     score_deltas = torch.zeros(len(records), limit, 1, dtype=torch.float32, device=device)
@@ -181,12 +195,35 @@ def tensors_from_attempts(
             action_ids[row, col] = action_id(step.action, buckets)
             legal_counts[row, col, 0] = float(len(step.legal_actions))
             legal_masks[row, col] = torch.as_tensor(legal_action_mask(step.legal_actions, buckets), dtype=torch.float32, device=device)
+            try:
+                legal_index = [str(item) for item in step.legal_actions].index(str(step.action))
+            except ValueError:
+                legal_index = 0
+            feature_observation = ArcAGI3Observation(
+                task_id=record.task_id,
+                episode_id=f"{record.task_id}/attempt_{record.attempt_index}",
+                step_index=int(step.step_index),
+                grid=np.asarray(step.frame, dtype=np.int64),
+                available_actions=tuple(str(item) for item in step.legal_actions),
+                extras={},
+            )
+            action_features[row, col] = torch.as_tensor(
+                action_to_features(
+                    feature_observation,
+                    str(step.action),
+                    legal_index=legal_index,
+                    legal_count=len(step.legal_actions),
+                ),
+                dtype=torch.float32,
+                device=device,
+            )
             terminals[row, col, 0] = float(step.terminal)
             score_deltas[row, col, 0] = float(step.score_delta)
             valid[row, col, 0] = 1.0
     return {
         "frames": frames,
         "action_ids": action_ids,
+        "action_features": action_features,
         "legal_counts": legal_counts,
         "legal_masks": legal_masks,
         "terminals": terminals,

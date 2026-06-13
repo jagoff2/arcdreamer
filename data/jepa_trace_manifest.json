@@ -43,23 +43,23 @@
     "device": "cuda",
     "train_attempts": 102,
     "val_attempts": 26,
-    "train_loss": 0.1296790987253189,
-    "val_loss": 0.18186116218566895,
-    "null_loss": 0.654235303401947,
+    "train_loss": 0.07711808383464813,
+    "val_loss": 0.11369654536247253,
+    "null_loss": 0.48657914996147156,
     "jepa_beats_null": true,
     "loss_tail": [
-      0.16689083,
-      0.16117667,
-      0.1561652,
-      0.15168269,
-      0.14688754,
-      0.14175163,
-      0.13695252,
-      0.13298266
+      0.08695874,
+      0.08575293,
+      0.08468878,
+      0.08360194,
+      0.08235504,
+      0.08099575,
+      0.07960276,
+      0.07827411
     ],
     "predicts_actions": false,
     "emits_text": false
   },
   "checkpoint": "runs\\video_jepa.pt",
-  "checkpoint_sha256": "B7EAC3E729ED345F85EA668EE55D9FA6B8624AABD07A8C7E841D5B9A377963C1"
+  "checkpoint_sha256": "CCCD1AC34CE726A2C11E953CD15D14081D5BC7F94B4924156B0BF1A52B892BBB"
 }

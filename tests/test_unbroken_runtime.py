@@ -3,7 +3,7 @@ from pathlib import Path
 import torch
 
 from src.env import TinyWorldRuntime
-from src.model import load_checkpoint
+from src.model import RecurrentLatentModel, load_checkpoint, save_checkpoint
 from src.run_unbroken import run_unbroken
 from src.train import train_model
 
@@ -36,3 +36,26 @@ def test_runtime_reuses_previous_latent_each_tick(tmp_path: Path) -> None:
             world.step(int(output["action_logits"].argmax(dim=-1).item()))
 
     assert sum(value > 1e-6 for value in norms) == len(norms)
+
+
+def test_run_unbroken_persists_neural_program_proposals(tmp_path: Path) -> None:
+    checkpoint = tmp_path / "proposal_runtime.pt"
+    memory_file = tmp_path / "proposal_memory.pt"
+    save_checkpoint(checkpoint, RecurrentLatentModel(device="cpu"), train_config={})
+
+    stats = run_unbroken(
+        checkpoint,
+        max_ticks=2,
+        log_every=0,
+        device="cpu",
+        memory_file=memory_file,
+    )
+    payload = torch.load(memory_file, map_location="cpu")
+    event = payload["event_journal"][0]
+    proposals = event["prediction_error"]["neural_program_proposals"]
+
+    assert stats["event_journal_length"] == 2.0
+    assert proposals
+    assert proposals[0]["schema"] == "neural_causal_program_proposal_v1"
+    assert proposals[0]["source"] == "neural_proposal"
+    assert payload["hypothesis_posterior"]["hypotheses"]

@@ -269,6 +269,9 @@ def generate_batch(
     world_pos = torch.zeros(batch_size, seq_len, dtype=torch.long, device=target_device)
     memory_color = torch.zeros(batch_size, seq_len, dtype=torch.long, device=target_device)
     self_start = torch.zeros(batch_size, seq_len, dtype=torch.long, device=target_device)
+    prev_action = torch.full((batch_size, seq_len), NUM_ACTIONS, dtype=torch.long, device=target_device)
+    prev_delta = torch.zeros(batch_size, seq_len, SENSOR_DIM, device=target_device)
+    dt = torch.ones(batch_size, seq_len, dtype=torch.float32, device=target_device)
 
     action_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool, device=target_device)
     delayed_memory_mask = torch.zeros(batch_size, seq_len, dtype=torch.bool, device=target_device)
@@ -294,7 +297,7 @@ def generate_batch(
             target_pos,
             torch.full_like(target_pos, GRID_SIZE),
         )
-        action = living_policy(current_pos, target_pos, energy, damage, resource)
+        action = shortest_action(current_pos, target_pos)
 
         sensory[:, tick, :] = build_sensory(
             current_pos,
@@ -365,12 +368,18 @@ def generate_batch(
         "world_pos_target": world_pos,
         "memory_color_target": memory_color,
         "self_start_target": self_start,
+        "prev_action": prev_action,
+        "prev_delta": prev_delta,
+        "dt": dt,
         "action_mask": action_mask,
         "delayed_memory_mask": delayed_memory_mask,
         "object_mask": object_mask,
         "grounded_language_mask": grounded_language_mask,
         "self_mask": self_mask,
     }
+    if seq_len > 1:
+        batch["prev_action"][:, 1:] = walk[:, :-1]
+        batch["prev_delta"][:, 1:] = sensory[:, 1:] - sensory[:, :-1]
     return batch
 
 

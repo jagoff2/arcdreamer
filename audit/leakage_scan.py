@@ -111,7 +111,13 @@ def _prompt_loop_findings() -> list[dict[str, Any]]:
     if not runtime.exists():
         return [{"path": str(runtime), "line": None, "match": "missing_runtime", "kind": "prompt_loop"}]
     text = runtime.read_text(encoding="utf-8")
-    required = ["model.step(observation, z)", "world.step(action)", "private_token = output[\"private_logits\"].argmax"]
+    required = [
+        "model.step(model_observation, z)",
+        "\"prev_action\"",
+        "\"prev_delta\"",
+        "world.step(action)",
+        "private_token = output[\"private_logits\"].argmax",
+    ]
     for item in required:
         if item not in text:
             findings.append({"path": str(runtime), "line": None, "match": item, "kind": "runtime_missing_expected_loop"})

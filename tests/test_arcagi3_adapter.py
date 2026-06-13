@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from src.arcagi3_adapter import ARCAGI3Adapter, ArcAGI3FixtureEnv, load_public_fixtures
 from src.arcagi3_baselines import build_baselines
 from src.arcagi3_eval import no_hack_audit, run_episode
+from src.arcagi3_official import official_frame_to_grid
 from src.explore_env import HYPOTHESIS_DIM, OBS_DIM, Z_DIM
 from src.head_collapse import HeadCollapsedExplorer
 from src.world_model import ExplorerCore
@@ -37,6 +39,27 @@ def test_adapter_tensorizes_arc_observation_without_text_state() -> None:
     assert tensors["hypothesis"].shape[-1] == HYPOTHESIS_DIM
     assert "target_texts" not in tensors
     assert state["hypothesis_state"]["semantic_action"] == state["semantic_action"]
+
+
+def test_official_frame_grid_preserves_raw_public_foreground_buckets() -> None:
+    class Response:
+        frame = [
+            np.array(
+                [
+                    [0, 0, 0, 0],
+                    [0, 11, 11, 0],
+                    [0, 22, 22, 0],
+                    [0, 0, 0, 0],
+                ],
+                dtype=np.int64,
+            )
+        ]
+
+    grid, stats = official_frame_to_grid(Response(), legal_ids=(1, 6), max_click_actions=16)
+    foreground = set(int(value) for value in grid.reshape(-1) if int(value) != 0)
+    assert 2 in foreground
+    assert len(foreground) >= 3
+    assert stats["raw_value_bucket_count"] == 2
 
 
 def test_baselines_and_trace_run_on_fixture(tmp_path: Path) -> None:

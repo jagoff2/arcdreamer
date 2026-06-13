@@ -1,0 +1,332 @@
+{
+  "terminal_outcome": "FOCUSED_GAME1_NOT_BEATEN",
+  "scope": "focused_official_first_game_until_beaten",
+  "primary_variant": "jepa_plus_attempt_memory",
+  "core_choice": {
+    "selected_core": "old_base_finetuned",
+    "selection_source": "non_arc_dev_only_before_official_sealed_eval",
+    "evidence": "docs/external_base_report.json",
+    "candidate_table": [
+      {
+        "variant": "old_base_finetuned",
+        "priority": 3,
+        "solve_rate": 0.0,
+        "mean_score": 5.25,
+        "mean_normalized_score": 0.065625,
+        "mean_steps": 6.75,
+        "mean_invalid_action_rate": 0.0,
+        "mean_unique_states": 7.75,
+        "mean_useful_events": 5.25,
+        "mean_action_entropy": 0.0,
+        "mean_repeat_collapse": 1.0
+      },
+      {
+        "variant": "old_base_world_model",
+        "priority": 2,
+        "solve_rate": 0.0,
+        "mean_score": 5.25,
+        "mean_normalized_score": 0.065625,
+        "mean_steps": 6.75,
+        "mean_invalid_action_rate": 0.0,
+        "mean_unique_states": 7.75,
+        "mean_useful_events": 5.25,
+        "mean_action_entropy": 0.0,
+        "mean_repeat_collapse": 1.0
+      },
+      {
+        "variant": "from_scratch_external_base",
+        "priority": 1,
+        "solve_rate": 0.0,
+        "mean_score": 5.25,
+        "mean_normalized_score": 0.065625,
+        "mean_steps": 6.75,
+        "mean_invalid_action_rate": 0.0,
+        "mean_unique_states": 7.75,
+        "mean_useful_events": 5.25,
+        "mean_action_entropy": 0.0,
+        "mean_repeat_collapse": 1.0
+      }
+    ]
+  },
+  "operation_mode": "offline",
+  "selected_game_ids": [
+    "ar25-0c556536"
+  ],
+  "variant_ids": [
+    "jepa_plus_attempt_memory"
+  ],
+  "no_op_control_variants_excluded": true,
+  "attempts": 40,
+  "official": {
+    "aggregate_by_variant": {
+      "jepa_plus_attempt_memory": {
+        "solve_rate": 0.0,
+        "mean_score": 0.003125,
+        "mean_normalized_score": 0.003125,
+        "mean_steps": 99.075,
+        "mean_invalid_action_rate": 0.0,
+        "mean_unique_states": 100.075,
+        "mean_useful_events": 0.025,
+        "mean_action_entropy": 3.1549840929190944,
+        "mean_repeat_collapse": 0.2343276016512632
+      }
+    },
+    "attempt_table": [
+      {
+        "variant": "jepa_plus_attempt_memory",
+        "attempt_index": 1,
+        "solve_rate": 0.0,
+        "mean_score": 0.0,
+        "mean_normalized_score": 0.0,
+        "mean_steps": 124.0,
+        "mean_invalid_action_rate": 0.0,
+        "mean_unique_states": 125.0,
+        "mean_useful_events": 0.0,
+        "mean_action_entropy": 4.708535299413935,
+        "mean_repeat_collapse": 0.10483870967741936
+      },
+      {
+        "variant": "jepa_plus_attempt_memory",
+        "attempt_index": 2,
+        "solve_rate": 0.0,
+        "mean_score": 0.0,
+        "mean_normalized_score": 0.0,
+        "mean_steps": 78.0,
+        "mean_invalid_action_rate": 0.0,
+        "mean_unique_states": 79.0,
+        "mean_useful_events": 0.0,
+        "mean_action_entropy": 2.58211413544444,
+        "mean_repeat_collapse": 0.1794871794871795
+      },
+      {
+        "variant": "jepa_plus_attempt_memory",
+        "attempt_index": 3,
+        "solve_rate": 0.0,
+        "mean_score": 0.0,
+        "mean_normalized_score": 0.0,
+        "mean_steps": 77.0,
+        "mean_invalid_action_rate": 0.0,
+        "mean_unique_states": 78.0,
+        "mean_useful_events": 0.0,
+        "mean_action_entropy": 2.547661814680179,
+        "mean_repeat_collapse": 0.19480519480519481
+      }
+    ],
+    "trace_paths": [
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_1\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_2\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_3\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_4\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_5\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_6\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_7\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_8\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_9\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_10\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_11\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_12\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_13\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_14\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_15\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_16\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_17\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_18\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_19\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_20\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_21\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_22\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_23\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_24\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_25\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_26\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_27\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_28\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_29\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_30\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_31\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_32\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_33\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_34\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_35\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_36\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_37\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_38\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_39\\ar25-0c556536.json",
+      "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_40\\ar25-0c556536.json"
+    ],
+    "device_runtime": {
+      "resolved_device": "cuda",
+      "torch_version": "2.11.0+cu128",
+      "torch_cuda_available": true,
+      "torch_cuda_version": "12.8",
+      "torch_device_count": 2,
+      "torch_cuda_devices": [
+        "NVIDIA GeForce RTX 5060 Ti",
+        "NVIDIA GeForce RTX 5060 Ti"
+      ]
+    },
+    "variant_model_info": {
+      "jepa_plus_attempt_memory": {
+        "source": "runs\\video_jepa.pt",
+        "available": true,
+        "metrics": {
+          "seed": 20270612,
+          "device": "cuda",
+          "train_attempts": 102,
+          "val_attempts": 26,
+          "train_loss": 0.07711808383464813,
+          "val_loss": 0.11369654536247253,
+          "null_loss": 0.48657914996147156,
+          "jepa_beats_null": true,
+          "loss_tail": [
+            0.08695874,
+            0.08575293,
+            0.08468878,
+            0.08360194,
+            0.08235504,
+            0.08099575,
+            0.07960276,
+            0.07827411
+          ],
+          "predicts_actions": false,
+          "emits_text": false
+        },
+        "external_base_checkpoint": "frozen\\external_base_v1.pt"
+      }
+    }
+  },
+  "focused_metrics": {
+    "game_beaten": false,
+    "primary_solve_rate": 0.0,
+    "primary_mean_normalized_score": 0.003125,
+    "primary_mean_useful_events": 0.025,
+    "primary_mean_repeat_collapse": 0.2343276016512632
+  },
+  "no_hack_proof": {
+    "passes": true,
+    "findings": [],
+    "hidden_target_canary": {
+      "passes": true,
+      "hidden_target_canary_max_abs_diff": 0.0,
+      "source": "docs\\audit_after_arcagi3_diagnosis.json"
+    },
+    "allowed_inputs": [
+      "public frames",
+      "public legal actions",
+      "chosen actions",
+      "public score and event deltas",
+      "terminal flags"
+    ],
+    "not_used": [
+      "official sealed tuning",
+      "hidden labels",
+      "action advice",
+      "game source inspection",
+      "manual hints",
+      "scripted solver actions",
+      "entropy schedules"
+    ],
+    "jepa_emits_text": false,
+    "actions_from": "existing_core_plus_attempt_memory"
+  },
+  "hashes": {
+    "src/attempt_buffer.py": {
+      "sha256": "5D1C304E1D55B57DCB6D8AF1D79D82A4B3F8B1B9050BF9A691A4DC5863ABB315",
+      "size_bytes": 11044
+    },
+    "src/video_jepa.py": {
+      "sha256": "A218C0F68A48864AD01CE94A6C90A77FC51A5F1D9398985EDEDCB0A54E30FE4B",
+      "size_bytes": 6465
+    },
+    "src/jepa_train.py": {
+      "sha256": "19D6439E8BA85669E38DB8F67EE62B92954587815EE0083CDAAE3A4F70547D35",
+      "size_bytes": 9148
+    },
+    "src/jepa_attempt_memory.py": {
+      "sha256": "D2473B55252237E0D64DDAFD912FD355FB814E85FDEA31F24E2CDB5BAC1CD763",
+      "size_bytes": 140864
+    },
+    "src/jepa_arc_eval.py": {
+      "sha256": "FCAD3602E59DB1DECAE225D6A1987786EAA250991CB951F30E3C43E8C5C12FE9",
+      "size_bytes": 71428
+    },
+    "tests/test_video_jepa.py": {
+      "sha256": "4C26AE67B809EA451A790F31A93F885F70761F9B5F13350A3655F1F1C0FD4BFF",
+      "size_bytes": 46529
+    },
+    "data/jepa_trace_manifest.json": {
+      "sha256": "FE94B2A06D0C9CD725D3C992BBA2A8E8A45C9B519CBF9778247AC9D8D5041FA0",
+      "size_bytes": 3539
+    },
+    "docs/jepa_attempt_report.json": {
+      "sha256": "B396646147E4F6A3D73DFC597346382ABB27AC68A312CF7D1334F973380DD589",
+      "size_bytes": 206796
+    },
+    "frozen/recurrent_latent_fast.pt": {
+      "sha256": "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD",
+      "size_bytes": 169185
+    },
+    "frozen/external_base_v1.pt": {
+      "sha256": "A31A73F2CDFECB0F01460A45BD92CE29310BB98B677E99C3527714D1D1E84061",
+      "size_bytes": 1638607
+    },
+    "runs/explorer_tiny.pt": {
+      "sha256": "F0A2F8BE9F64B7928083E6EF59A5535998AF5E8465F4FDD3E3C1B7EDDB6727E9",
+      "size_bytes": 607937
+    },
+    "runs/video_jepa.pt": {
+      "sha256": "CCCD1AC34CE726A2C11E953CD15D14081D5BC7F94B4924156B0BF1A52B892BBB",
+      "size_bytes": 276661
+    }
+  },
+  "trace_paths": [
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_1\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_2\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_3\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_4\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_5\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_6\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_7\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_8\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_9\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_10\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_11\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_12\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_13\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_14\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_15\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_16\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_17\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_18\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_19\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_20\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_21\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_22\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_23\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_24\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_25\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_26\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_27\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_28\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_29\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_30\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_31\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_32\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_33\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_34\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_35\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_36\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_37\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_38\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_39\\ar25-0c556536.json",
+    "docs\\jepa_focused_game1_traces\\official_arcagi3\\sealed_eval\\jepa_plus_attempt_memory\\attempt_40\\ar25-0c556536.json"
+  ],
+  "required_commands": [
+    "pytest -q tests/test_video_jepa.py",
+    "python -m src.jepa_arc_eval --config focused_official --checkpoint frozen/recurrent_latent_fast.pt --explorer-checkpoint runs/explorer_tiny.pt --jepa-checkpoint runs/video_jepa.pt --json-output docs/jepa_focused_game1_report.json --trace-dir docs/jepa_focused_game1_traces --operation-mode offline --limit 1"
+  ],
+  "limitations": [
+    "Focused report is a development loop for the first official public game, not the full 25-game success proof.",
+    "No-op control variants are intentionally excluded from this focused loop."
+  ]
+}

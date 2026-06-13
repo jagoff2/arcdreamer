@@ -101,11 +101,18 @@ class ExternalBaseController:
         base_action, diagnostics = self.adapter.choose_action(observation)
         legal = tuple(observation.available_actions)
         base_scores = {action: float(diagnostics.get("action_scores", {}).get(action, 0.0)) for action in legal}
-        adjusted = dict(base_scores)
+        use_learned_calibration = self.model is not None and not self.disable_external_base
+        adjusted = (
+            {action: 0.35 * value for action, value in normalized_scores(base_scores).items()}
+            if use_learned_calibration
+            else dict(base_scores)
+        )
         external_scores = {action: 0.0 for action in legal}
+        external_calibrated = {action: 0.0 for action in legal}
         external_diag: dict[str, Any] = {}
+        candidate_memory: torch.Tensor | None = None
         if self.model is not None and not self.disable_external_base:
-            external_scores, external_diag, self.memory = self.model.score_actions(
+            external_scores, external_diag, candidate_memory = self.model.score_actions(
                 observation,
                 legal,
                 memory=self.memory,
@@ -113,12 +120,22 @@ class ExternalBaseController:
                 disable_world_model=self.disable_world_model,
                 disable_affordance=self.disable_affordance,
             )
+            external_calibrated = normalized_scores(external_scores)
             for action, score in external_scores.items():
-                adjusted[action] = adjusted.get(action, 0.0) + self.external_weight * float(score)
+                adjusted[action] = adjusted.get(action, 0.0) + self.external_weight * float(external_calibrated.get(action, score))
         if self.arm.arm_id == "old_base_unchanged" or self.arm.null_control or self.disable_external_base:
             chosen = base_action
         else:
             chosen = max(legal, key=lambda action: (adjusted.get(action, -1.0e9), -legal.index(action)))
+        if candidate_memory is not None:
+            try:
+                chosen_index = list(legal).index(chosen)
+            except ValueError:
+                chosen_index = 0
+            if candidate_memory.ndim >= 2 and candidate_memory.shape[0] == len(legal):
+                self.memory = candidate_memory[chosen_index : chosen_index + 1].detach()
+            else:
+                self.memory = candidate_memory[:1].detach()
         changed = chosen != base_action
         self.changed_actions += int(changed)
         self.frames += 1
@@ -129,6 +146,8 @@ class ExternalBaseController:
                 self.reason_counts["memory"] += 1
             if not self.disable_affordance:
                 self.reason_counts["affordance"] += 1
+        diagnostics["adapter_action_scores"] = base_scores
+        diagnostics["action_scores"] = adjusted
         diagnostics["policy"] = {
             **diagnostics.get("policy", {}),
             "variant": self.arm.arm_id,
@@ -138,6 +157,7 @@ class ExternalBaseController:
             "top_base_scores": top_scores(base_scores),
             "top_adjusted_scores": top_scores(adjusted),
             "external_scores": top_scores(external_scores),
+            "external_calibrated_scores": top_scores(external_calibrated),
             "external_diagnostics": external_diag,
             "ablation": {
                 "disable_external_base": self.disable_external_base,
@@ -174,6 +194,20 @@ def top_scores(scores: dict[str, float], limit: int = 8) -> dict[str, float]:
     return {
         action: round(float(value), 6)
         for action, value in sorted(scores.items(), key=lambda item: item[1], reverse=True)[:limit]
+    }
+
+
+def normalized_scores(scores: dict[str, float]) -> dict[str, float]:
+    if not scores:
+        return {}
+    values = [float(value) for value in scores.values()]
+    mean = sum(values) / len(values)
+    span = max(values) - min(values)
+    if span <= 1.0e-9:
+        return {action: 0.0 for action in scores}
+    return {
+        action: max(min((float(value) - mean) / span * 2.0, 1.0), -1.0)
+        for action, value in scores.items()
     }
 
 

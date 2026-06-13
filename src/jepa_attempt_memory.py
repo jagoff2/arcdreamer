@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from .attempt_buffer import AttemptRecord, observation_frame, stable_hash, tensors_from_attempts
+from .attempt_buffer import AttemptRecord, observation_frame, public_observation_key_payload, stable_hash, tensors_from_attempts
 from .video_jepa import VideoJEPA
 
 
@@ -32,6 +32,24 @@ PRODUCTIVE_COMPONENT_MECHANISMS = {
     "component_visual_transform",
 }
 NON_PRODUCTIVE_COMPONENT_MECHANISMS = {"blocked_or_no_effect", "stable"}
+PLANNER_DIAGNOSTIC_KINDS = ("component_chain", "relation_chain", "relation_delta", "relation_delta_sequence")
+PLANNER_DIAGNOSTIC_EVENTS = (
+    "activations",
+    "score_hits",
+    "legal_resolutions",
+    "visible_changes",
+    "useful_events",
+    "contradiction_aborts",
+    "stale_penalties",
+)
+RELATION_SCORING_ACTION_LIMIT = 96
+
+
+def _empty_planner_activation_stats() -> dict[str, dict[str, int]]:
+    return {
+        kind: {event: 0 for event in PLANNER_DIAGNOSTIC_EVENTS}
+        for kind in PLANNER_DIAGNOSTIC_KINDS
+    }
 
 
 @dataclass
@@ -49,6 +67,7 @@ class AttemptMemoryEntry:
     component_causal_hypotheses: list[dict[str, Any]] = field(default_factory=list)
     sequence_plan_summary: dict[str, Any] = field(default_factory=dict)
     jepa_action_evidence: dict[str, dict[str, float]] = field(default_factory=dict)
+    jepa_planner_state: dict[str, Any] = field(default_factory=dict)
     action_distribution_delta: dict[str, float] = field(default_factory=dict)
     causal_substrate_active: bool = False
 
@@ -57,9 +76,16 @@ class AttemptMemoryEntry:
 
 
 class JEPAAttemptMemory:
-    def __init__(self, *, use_jepa_tokens: bool, device: torch.device | str = "cpu") -> None:
+    def __init__(
+        self,
+        *,
+        use_jepa_tokens: bool,
+        device: torch.device | str = "cpu",
+        jepa_token_mode: str = "normal",
+    ) -> None:
         self.use_jepa_tokens = bool(use_jepa_tokens)
         self.device = torch.device(device)
+        self.jepa_token_mode = str(jepa_token_mode)
         self.entries: list[AttemptMemoryEntry] = []
         self.transition_counts: dict[tuple[str, str], int] = {}
         self.transition_values: dict[tuple[str, str], float] = {}
@@ -67,6 +93,10 @@ class JEPAAttemptMemory:
         self.transition_failures: dict[tuple[str, str], int] = {}
         self.transition_events: dict[tuple[str, str], int] = {}
         self.state_seen_actions: dict[str, set[str]] = {}
+        self.action_counts: dict[str, int] = {}
+        self.action_values: dict[str, float] = {}
+        self.action_failures: dict[str, int] = {}
+        self.action_events: dict[str, int] = {}
         self.family_counts: dict[str, int] = {}
         self.family_values: dict[str, float] = {}
         self.region_counts: dict[tuple[int, int], int] = {}
@@ -118,6 +148,14 @@ class JEPAAttemptMemory:
         self.active_sequence_expectations: list[dict[str, Any]] = []
         self.sequence_cursor = 0
         self.active_sequence_source = ""
+        self.best_event_prefix: list[str] = []
+        self.best_event_prefix_value = 0.0
+        self.positive_prefix_completed = False
+        self.discovery_phase = 0
+        self.phase_action_counts: dict[tuple[int, str], int] = {}
+        self.phase_family_counts: dict[tuple[int, str], int] = {}
+        self.phase_state_seen_actions: dict[tuple[int, str], set[str]] = {}
+        self.planner_activation_stats = _empty_planner_activation_stats()
 
     def reset(self) -> None:
         self.entries.clear()
@@ -127,6 +165,10 @@ class JEPAAttemptMemory:
         self.transition_failures.clear()
         self.transition_events.clear()
         self.state_seen_actions.clear()
+        self.action_counts.clear()
+        self.action_values.clear()
+        self.action_failures.clear()
+        self.action_events.clear()
         self.family_counts.clear()
         self.family_values.clear()
         self.region_counts.clear()
@@ -178,6 +220,14 @@ class JEPAAttemptMemory:
         self.active_sequence_expectations.clear()
         self.sequence_cursor = 0
         self.active_sequence_source = ""
+        self.best_event_prefix.clear()
+        self.best_event_prefix_value = 0.0
+        self.positive_prefix_completed = False
+        self.discovery_phase = 0
+        self.phase_action_counts.clear()
+        self.phase_family_counts.clear()
+        self.phase_state_seen_actions.clear()
+        self.planner_activation_stats = _empty_planner_activation_stats()
 
     def ingest_attempt(self, record: AttemptRecord, model: VideoJEPA | None = None) -> AttemptMemoryEntry:
         failed: dict[str, int] = {}
@@ -230,8 +280,17 @@ class JEPAAttemptMemory:
             model = model.to(self.device)
             model.eval()
             with torch.no_grad():
-                output = model(batch["frames"], batch["action_ids"], batch["legal_counts"], batch.get("valid"))
-                token_mean = [round(float(item), 6) for item in model.attempt_tokens(batch).detach().cpu().reshape(-1).tolist()[:24]]
+                output = model(
+                    batch["frames"],
+                    batch["action_ids"],
+                    batch["legal_counts"],
+                    batch.get("valid"),
+                    batch.get("action_features"),
+                )
+                if self.jepa_token_mode == "shuffled":
+                    output = _shuffled_jepa_output(output)
+                token_mean_tensor = _attempt_token_mean_from_output(output, batch.get("valid"))
+                token_mean = [round(float(item), 6) for item in token_mean_tensor.detach().cpu().reshape(-1).tolist()[:24]]
                 jepa_action_evidence = _jepa_action_evidence(record, output)
         total = max(len(record.steps), 1)
         repeated = {
@@ -265,7 +324,7 @@ class JEPAAttemptMemory:
         for action, count in failed.items():
             next_plan[action] = next_plan.get(action, 0.0) - min(float(count), 4.0) * 0.25
         for action, count in effects.items():
-            if action not in failed and action not in events:
+            if positive > 0 and action not in failed and action not in events:
                 next_plan[action] = next_plan.get(action, 0.0) + min(float(count), 4.0) * 0.05
         if positive == 0:
             for action, fraction in repeated.items():
@@ -285,8 +344,10 @@ class JEPAAttemptMemory:
             object_hypotheses,
             component_hypotheses,
         )
+        self._update_best_event_prefix(record, transition_outcomes)
         graph_summary = self.transition_graph_summary()
         object_summary = self.object_memory_summary()
+        planner_stats = self.planner_activation_summary()
         causal.update(
             {
                 "transition_graph_edges": float(graph_summary["observed_edges"]),
@@ -320,17 +381,33 @@ class JEPAAttemptMemory:
                 "sequence_candidate_count": float(object_summary["sequence_candidate_count"]),
             }
         )
+        for planner_name, stats in planner_stats.items():
+            for event_name, value in stats.items():
+                causal[f"{planner_name}_{event_name}"] = float(value)
         if jepa_active:
+            jepa_planner_biases: dict[str, float] = {}
             for action, evidence in jepa_action_evidence.items():
                 effect_centered = float(evidence.get("effect", 0.0) - effect_mean)
                 surprise_centered = float(evidence.get("surprise", 0.0) - surprise_mean)
                 count_scale = math.log1p(float(evidence.get("count", 0.0)))
-                latent_rule_bias = (0.55 * effect_centered + 0.25 * surprise_centered) * max(count_scale, 1.0)
+                latent_rule_bias = (0.90 * effect_centered + 0.40 * surprise_centered) * max(count_scale, 1.0)
+                if len(jepa_action_evidence) == 1:
+                    quality_signal = float(evidence.get("effect", 0.0)) - 0.05 * float(evidence.get("surprise", 0.0))
+                    latent_rule_bias += 0.35 * math.tanh(quality_signal * 8.0)
                 if action in events:
-                    latent_rule_bias += 0.20 * min(float(events[action]), 3.0)
+                    latent_rule_bias += 0.25 * min(float(events[action]), 3.0)
                 if action in failed and effect_centered < 0.0:
-                    latent_rule_bias -= 0.15 * min(float(failed[action]), 4.0)
+                    latent_rule_bias -= 0.20 * min(float(failed[action]), 4.0)
+                if positive == 0 and action not in events:
+                    latent_rule_bias = min(latent_rule_bias, 0.0)
                 next_plan[action] = next_plan.get(action, 0.0) + latent_rule_bias
+                jepa_planner_biases[action] = float(latent_rule_bias)
+            causal["jepa_planner_bias_l1"] = float(sum(abs(value) for value in jepa_planner_biases.values()))
+            causal["jepa_planner_consumed_actions"] = float(sum(1 for value in jepa_planner_biases.values() if abs(value) > 1.0e-9))
+        else:
+            jepa_planner_biases = {}
+            causal["jepa_planner_bias_l1"] = 0.0
+            causal["jepa_planner_consumed_actions"] = 0.0
         action_distribution_delta = _centered_distribution_delta(next_plan)
         entry = AttemptMemoryEntry(
             attempt_index=int(record.attempt_index),
@@ -346,11 +423,48 @@ class JEPAAttemptMemory:
             component_causal_hypotheses=component_hypotheses[:12],
             sequence_plan_summary=object_summary,
             jepa_action_evidence=jepa_action_evidence,
+            jepa_planner_state={
+                "mode": self.jepa_token_mode,
+                "consumed_by_planner": bool(jepa_planner_biases),
+                "bias_l1": float(sum(abs(value) for value in jepa_planner_biases.values())),
+                "action_biases": {action: round(float(value), 6) for action, value in sorted(jepa_planner_biases.items())},
+                "evidence": {
+                    action: {key: round(float(value), 6) for key, value in sorted(values.items())}
+                    for action, values in sorted(jepa_action_evidence.items())
+                },
+            },
             action_distribution_delta=action_distribution_delta,
             causal_substrate_active=jepa_active,
         )
         self.entries.append(entry)
         return entry
+
+    def _planner_kind(self, source: str | None) -> str | None:
+        source_text = str(source or "")
+        if "relation_delta_sequence" in source_text:
+            return "relation_delta_sequence"
+        if source_text == "positive_public_relation_delta_sequence":
+            return "relation_delta_sequence"
+        if "relation_delta" in source_text:
+            return "relation_delta"
+        if "component_relation_goal_chain" in source_text:
+            return "relation_chain"
+        if "component_transition_goal_chain" in source_text:
+            return "component_chain"
+        return None
+
+    def _record_planner_event(self, source: str | None, event: str, amount: int = 1) -> None:
+        kind = self._planner_kind(source)
+        if kind is None or event not in PLANNER_DIAGNOSTIC_EVENTS:
+            return
+        self.planner_activation_stats.setdefault(kind, {name: 0 for name in PLANNER_DIAGNOSTIC_EVENTS})
+        self.planner_activation_stats[kind][event] = int(self.planner_activation_stats[kind].get(event, 0)) + int(amount)
+
+    def planner_activation_summary(self) -> dict[str, dict[str, int]]:
+        return {
+            kind: {event: int(self.planner_activation_stats.get(kind, {}).get(event, 0)) for event in PLANNER_DIAGNOSTIC_EVENTS}
+            for kind in PLANNER_DIAGNOSTIC_KINDS
+        }
 
     def score_action(self, action: str) -> float:
         if not self.entries:
@@ -367,13 +481,16 @@ class JEPAAttemptMemory:
         legal_actions = [str(action) for action in getattr(observation, "available_actions", ())]
         if not legal_actions:
             return {}
+        has_goal_evidence = self._has_public_goal_evidence()
         obs_key = _observation_key(observation)
         frame = _public_frame(observation)
         component_relations: dict[str, dict[str, Any]] = {}
         components: list[_FrameComponent] | None = None
+        relation_actions = _bounded_relation_scoring_actions(legal_actions)
+        relation_action_set = set(relation_actions)
         if frame is not None and frame.size:
             components = _frame_components(frame)
-            for action in legal_actions:
+            for action in relation_actions:
                 component_relations[action] = _component_target_relation(
                     frame,
                     _action_target_cell(action, frame),
@@ -381,32 +498,60 @@ class JEPAAttemptMemory:
                 )
         scores = self.plan_scores(legal_actions)
         seen_here = self.state_seen_actions.get(obs_key, set()) if obs_key else set()
+        phase_seen_here = self.phase_state_seen_actions.get((self.discovery_phase, obs_key), set()) if obs_key else set()
         stuck = self._recent_stuck()
         for action in legal_actions:
+            family = _action_family(action)
             edge = (obs_key, action)
             edge_count = self.transition_counts.get(edge, 0)
             if obs_key and edge_count:
                 edge_mean = self.transition_values.get(edge, 0.0) / max(edge_count, 1)
                 scores[action] += 0.65 * edge_mean
-                scores[action] -= 0.08 * min(float(self.transition_failures.get(edge, 0)), 4.0)
+                scores[action] -= 0.22 * min(float(self.transition_failures.get(edge, 0)), 6.0)
                 if self.transition_events.get(edge, 0):
                     scores[action] += 0.12
             else:
-                family = _action_family(action)
                 family_count = self.family_counts.get(family, 0)
                 if family_count:
-                    scores[action] += 0.20 * (self.family_values.get(family, 0.0) / max(family_count, 1))
+                    family_mean = self.family_values.get(family, 0.0) / max(family_count, 1)
+                    if has_goal_evidence or family_mean > 0.0:
+                        scores[action] += 0.20 * family_mean
+                    elif family_count >= 24:
+                        evidence_scale = min(max((float(family_count) - 24.0) / 24.0, 0.0), 1.0)
+                        scores[action] += 0.70 * evidence_scale * family_mean
                 if stuck:
                     scores[action] += 0.10
                 if obs_key and seen_here and action not in seen_here:
                     scores[action] += 0.08
-            scores[action] += self._object_region_score(action, frame)
-            target_relation = component_relations.get(action)
-            scores[action] += self._component_relation_score(action, frame, target_relation)
-            scores[action] += self._component_transition_prediction_score(action, frame, target_relation)
-            scores[action] += self._component_relation_delta_score(action, frame, target_relation)
+            if self.discovery_phase > 0 and family != "wait":
+                phase_action_count = self.phase_action_counts.get((self.discovery_phase, action), 0)
+                phase_family_count = self.phase_family_counts.get((self.discovery_phase, family), 0)
+                scores[action] += 0.18 / math.sqrt(float(phase_action_count + 1))
+                scores[action] += 0.12 / math.sqrt(float(phase_family_count + 1))
+                if obs_key and phase_seen_here and action not in phase_seen_here:
+                    scores[action] += 0.10
+            action_count = self.action_counts.get(action, 0)
+            if action_count:
+                action_mean = self.action_values.get(action, 0.0) / max(action_count, 1)
+                scores[action] += 0.45 * action_mean
+                if not has_goal_evidence and action_mean <= 0.0:
+                    scores[action] -= 0.030 * min(float(action_count), 24.0)
+                if self.action_events.get(action, 0):
+                    scores[action] += 0.10
+            if action in relation_action_set:
+                scores[action] += self._object_region_score(action, frame)
+                target_relation = component_relations.get(action)
+                scores[action] += self._component_relation_score(action, frame, target_relation)
+                scores[action] += self._component_transition_prediction_score(action, frame, target_relation)
+                relation_delta_score = self._component_relation_delta_score(action, frame, target_relation)
+                scores[action] += relation_delta_score
+                if abs(relation_delta_score) > 1.0e-9:
+                    self._record_planner_event("component_relation_delta_event_miner", "score_hits")
+                    if relation_delta_score > 0.0:
+                        self._record_planner_event("component_relation_delta_event_miner", "activations")
+                        self._record_planner_event("component_relation_delta_event_miner", "legal_resolutions")
         chain_plan = self._component_chain_plan(frame, legal_actions, components)
-        relation_chain_plan = self._component_relation_chain_plan(frame, legal_actions, components)
+        relation_chain_plan = self._component_relation_chain_plan(frame, relation_actions, components)
         selected_plan = chain_plan
         if relation_chain_plan is not None and (
             selected_plan is None
@@ -428,7 +573,23 @@ class JEPAAttemptMemory:
         if planned_action is not None:
             plan_support = self._sequence_plan_support(planned_action, frame, component_relations.get(planned_action))
             scores[planned_action] = scores.get(planned_action, 0.0) + (0.85 * plan_support)
-        return {action: float(max(min(score, 0.75), -0.75)) for action, score in scores.items()}
+        if not has_goal_evidence:
+            scores = {action: min(float(score), 0.0) for action, score in scores.items()}
+        lower_bound = -1.75 if not has_goal_evidence else -0.75
+        return {action: float(max(min(score, 0.75), lower_bound)) for action, score in scores.items()}
+
+    def _has_public_goal_evidence(self) -> bool:
+        return bool(
+            self.transition_events
+            or self.component_goal_relations
+            or self.component_prediction_goal_values
+            or self.component_chain_goal_values
+            or self.component_goal_state_values
+            or self.component_relation_chain_goal_values
+            or self.component_relation_goal_state_values
+            or self.component_relation_delta_goal_values
+            or any(entry.event_candidates for entry in self.entries)
+        )
 
     def action_distribution(self, legal_actions: tuple[str, ...] | list[str]) -> dict[str, float]:
         actions = [str(action) for action in legal_actions]
@@ -446,6 +607,74 @@ class JEPAAttemptMemory:
         denom = sum(math.exp(value) for value in logits.values())
         return {action: float(math.exp(logits[action]) / max(denom, 1.0e-12)) for action in actions}
 
+    def bridge_public_support_weight(self, action: str) -> float:
+        action = str(action)
+        if self.action_events.get(action, 0) > 0:
+            return 1.0
+        count = int(self.action_counts.get(action, 0))
+        if count <= 0:
+            family = _action_family(action)
+            family_count = int(self.family_counts.get(family, 0))
+            if family_count >= 24:
+                family_mean = self.family_values.get(family, 0.0) / max(family_count, 1)
+                if family_mean <= 0.0:
+                    evidence_scale = min(max((float(family_count) - 24.0) / 24.0, 0.0), 1.0)
+                    return float(max(0.05, 0.55 + 0.70 * evidence_scale * family_mean))
+            return 0.55
+        mean_value = self.action_values.get(action, 0.0) / max(count, 1)
+        if mean_value > 0.0:
+            return 0.85
+        failures = min(float(self.action_failures.get(action, 0)), 8.0)
+        return float(max(0.0, 0.55 - 0.075 * failures))
+
+    def discovery_action_counts(self, action: str) -> tuple[int, int]:
+        action = str(action)
+        family = _action_family(action)
+        return (
+            int(self.phase_action_counts.get((self.discovery_phase, action), 0)),
+            int(self.phase_family_counts.get((self.discovery_phase, family), 0)),
+        )
+
+    def discovery_exploration_candidates(
+        self,
+        legal_actions: list[str] | tuple[str, ...],
+        *,
+        observation: Any | None = None,
+        scores: dict[str, float] | None = None,
+        limit: int = 16,
+    ) -> list[str]:
+        if self.discovery_phase <= 0 and not self.positive_prefix_completed:
+            return []
+        legal = [str(action) for action in legal_actions if _action_family(str(action)) != "wait"]
+        if not legal:
+            return [str(action) for action in legal_actions]
+        obs_key = _observation_key(observation) if observation is not None else ""
+        unseen_here = [
+            action
+            for action in legal
+            if obs_key
+            and action not in self.phase_state_seen_actions.get((self.discovery_phase, obs_key), set())
+        ]
+        pool = unseen_here or legal
+        min_family_count = min((self.discovery_action_counts(action)[1] for action in pool), default=0)
+        pool = [action for action in pool if self.discovery_action_counts(action)[1] == min_family_count]
+        min_action_count = min((self.discovery_action_counts(action)[0] for action in pool), default=0)
+        pool = [action for action in pool if self.discovery_action_counts(action)[0] == min_action_count] or pool
+        if scores:
+            index = {action: idx for idx, action in enumerate(legal)}
+            pool = sorted(pool, key=lambda action: (float(scores.get(action, 0.0)), -index.get(action, 0)), reverse=True)
+        return pool[: max(int(limit), 1)]
+
+    def public_no_effect_suppresses_action(self, action: str) -> bool:
+        if self._has_public_goal_evidence():
+            return False
+        family = _action_family(str(action))
+        family_count = int(self.family_counts.get(family, 0))
+        if family_count < 48:
+            return False
+        family_mean = self.family_values.get(family, 0.0) / max(family_count, 1)
+        return bool(family_mean <= -0.35)
+
     def transition_graph_summary(self) -> dict[str, Any]:
         return {
             "observed_edges": len(self.transition_counts),
@@ -453,6 +682,12 @@ class JEPAAttemptMemory:
             "positive_edges": sum(1 for value in self.transition_events.values() if value > 0),
             "effect_edges": sum(1 for value in self.transition_effects.values() if value > 0),
             "no_effect_edges": sum(1 for value in self.transition_failures.values() if value > 0),
+            "observed_actions": len(self.action_counts),
+            "negative_actions": sum(
+                1
+                for action, count in self.action_counts.items()
+                if self.action_values.get(action, 0.0) / max(count, 1) < 0.0
+            ),
             "action_families": sorted(self.family_counts),
         }
 
@@ -490,6 +725,19 @@ class JEPAAttemptMemory:
             "active_sequence_length": len(self.active_sequence),
             "active_sequence_remaining": active_remaining,
             "active_sequence_source": self.active_sequence_source,
+            "best_event_prefix_length": len(self.best_event_prefix),
+            "best_event_prefix_value": float(self.best_event_prefix_value),
+            "positive_prefix_completed": bool(self.positive_prefix_completed),
+            "discovery_phase": int(self.discovery_phase),
+            "phase_action_count": sum(
+                count for (phase, _action), count in self.phase_action_counts.items() if phase == self.discovery_phase
+            ),
+            "phase_family_counts": {
+                family: int(count)
+                for (phase, family), count in sorted(self.phase_family_counts.items())
+                if phase == self.discovery_phase
+            },
+            "planner_activation": self.planner_activation_summary(),
         }
 
     def start_attempt(self) -> None:
@@ -497,6 +745,17 @@ class JEPAAttemptMemory:
         self.active_sequence_expectations = []
         self.sequence_cursor = 0
         self.active_sequence_source = ""
+        self.positive_prefix_completed = False
+        self.discovery_phase = 0
+        self.phase_action_counts.clear()
+        self.phase_family_counts.clear()
+        self.phase_state_seen_actions.clear()
+        if self.best_event_prefix:
+            self.active_sequence = list(self.best_event_prefix[:128])
+            self.active_sequence_expectations = [{} for _ in self.active_sequence]
+            self.active_sequence_source = "positive_public_control_prefix"
+            self._record_planner_event(self.active_sequence_source, "activations")
+            return
         candidates = sorted(
             self.sequence_candidates,
             key=lambda item: (float(item.get("value", 0.0)), int(item.get("length", 0))),
@@ -513,6 +772,7 @@ class JEPAAttemptMemory:
                 while len(self.active_sequence_expectations) < len(self.active_sequence):
                     self.active_sequence_expectations.append({})
                 self.active_sequence_source = str(candidate.get("source", "prior_attempt_event_window"))
+                self._record_planner_event(self.active_sequence_source, "activations")
                 return
 
     def sequence_plan_action(
@@ -543,8 +803,10 @@ class JEPAAttemptMemory:
                 components,
             )
             if resolved_action is not None:
+                self._record_planner_event(self.active_sequence_source, "legal_resolutions")
                 return resolved_action
             if action in legal:
+                self._record_planner_event(self.active_sequence_source, "legal_resolutions")
                 return action
             self.sequence_cursor += 1
         return None
@@ -554,17 +816,50 @@ class JEPAAttemptMemory:
             return
         if str(chosen_action) == self.active_sequence[self.sequence_cursor]:
             self.sequence_cursor += 1
+            if self.active_sequence_source == "positive_public_control_prefix" and self.sequence_cursor >= len(self.active_sequence):
+                self.positive_prefix_completed = True
 
     def observe_live_transition(self, before_observation: Any, action: str, result: Any) -> None:
-        if not self.active_sequence or self.sequence_cursor >= len(self.active_sequence):
-            return
         action = str(action)
+        before = _public_frame(before_observation)
+        after = _public_frame(getattr(result, "observation", None))
+        events = [str(item) for item in getattr(result, "info", {}).get("events", [])]
+        level_completed = any(event == "level_completed" for event in events)
+        event_hit = bool(POSITIVE_EVENTS.intersection(events)) or float(getattr(result, "reward", 0.0)) > 0.0
+        no_effect_event = _is_no_effect_event(events)
+        changed = bool(before is not None and after is not None and before.shape == after.shape and np.any(before != after))
+        obs_key = _observation_key(before_observation)
+        self._record_phase_action(obs_key, action)
+        if obs_key:
+            self._update_transition_graph(
+                [
+                    {
+                        "edge": (obs_key, action),
+                        "action": action,
+                        "value": _transition_credit(
+                            event_hit=event_hit,
+                            changed=changed,
+                            no_effect_event=no_effect_event,
+                            invalid_action=any("invalid" in event.lower() for event in events),
+                            score_delta=float(getattr(result, "reward", 0.0)),
+                            terminal=bool(getattr(result, "terminated", False) or getattr(result, "truncated", False)),
+                        ),
+                        "event_hit": event_hit,
+                        "changed": changed,
+                        "no_effect": (not changed) or no_effect_event,
+                    }
+                ]
+            )
+        if not self.active_sequence or self.sequence_cursor >= len(self.active_sequence):
+            if level_completed:
+                self._enter_next_discovery_phase()
+            return
+        source = self.active_sequence_source
         expected = (
             self.active_sequence_expectations[self.sequence_cursor]
             if self.sequence_cursor < len(self.active_sequence_expectations)
             else {}
         )
-        before = _public_frame(before_observation)
         legal_actions = list(getattr(before_observation, "available_actions", ()))
         expected_action = self.active_sequence[self.sequence_cursor]
         resolved_expected_action = _resolve_sequence_expected_action(
@@ -574,10 +869,10 @@ class JEPAAttemptMemory:
         )
         if action != expected_action and (resolved_expected_action is None or action != resolved_expected_action):
             return
-        after = _public_frame(getattr(result, "observation", None))
-        event_hit = bool(POSITIVE_EVENTS.intersection(getattr(result, "info", {}).get("events", []))) or float(
-            getattr(result, "reward", 0.0)
-        ) > 0.0
+        if before is not None and after is not None and bool(np.any(before != after)):
+            self._record_planner_event(source, "visible_changes")
+        if event_hit:
+            self._record_planner_event(source, "useful_events")
         if expected and before is not None and after is not None:
             actual = _component_hypothesis_from_frames(
                 before=before,
@@ -590,18 +885,42 @@ class JEPAAttemptMemory:
             )
             if not _component_expectation_matches(expected, actual) and not event_hit:
                 self.sequence_contradictions += 1
+                self._record_planner_event(source, "contradiction_aborts")
                 self._penalize_component_prediction(expected)
+                self._record_planner_event(source, "stale_penalties")
                 self.active_sequence = []
                 self.active_sequence_expectations = []
                 self.sequence_cursor = 0
                 self.active_sequence_source = "aborted_by_public_component_contradiction"
                 return
         self.sequence_cursor += 1
+        if source == "positive_public_control_prefix" and self.sequence_cursor >= len(self.active_sequence):
+            self.positive_prefix_completed = True
+        if level_completed:
+            self._enter_next_discovery_phase()
+
+    def _record_phase_action(self, obs_key: str, action: str) -> None:
+        phase = int(self.discovery_phase)
+        self.phase_action_counts[(phase, action)] = self.phase_action_counts.get((phase, action), 0) + 1
+        family = _action_family(action)
+        self.phase_family_counts[(phase, family)] = self.phase_family_counts.get((phase, family), 0) + 1
+        if obs_key:
+            key = (phase, obs_key)
+            self.phase_state_seen_actions.setdefault(key, set()).add(action)
+
+    def _enter_next_discovery_phase(self) -> None:
+        self.discovery_phase += 1
+        self.active_sequence = []
+        self.active_sequence_expectations = []
+        self.sequence_cursor = 0
+        self.active_sequence_source = "post_level_discovery"
+        self.positive_prefix_completed = True
 
     def summary(self) -> dict[str, Any]:
         return {
             "entry_count": len(self.entries),
             "use_jepa_tokens": self.use_jepa_tokens,
+            "jepa_token_mode": self.jepa_token_mode,
             "entries": [entry.to_dict() for entry in self.entries[-3:]],
             "emits_text": False,
             "direct_action_source": False,
@@ -630,6 +949,8 @@ class JEPAAttemptMemory:
             ],
             "transition_graph": self.transition_graph_summary(),
             "object_memory": self.object_memory_summary(),
+            "planner_activation": self.planner_activation_summary(),
+            "jepa_evidence_state": [entry.jepa_planner_state for entry in self.entries[-3:]],
             "causal_substrate_active": any(entry.causal_substrate_active for entry in self.entries),
         }
 
@@ -643,22 +964,28 @@ class JEPAAttemptMemory:
             self.transition_counts[edge] = self.transition_counts.get(edge, 0) + 1
             self.transition_values[edge] = self.transition_values.get(edge, 0.0) + value
             self.state_seen_actions.setdefault(edge[0], set()).add(action)
+            self.action_counts[action] = self.action_counts.get(action, 0) + 1
+            self.action_values[action] = self.action_values.get(action, 0.0) + value
             self.family_counts[family] = self.family_counts.get(family, 0) + 1
             self.family_values[family] = self.family_values.get(family, 0.0) + value
             if outcome["event_hit"]:
                 self.transition_events[edge] = self.transition_events.get(edge, 0) + 1
+                self.action_events[action] = self.action_events.get(action, 0) + 1
             if outcome["changed"]:
                 self.transition_effects[edge] = self.transition_effects.get(edge, 0) + 1
             if outcome["no_effect"]:
                 self.transition_failures[edge] = self.transition_failures.get(edge, 0) + 1
+                self.action_failures[action] = self.action_failures.get(action, 0) + 1
 
         event_indices = [index for index, outcome in enumerate(outcomes) if outcome["event_hit"]]
         for event_index in event_indices:
             for prior_index in range(max(0, event_index - 6), event_index):
                 edge = outcomes[prior_index]["edge"]
+                action = str(outcomes[prior_index]["action"])
                 distance = event_index - prior_index
                 credit = 0.42 / float(distance + 1)
                 self.transition_values[edge] = self.transition_values.get(edge, 0.0) + credit
+                self.action_values[action] = self.action_values.get(action, 0.0) + credit
                 delayed_credit_edges.add(edge)
         return len(delayed_credit_edges)
 
@@ -978,6 +1305,24 @@ class JEPAAttemptMemory:
             reverse=True,
         )[:24]
         return added
+
+    def _update_best_event_prefix(self, record: AttemptRecord, outcomes: list[dict[str, Any]]) -> None:
+        cumulative_positive = 0.0
+        for event_index, outcome in enumerate(outcomes):
+            step = record.steps[event_index]
+            if bool(outcome.get("event_hit", False)):
+                cumulative_positive += max(1.0, float(step.score_delta))
+            if cumulative_positive <= 0.0:
+                continue
+            prefix_actions = [str(item.action) for item in record.steps[: event_index + 1]]
+            if not prefix_actions or any(_action_family(action) == "contact" for action in prefix_actions):
+                continue
+            shorter_existing = self.best_event_prefix and len(prefix_actions) < len(self.best_event_prefix)
+            if cumulative_positive > self.best_event_prefix_value + 1.0e-6 or (
+                abs(cumulative_positive - self.best_event_prefix_value) <= 1.0e-6 and shorter_existing
+            ):
+                self.best_event_prefix = prefix_actions[:128]
+                self.best_event_prefix_value = float(cumulative_positive)
 
     def _object_region_score(self, action: str, frame: np.ndarray | None) -> float:
         score = 0.0
@@ -1370,6 +1715,8 @@ class JEPAAttemptMemory:
             return False
         source = str(plan.get("source", "component_transition_goal_chain"))
         remaining = self.active_sequence[self.sequence_cursor :] if self.active_sequence else []
+        if self.active_sequence_source == "positive_public_control_prefix" and remaining:
+            return False
         if self.active_sequence_source == source and remaining:
             if remaining == actions[: len(remaining)]:
                 return False
@@ -1384,6 +1731,8 @@ class JEPAAttemptMemory:
         self.active_sequence_expectations = expectations[: len(self.active_sequence)]
         self.sequence_cursor = 0
         self.active_sequence_source = source
+        self._record_planner_event(source, "activations")
+        self._record_planner_event(source, "legal_resolutions")
         return True
 
     def _sequence_plan_support(
@@ -1491,6 +1840,29 @@ def _jepa_action_evidence(record: AttemptRecord, output: dict[str, torch.Tensor]
     return evidence
 
 
+def _shuffled_jepa_output(output: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    shuffled: dict[str, torch.Tensor] = {}
+    for key, value in output.items():
+        if not torch.is_tensor(value):
+            shuffled[key] = value
+            continue
+        if key in {"context_tokens", "frame_tokens"} and value.dim() >= 2 and value.shape[1] > 1:
+            shuffled[key] = torch.roll(value, shifts=1, dims=1)
+        elif key in {"predicted_future", "target_future", "loss_mask"} and value.dim() >= 2 and value.shape[1] > 1:
+            shuffled[key] = torch.roll(value, shifts=1, dims=1)
+        else:
+            shuffled[key] = value
+    return shuffled
+
+
+def _attempt_token_mean_from_output(output: dict[str, torch.Tensor], valid: torch.Tensor | None = None) -> torch.Tensor:
+    tokens = output["context_tokens"]
+    if valid is None:
+        return tokens.mean(dim=1)
+    weights = valid.float().clamp(0.0, 1.0)
+    return (tokens * weights).sum(dim=1) / weights.sum(dim=1).clamp_min(1.0)
+
+
 def _is_no_effect_event(events: list[str]) -> bool:
     for event in events:
         lowered = str(event).lower()
@@ -1522,30 +1894,24 @@ def _transition_credit(
     if no_effect_event or not changed:
         return -0.65
     if terminal:
-        return 0.05
-    return 0.18
+        return -0.65
+    return min(float(score_delta), 0.0) - 0.04
 
 
 def _observation_key(observation: Any) -> str:
     try:
-        return stable_hash(
-            {
-                "grid": np.asarray(observation.grid, dtype=np.int64),
-                "extras": getattr(observation, "extras", {}),
-                "actions": getattr(observation, "available_actions", ()),
-            }
-        )
+        return stable_hash(public_observation_key_payload(observation))
     except Exception:
         return ""
 
 
 def _action_family(action: str) -> str:
     lowered = str(action).lower()
-    if lowered in {"up", "down", "left", "right", "north", "south", "east", "west"}:
+    if lowered in {"up", "down", "left", "right", "north", "south", "east", "west", "1", "2", "3", "4"}:
         return "move"
     if "click" in lowered or "press" in lowered or "tap" in lowered or "touch" in lowered:
         return "contact"
-    if lowered in {"wait", "noop", "no_op", "none"}:
+    if lowered in {"7", "wait", "noop", "no_op", "none"}:
         return "wait"
     if "toggle" in lowered or "use" in lowered or "pickup" in lowered or "drop" in lowered:
         return "object"
@@ -2557,6 +2923,16 @@ def _public_frame(observation: Any) -> np.ndarray | None:
             return np.asarray(observation.grid, dtype=np.int64)
         except Exception:
             return None
+
+
+def _bounded_relation_scoring_actions(actions: list[str] | tuple[str, ...]) -> list[str]:
+    legal = [str(action) for action in actions]
+    if len(legal) <= RELATION_SCORING_ACTION_LIMIT:
+        return legal
+    non_click = [action for action in legal if not action.lower().startswith("click:")]
+    click_budget = max(RELATION_SCORING_ACTION_LIMIT - len(non_click), 0)
+    bounded = [*non_click, *[action for action in legal if action.lower().startswith("click:")][:click_budget]]
+    return list(dict.fromkeys(bounded))
 
 
 def _click_cell(action: str, shape: tuple[int, ...] | list[int] = (8, 8)) -> tuple[int, int] | None:

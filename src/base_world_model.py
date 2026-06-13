@@ -10,7 +10,21 @@ import numpy as np
 import torch
 from torch import nn
 
-from .arcagi3_adapter import ArcAGI3Observation, MOVE_DELTAS, find_agent, in_bounds, parse_click
+from .arcagi3_adapter import (
+    CELL_AGENT,
+    CELL_DOOR,
+    CELL_GOAL,
+    CELL_HAZARD,
+    CELL_KEY,
+    CELL_RESOURCE,
+    CELL_UNKNOWN,
+    CELL_WALL,
+    ArcAGI3Observation,
+    MOVE_DELTAS,
+    find_agent,
+    in_bounds,
+    parse_click,
+)
 from .device import AUTO_DEVICE, DeviceLike, resolve_device
 
 
@@ -18,6 +32,19 @@ GRID_SIZE = 8
 NUM_CELLS = 9
 ACTION_FEATURE_DIM = 16
 FAMILY_TO_INDEX = {"move": 0, "click": 1, "wait": 2, "reset": 3, "other": 4}
+POOL_PRIORITY = np.zeros(NUM_CELLS, dtype=np.int64)
+for _value, _priority in {
+    CELL_WALL: 1,
+    CELL_UNKNOWN: 1,
+    CELL_RESOURCE: 2,
+    CELL_KEY: 3,
+    CELL_DOOR: 3,
+    CELL_GOAL: 4,
+    CELL_HAZARD: 4,
+    CELL_AGENT: 5,
+}.items():
+    if 0 <= int(_value) < len(POOL_PRIORITY):
+        POOL_PRIORITY[int(_value)] = int(_priority)
 
 
 @dataclass
@@ -40,9 +67,32 @@ def sha256_file(path: str | Path) -> str:
 def grid_to_fixed(grid: np.ndarray, size: int = GRID_SIZE) -> np.ndarray:
     arr = np.asarray(grid, dtype=np.int64)
     out = np.zeros((size, size), dtype=np.int64)
-    height = min(size, arr.shape[0])
-    width = min(size, arr.shape[1])
-    out[:height, :width] = np.clip(arr[:height, :width], 0, NUM_CELLS - 1)
+    if arr.ndim != 2 or arr.size == 0:
+        return out
+    clipped = np.clip(arr, 0, NUM_CELLS - 1)
+    if clipped.shape[0] <= size and clipped.shape[1] <= size:
+        height = min(size, clipped.shape[0])
+        width = min(size, clipped.shape[1])
+        out[:height, :width] = clipped[:height, :width]
+        return out
+    row_bins = np.array_split(np.arange(clipped.shape[0]), size)
+    col_bins = np.array_split(np.arange(clipped.shape[1]), size)
+    for row_index, rows in enumerate(row_bins):
+        if rows.size == 0:
+            continue
+        for col_index, cols in enumerate(col_bins):
+            if cols.size == 0:
+                continue
+            block = clipped[np.ix_(rows, cols)].reshape(-1)
+            if block.size == 0:
+                continue
+            non_empty = block[block != 0]
+            if non_empty.size == 0:
+                continue
+            values, counts = np.unique(non_empty, return_counts=True)
+            priorities = POOL_PRIORITY[values]
+            order = np.lexsort((values, counts, priorities))
+            out[row_index, col_index] = int(values[order[-1]])
     return out
 
 
@@ -55,7 +105,7 @@ def action_family(action: str) -> str:
         return "move"
     if action.startswith("click:"):
         return "click"
-    if action in {"wait", "noop"}:
+    if action in {"7", "wait", "noop"}:
         return "wait"
     if action == "0":
         return "reset"
@@ -71,6 +121,10 @@ def _hash_features(action: str, width: int = 6) -> list[float]:
     return [((digest[index] / 255.0) * 2.0) - 1.0 for index in range(width)]
 
 
+def action_hash_features(action: str, width: int = 6) -> np.ndarray:
+    return np.asarray(_hash_features(str(action), width=width), dtype=np.float32)
+
+
 def action_to_features(
     observation: ArcAGI3Observation,
     action: str,
@@ -82,20 +136,23 @@ def action_to_features(
     family = action_family(action)
     family_vec = [0.0] * len(FAMILY_TO_INDEX)
     family_vec[FAMILY_TO_INDEX[family]] = 1.0
+    grid = np.asarray(observation.grid, dtype=np.int64)
+    height = int(grid.shape[0]) if grid.ndim >= 2 else int(size)
+    width = int(grid.shape[1]) if grid.ndim >= 2 else int(size)
     target_y = 0.0
     target_x = 0.0
     click = parse_click(action)
     if click is not None:
-        y, x = click
-        target_y = float(np.clip(y / max(size - 1, 1), 0.0, 1.0))
-        target_x = float(np.clip(x / max(size - 1, 1), 0.0, 1.0))
+        x, y = click
+        target_y = float(np.clip(y / max(height - 1, 1), 0.0, 1.0))
+        target_x = float(np.clip(x / max(width - 1, 1), 0.0, 1.0))
     elif action in MOVE_DELTAS:
-        agent = find_agent(np.asarray(observation.grid, dtype=np.int64))
+        agent = find_agent(grid)
         if agent is not None:
             dy, dx = MOVE_DELTAS[action]
             y, x = agent[0] + dy, agent[1] + dx
-            target_y = float(np.clip(y / max(size - 1, 1), 0.0, 1.0))
-            target_x = float(np.clip(x / max(size - 1, 1), 0.0, 1.0))
+            target_y = float(np.clip(y / max(height - 1, 1), 0.0, 1.0))
+            target_x = float(np.clip(x / max(width - 1, 1), 0.0, 1.0))
     legal_total = max(int(legal_count if legal_count is not None else len(observation.available_actions)), 1)
     legal_features = [float(legal_index / max(legal_total - 1, 1)), float(legal_total / 256.0), 1.0]
     features = family_vec + [target_y, target_x] + legal_features + _hash_features(action)
@@ -208,12 +265,16 @@ class ExternalBaseWorldModel(nn.Module):
         change = torch.sigmoid(output["change_logits"]).mean(dim=-1)
         reward = output["reward"].tanh()
         noop = torch.sigmoid(output["noop_logits"])
-        affordance = output["affordance"].tanh()
+        affordance = torch.sigmoid(output["affordance"])
         scores = {}
         diagnostics = {}
         for index, action in enumerate(actions):
-            world_score = float((reward[index] + change[index] - noop[index]).item()) if not disable_world_model else 0.0
-            affordance_score = float(affordance[index].item()) if not disable_affordance else 0.0
+            world_score = (
+                float((1.6 * reward[index] + 0.35 * change[index] - 0.45 * noop[index]).item())
+                if not disable_world_model
+                else 0.0
+            )
+            affordance_score = float(0.35 * affordance[index].item()) if not disable_affordance else 0.0
             scores[action] = world_score + affordance_score
             diagnostics[action] = {
                 "reward": round(float(reward[index].item()), 6),
@@ -222,7 +283,7 @@ class ExternalBaseWorldModel(nn.Module):
                 "affordance": round(float(affordance[index].item()), 6),
                 "score": round(float(scores[action]), 6),
             }
-        next_memory = output["memory"][:1].detach()
+        next_memory = output["memory"].detach()
         return scores, diagnostics, next_memory
 
 

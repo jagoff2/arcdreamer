@@ -179,10 +179,15 @@ def no_text_as_state_check() -> dict[str, Any]:
     for item in blocked:
         if item.lower() in runtime.lower() or item.lower() in external.lower() or item.lower() in collapse.lower():
             findings.append(item)
+    runtime_has_impulse_loop = (
+        "model.step(model_observation, z)" in runtime
+        and '"prev_action"' in runtime
+        and '"prev_delta"' in runtime
+    )
     return {
-        "passes": not findings and "model.step(observation, z)" in runtime,
+        "passes": not findings and runtime_has_impulse_loop,
         "findings": findings,
-        "runtime_z_loop_present": "model.step(observation, z)" in runtime,
+        "runtime_z_loop_present": runtime_has_impulse_loop,
     }
 
 
@@ -712,9 +717,8 @@ def build_audit(
     arc_affordance = arc_affordance_report_checks()
     jepa = jepa_report_checks()
     hashes = collect_hashes(AUDIT_PATHS + EXTERNAL_AUDITED_PATHS)
-    frozen_ok = (
-        hashes["frozen/recurrent_latent_fast.pt"].get("sha256") == "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD"
-    )
+    manifest = load_json("frozen/manifest.json")
+    frozen_ok = hashes["frozen/recurrent_latent_fast.pt"].get("sha256") == manifest.get("checkpoint_sha256")
     checks = {
         "external_report_proven": report.get("terminal_outcome") == "EXTERNAL GENERALIZATION DISCIPLINE PROVEN",
         "leakage_scan_passes": bool(leakage.get("passes")),

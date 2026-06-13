@@ -14,11 +14,22 @@ from .device import AUTO_DEVICE, DeviceLike
 from .external_collapse_experiment import make_adapter
 from .external_eval import GymnasiumExternalEnv
 from .external_registry import discover_external_suites
-from .base_world_model import GRID_SIZE, action_to_features, family_index, grid_to_features, sha256_file
+from .base_world_model import (
+    GRID_SIZE,
+    ACTION_FEATURE_DIM,
+    FAMILY_TO_INDEX,
+    action_family,
+    action_hash_features,
+    action_to_features,
+    family_index,
+    grid_to_features,
+    sha256_file,
+)
 
 
 ACTION_DIM = 8
 SOURCE_TO_ID = {"generated_arc_like_pretrain": 0, "gymnasium_dev_policy": 1, "old_explorer_dev": 2}
+GENERATED_ACTIONS = ("1", "2", "3", "4", "5", "click_target", "click_decoy", "7")
 
 
 @dataclass
@@ -86,64 +97,125 @@ def generated_arc_like_arrays(count: int, *, seed: int = 7001, size: int = GRID_
     agent_x = rng.integers(0, size, size=count)
     object_y = rng.integers(0, size, size=count)
     object_x = rng.integers(0, size, size=count)
+    decoy_y = rng.integers(0, size, size=count)
+    decoy_x = rng.integers(0, size, size=count)
     same = (agent_y == object_y) & (agent_x == object_x)
     object_x[same] = (object_x[same] + 1) % size
-    obs_grid[np.arange(count), agent_y, agent_x] = 2
-    obs_grid[np.arange(count), object_y, object_x] = 7
-    next_grid[:] = obs_grid
+    decoy_same = (decoy_y == object_y) & (decoy_x == object_x)
+    decoy_x[decoy_same] = (decoy_x[decoy_same] + 2) % size
     action_id = rng.integers(0, ACTION_DIM, size=count)
+    task_mode = rng.choice(
+        np.asarray([0, 1, 2, 3, 4], dtype=np.int64),
+        size=count,
+        p=np.asarray([0.25, 0.20, 0.15, 0.15, 0.25], dtype=np.float64),
+    )
+    object_value = rng.choice(np.asarray([3, 4, 5, 6, 7], dtype=np.uint8), size=count)
+    viewport_mode = task_mode == 4
+    center_y = int(size // 2)
+    center_x = int(size // 2)
+    agent_y[viewport_mode] = center_y
+    agent_x[viewport_mode] = center_x
+    centered_object = viewport_mode & (object_y == center_y) & (object_x == center_x)
+    object_x[centered_object] = (object_x[centered_object] + 2) % size
+    obs_grid[np.arange(count), object_y, object_x] = object_value
+    obs_grid[np.arange(count), agent_y, agent_x] = 2
+    next_grid[:] = obs_grid
     reward = np.zeros((count,), dtype=np.float32)
     terminal = np.zeros((count,), dtype=np.bool_)
     family = np.zeros((count,), dtype=np.int64)
-    action_features = np.zeros((count, 16), dtype=np.float32)
+    action_features = np.zeros((count, ACTION_FEATURE_DIM), dtype=np.float32)
     for action in range(ACTION_DIM):
         idx = np.where(action_id == action)[0]
         if idx.size == 0:
             continue
+        action_name = GENERATED_ACTIONS[action]
         features = action_features[idx]
-        features[:, 10:] = _generated_hash_features(action)
-        features[:, 7] = float(action) / float(ACTION_DIM - 1)
         features[:, 8] = ACTION_DIM / 256.0
         features[:, 9] = 1.0
+        features[:, 7] = float(action) / float(ACTION_DIM - 1)
         if action < 4:
-            family[idx] = 0
-            features[:, 0] = 1.0
+            family[idx] = FAMILY_TO_INDEX["move"]
+            features[:, FAMILY_TO_INDEX["move"]] = 1.0
+            features[:, 10:] = action_hash_features(action_name)
             dy, dx = [(-1, 0), (1, 0), (0, -1), (0, 1)][action]
+            is_viewport = viewport_mode[idx]
             ny = np.clip(agent_y[idx] + dy, 0, size - 1)
             nx = np.clip(agent_x[idx] + dx, 0, size - 1)
             features[:, 5] = ny / max(size - 1, 1)
             features[:, 6] = nx / max(size - 1, 1)
-            old_dist = np.abs(agent_y[idx] - object_y[idx]) + np.abs(agent_x[idx] - object_x[idx])
-            new_dist = np.abs(ny - object_y[idx]) + np.abs(nx - object_x[idx])
-            next_grid[idx, agent_y[idx], agent_x[idx]] = 0
-            next_grid[idx, ny, nx] = 2
-            reward[idx] = (new_dist < old_dist).astype(np.float32) * 0.05
+            standard = idx[~is_viewport]
+            if standard.size:
+                old_dist = np.abs(agent_y[standard] - object_y[standard]) + np.abs(agent_x[standard] - object_x[standard])
+                standard_ny = np.clip(agent_y[standard] + dy, 0, size - 1)
+                standard_nx = np.clip(agent_x[standard] + dx, 0, size - 1)
+                new_dist = np.abs(standard_ny - object_y[standard]) + np.abs(standard_nx - object_x[standard])
+                next_grid[standard, agent_y[standard], agent_x[standard]] = 0
+                next_grid[standard, standard_ny, standard_nx] = 2
+                progress = (new_dist < old_dist).astype(np.float32)
+                reaches_goal = (standard_ny == object_y[standard]) & (standard_nx == object_x[standard])
+                move_or_use_mode = task_mode[standard] != 1
+                reward[standard] = progress * 0.06
+                reward[standard[reaches_goal & move_or_use_mode]] = 1.0
+                terminal[standard[reaches_goal & move_or_use_mode]] = True
+            viewport = idx[is_viewport]
+            if viewport.size:
+                old_dist = np.abs(object_y[viewport] - center_y) + np.abs(object_x[viewport] - center_x)
+                shifted_y = np.clip(object_y[viewport] - dy, 0, size - 1)
+                shifted_x = np.clip(object_x[viewport] - dx, 0, size - 1)
+                new_dist = np.abs(shifted_y - center_y) + np.abs(shifted_x - center_x)
+                next_grid[viewport, object_y[viewport], object_x[viewport]] = 0
+                next_grid[viewport, center_y, center_x] = 2
+                off_center = (shifted_y != center_y) | (shifted_x != center_x)
+                if np.any(off_center):
+                    target_rows = viewport[off_center]
+                    next_grid[target_rows, shifted_y[off_center], shifted_x[off_center]] = object_value[target_rows]
+                progress = (new_dist < old_dist).astype(np.float32)
+                reward[viewport] = progress * 0.12 - (1.0 - progress) * 0.02
         elif action == 4:
-            family[idx] = 1
-            features[:, 1] = 1.0
+            family_name = action_family("5")
+            family[idx] = FAMILY_TO_INDEX[family_name]
+            features[:, FAMILY_TO_INDEX[family_name]] = 1.0
+            features[:, 10:] = action_hash_features("5")
+            distance = np.abs(agent_y[idx] - object_y[idx]) + np.abs(agent_x[idx] - object_x[idx])
+            viewport_distance = np.abs(object_y[idx] - center_y) + np.abs(object_x[idx] - center_x)
+            useful = ((task_mode[idx] == 2) & (distance <= 1)) | (task_mode[idx] == 3) | (
+                (task_mode[idx] == 4) & (viewport_distance <= 1)
+            )
+            next_grid[idx[useful], object_y[idx[useful]], object_x[idx[useful]]] = 5
+            reward[idx[useful]] = 1.0
+            reward[idx[~useful]] = -0.02
+            terminal[idx[useful]] = True
+        elif action == 5:
+            family[idx] = FAMILY_TO_INDEX["click"]
+            features[:, FAMILY_TO_INDEX["click"]] = 1.0
             features[:, 5] = object_y[idx] / max(size - 1, 1)
             features[:, 6] = object_x[idx] / max(size - 1, 1)
-            next_grid[idx, object_y[idx], object_x[idx]] = 0
-            reward[idx] = 1.0
-            terminal[idx] = True
-        elif action == 5:
-            family[idx] = 1
-            features[:, 1] = 1.0
-            ty = rng.integers(0, size, size=idx.size)
-            tx = rng.integers(0, size, size=idx.size)
-            features[:, 5] = ty / max(size - 1, 1)
-            features[:, 6] = tx / max(size - 1, 1)
-            hit = (ty == object_y[idx]) & (tx == object_x[idx])
-            next_grid[idx[hit], object_y[idx[hit]], object_x[idx[hit]]] = 0
-            reward[idx[hit]] = 1.0
-            terminal[idx[hit]] = True
+            for y in range(size):
+                for x in range(size):
+                    mask = (object_y[idx] == y) & (object_x[idx] == x)
+                    if np.any(mask):
+                        features[mask, 10:] = action_hash_features(f"click:{x}:{y}")
+            useful = task_mode[idx] == 1
+            next_grid[idx[useful], object_y[idx[useful]], object_x[idx[useful]]] = 0
+            reward[idx[useful]] = 1.0
+            reward[idx[~useful]] = -0.02
+            terminal[idx[useful]] = True
         elif action == 6:
-            family[idx] = 2
-            features[:, 2] = 1.0
-            reward[idx] = -0.01
+            family[idx] = FAMILY_TO_INDEX["click"]
+            features[:, FAMILY_TO_INDEX["click"]] = 1.0
+            features[:, 5] = decoy_y[idx] / max(size - 1, 1)
+            features[:, 6] = decoy_x[idx] / max(size - 1, 1)
+            for y in range(size):
+                for x in range(size):
+                    mask = (decoy_y[idx] == y) & (decoy_x[idx] == x)
+                    if np.any(mask):
+                        features[mask, 10:] = action_hash_features(f"click:{x}:{y}")
+            reward[idx] = -0.02
         else:
-            family[idx] = 3
-            features[:, 3] = 1.0
+            family[idx] = FAMILY_TO_INDEX["wait"]
+            features[:, FAMILY_TO_INDEX["wait"]] = 1.0
+            features[:, 10:] = action_hash_features("7")
+            reward[idx] = -0.01
         action_features[idx] = features
     legal_mask = np.ones((count, ACTION_DIM), dtype=np.float32)
     return {

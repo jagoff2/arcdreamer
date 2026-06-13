@@ -1,10 +1,11 @@
 {
   "checkpoint": "frozen/recurrent_latent_fast.pt",
-  "checkpoint_sha256": "D36D59ED56A5BF4DC79835CB04D8B10F46E59FB00B2FE95DBF5AED30D1DBEFBD",
-  "checkpoint_size_bytes": 169185,
+  "checkpoint_sha256": "2F0B2934CEED4BB986522DF4CA7D797ADB82C0C1A0DC70C59CA44B2DF7B6FC00",
+  "checkpoint_size_bytes": 400256,
   "source_checkpoint": "runs/living_latest.pt",
   "model_file": "src/model.py",
-  "model_sha256": "CE2838225E6852E64CA22D5A934B8ABAC6922D7377058F01F91CF5188CAC8DAF",
+  "model_sha256": "5C67A787DCC803B54488B7F5139D6333233C6094736DD6468134302C712E6B5A",
   "status": "frozen_for_living_system_evaluation",
-  "notes": "Checkpoint was produced locally by the repository training path after adding persistent tensor memory, private internal tokens, richer body dynamics, idle anti-repetition, and curriculum-growth support."
+  "notes": "Checkpoint was produced locally by the repository training path and refreshed for recurrent state-transition impulse inputs, liquid-time-constant residual dynamics, neural causal-program proposal heads, the local object/relation encoder, and reusable-base/fast-adaptation checkpoint metadata while preserving old learned weights and zero-compatible optional perception inputs.",
+  "parameter_count": 100930
 }

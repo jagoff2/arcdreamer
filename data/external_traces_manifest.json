@@ -23,7 +23,7 @@
     "sealed_official_arcagi3_used_for_training": false
   },
   "data_path": "data\\external_trace_tensors.npz",
-  "data_sha256": "AE718CF6FC7E725BF841D659C237D92F47224DEDD6FF8B254F1D15AA45D0BAB5",
+  "data_sha256": "4F0D8AE5F79537C9AA72F8FF26678014A7B5065FA0B2836A376590CC1FBCCAB6",
   "sample_records": [
     {
       "path": "data\\external_trace_samples.jsonl",
@@ -190,5 +190,5 @@
     "gymnasium_dev_policy": 724,
     "old_explorer_dev": 39
   },
-  "manifest_sha256": "B5399FC92DC6E20287514D87EE4F5224523265C19422AB966EFE7F0117996658"
+  "manifest_sha256": "2036FED0C30164239F546ABFA45CC438EFE559B2177BD0459BDB8D37658C9B55"
 }
