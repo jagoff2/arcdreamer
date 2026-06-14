@@ -1072,6 +1072,27 @@ def test_select_experiment_prioritizes_useful_control_family_over_unproductive_c
     assert memory.family_useful["move"] >= 1
 
 
+def test_select_experiment_prioritizes_planner_score_over_untried_undo_probe() -> None:
+    grid = np.zeros((8, 8), dtype=np.int64)
+    grid[2, 2] = 4
+    actions = ("1", "7")
+    observation = _obs_grid(0, grid, actions)
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    memory.start_attempt()
+    memory.last_transition_nontrivial = True
+    memory.phase_family_counts[(memory.discovery_phase, "move")] = 8
+    memory.phase_action_counts[(memory.discovery_phase, "1")] = 8
+
+    selected = memory.select_experiment(
+        observation,
+        actions,
+        scores={"1": 0.42, "7": 0.0},
+    )
+
+    assert selected is not None
+    assert selected.action == "1"
+
+
 def test_coordinate_equiv_class_collapses_raw_clicks_but_separates_component_cells() -> None:
     grid = np.zeros((8, 8), dtype=np.int64)
     grid[1:5, 1:5] = 5

@@ -858,10 +858,10 @@ class JEPAAttemptMemory:
         fallback_abstract_state = _abstract_frame_state_class(frame)
         if not fallback_abstract_state:
             fallback_abstract_state = _observation_key(observation)
-        candidates: list[tuple[tuple[float, float, float, float, int, float, int], Experiment]] = []
+        candidates: list[tuple[tuple[float, float, float, float, float, int, float, int], Experiment]] = []
         contact_by_coordinate_class: dict[
             str,
-            tuple[tuple[float, int], tuple[float, float, float, float, int, float, int], Experiment],
+            tuple[tuple[float, int], tuple[float, float, float, float, float, int, float, int], Experiment],
         ] = {}
         useful_family_total = int(sum(max(int(value), 0) for value in self.family_useful.values()))
         for legal_index, action in enumerate(legal):
@@ -891,6 +891,11 @@ class JEPAAttemptMemory:
             family_count = int(self.family_counts.get(family, 0))
             family_mean = self.family_values.get(family, 0.0) / max(family_count, 1)
             family_nuisance_rate = float(self.family_nuisance.get(family, 0)) / max(float(family_count), 1.0)
+            has_planner_support = bool(
+                action_score > 0.02
+                or int(self.action_useful.get(action, 0)) > 0
+                or (family in {"move", "object"} and family_useful > 0)
+            )
             if useful_family_total <= 0:
                 useful_family_priority = 0.0
             elif family_useful > 0:
@@ -901,6 +906,7 @@ class JEPAAttemptMemory:
                 useful_family_priority = 1.0
             candidate_key = (
                 useful_family_priority,
+                0.0 if has_planner_support else 1.0,
                 float(phase_family_count),
                 float(priority),
                 float(phase_action_count),
