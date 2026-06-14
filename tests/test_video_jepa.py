@@ -315,12 +315,13 @@ def test_attempt_memory_separates_visible_effect_from_failed_action() -> None:
     assert entry.effect_actions["down"] == 1
     assert entry.causal_hypotheses["no_effect_rate"] == 0.0
     assert entry.causal_hypotheses["visible_effect_rate"] == 1.0
-    assert entry.causal_hypotheses["useful_effect_rate"] == 1.0
-    assert entry.causal_hypotheses["nuisance_effect_rate"] == 0.0
-    assert entry.causal_hypotheses["controllability_effect_rate"] == 1.0
-    assert entry.causal_hypotheses["reachable_state_class_effect_rate"] == 1.0
-    assert entry.transition_graph_summary["useful_edges"] == 1
-    assert entry.transition_graph_summary["nuisance_edges"] == 0
+    assert entry.causal_hypotheses["useful_effect_rate"] == 0.0
+    assert entry.causal_hypotheses["nuisance_effect_rate"] == 1.0
+    assert entry.causal_hypotheses["instrumental_evidence_rate"] == 1.0
+    assert entry.causal_hypotheses["controllability_effect_rate"] == 0.0
+    assert entry.causal_hypotheses["reachable_state_class_effect_rate"] == 0.0
+    assert entry.transition_graph_summary["useful_edges"] == 0
+    assert entry.transition_graph_summary["nuisance_edges"] == 1
     assert memory.score_action("down") == 0.0
     assert entry.next_attempt_plan.get("down", 0.0) == 0.0
 
@@ -341,8 +342,10 @@ def test_scoreless_visible_action_return_penalizes_exact_repeat() -> None:
     scores = memory.plan_scores_for_observation(_obs_grid(20, np.zeros((8, 8), dtype=np.int64), actions))
 
     assert entry.transition_graph_summary["observed_actions"] == 1
-    assert entry.transition_graph_summary["useful_edges"] >= 1
-    assert memory.action_useful["4"] >= 1
+    assert entry.transition_graph_summary["useful_edges"] == 0
+    assert entry.transition_graph_summary["nuisance_edges"] >= 1
+    assert entry.causal_hypotheses["instrumental_evidence_rate"] > 0.0
+    assert memory.action_useful.get("4", 0) == 0
     assert scores["4"] < scores["1"]
 
 
@@ -497,9 +500,11 @@ def test_contact_family_suppresses_earlier_after_public_control_evidence() -> No
     memory = JEPAAttemptMemory(use_jepa_tokens=False)
     before_grid = np.zeros((8, 8), dtype=np.int64)
     before_grid[2, 2] = 4
+    before_grid[2, 5] = 7
     after_grid = np.zeros((8, 8), dtype=np.int64)
     after_grid[2, 3] = 4
-    actions = ("1", "click:7:7")
+    after_grid[2, 5] = 7
+    actions = ("right", "click:7:7")
     before = _obs_grid(0, before_grid, actions)
     after = _obs_grid(1, after_grid, actions)
     no_effect = ArcAGI3StepResult(after, -0.001, False, False, {"events": ["no_effect"]})
@@ -510,12 +515,12 @@ def test_contact_family_suppresses_earlier_after_public_control_evidence() -> No
 
     memory.observe_live_transition(
         before,
-        "1",
+        "right",
         ArcAGI3StepResult(after, -0.001, False, False, {"events": ["move"]}),
     )
 
     assert memory.public_no_effect_suppresses_action("click:7:7") is True
-    assert memory.public_no_effect_suppresses_action("1") is False
+    assert memory.public_no_effect_suppresses_action("right") is False
 
 
 def test_transition_graph_planner_credits_delayed_public_event_predecessor() -> None:
@@ -555,7 +560,23 @@ def test_object_causal_hypothesis_detects_public_movement() -> None:
     assert memory.summary()["object_memory"]["observed_colors"] == 1
 
 
-def test_public_movement_creates_controllability_usefulness_without_progress() -> None:
+def test_goal_predicate_generator_populates_progress_hypothesis_bank() -> None:
+    grid = np.zeros((8, 8), dtype=np.int64)
+    grid[2, 2] = 4
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    observation = _obs_grid(0, grid, ("right", "left", "wait"))
+
+    predicates = memory.goal_predicates_for_observation(observation)
+    summary = memory.summary()["progress_hypothesis_bank"]
+
+    assert 20 <= len(predicates) <= 200
+    assert summary["predicate_count"] >= 20
+    assert any(predicate["type"] == "reach_component" for predicate in predicates)
+    assert any(predicate["type"] == "align_axis_bucket" for predicate in predicates)
+    assert "goal_predicate_generator" in memory.summary()["planner_chain"]
+
+
+def test_bare_public_movement_is_instrumental_without_goal_predicate_progress() -> None:
     before_grid = np.zeros((8, 8), dtype=np.int64)
     before_grid[2, 2] = 4
     after_grid = np.zeros((8, 8), dtype=np.int64)
@@ -572,26 +593,64 @@ def test_public_movement_creates_controllability_usefulness_without_progress() -
     summary = memory.transition_graph_summary()
     recent = memory.summary()["experiment_protocol"]["recent_results"][-1]
 
-    assert summary["useful_edges"] == 1
-    assert summary["nuisance_edges"] == 0
-    assert recent["classification"] == "controllability"
-    assert recent["posthoc_useful"] is True
+    assert summary["useful_edges"] == 0
+    assert summary["nuisance_edges"] == 1
+    assert recent["classification"] == "instrumental"
+    assert recent["posthoc_useful"] is False
+    assert recent["posthoc_instrumental"] is True
     assert recent["retired"] is False
 
 
-def test_public_controllability_scores_above_unproven_contact_without_progress() -> None:
+def test_goal_attached_public_movement_creates_usefulness_without_reward_progress() -> None:
     before_grid = np.zeros((8, 8), dtype=np.int64)
     before_grid[2, 2] = 4
+    before_grid[2, 5] = 7
     after_grid = np.zeros((8, 8), dtype=np.int64)
     after_grid[2, 3] = 4
-    actions = ("1", "2", "click:16:16")
+    after_grid[2, 5] = 7
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    memory.start_attempt()
+    before = _obs_grid(0, before_grid, ("right", "left", "wait"))
+    after = _obs_grid(1, after_grid, ("right", "left", "wait"))
+    experiment = memory.experiment_for_action(before, "right")
+
+    assert experiment is not None
+    assert any(item.startswith("goal:") for item in experiment.hypothesis_ids)
+    memory.begin_experiment(experiment)
+    label = memory.observe_live_transition(before, "right", ArcAGI3StepResult(after, -0.001, False, False, {"events": ["move"]}))
+    summary = memory.summary()
+    recent = summary["experiment_protocol"]["recent_results"][-1]
+
+    assert label is not None
+    assert label.progress_effect is False
+    assert label.useful_effect is True
+    assert label.instrumental_evidence is False
+    assert label.candidate_goal_reachability_improved > 0.0
+    assert label.goal_entropy_drop > 0.0
+    assert label.attached_goal_predicates
+    assert summary["transition_graph"]["useful_edges"] == 1
+    assert summary["progress_hypothesis_bank"]["supported_predicate_count"] >= 1
+    assert recent["classification"] == "controllability"
+    assert recent["posthoc_useful"] is True
+    assert recent["posthoc_goal_reachability_delta"] > 0.0
+    assert recent["attached_goal_predicates"]
+
+
+def test_goal_predicate_scores_public_control_above_unproven_contact_without_reward_progress() -> None:
+    before_grid = np.zeros((8, 8), dtype=np.int64)
+    before_grid[2, 2] = 4
+    before_grid[2, 5] = 7
+    after_grid = np.zeros((8, 8), dtype=np.int64)
+    after_grid[2, 3] = 4
+    after_grid[2, 5] = 7
+    actions = ("right", "left", "click:16:16")
     memory = JEPAAttemptMemory(use_jepa_tokens=False)
     before = _obs_grid(0, before_grid, actions)
     after = _obs_grid(1, after_grid, actions)
 
     memory.observe_live_transition(
         before,
-        "1",
+        "right",
         ArcAGI3StepResult(after, -0.001, False, False, {"events": ["move"]}),
     )
     scores = memory.plan_scores_for_observation(after)
@@ -600,17 +659,19 @@ def test_public_controllability_scores_above_unproven_contact_without_progress()
     assert summary["useful_edges"] == 1
     assert memory.last_transition_usefulness is not None
     assert memory.last_transition_usefulness.progress_effect is False
-    assert scores["1"] > 0.0
-    assert scores["2"] > scores["click:16:16"]
-    assert scores["1"] > scores["click:16:16"]
+    assert memory.last_transition_usefulness.attached_goal_predicates
+    assert scores["right"] > 0.0
+    assert scores["right"] > scores["click:16:16"]
 
 
 def test_live_public_controllability_updates_component_memory_before_ingest() -> None:
     before_grid = np.zeros((8, 8), dtype=np.int64)
     before_grid[2, 2] = 4
+    before_grid[2, 5] = 7
     after_grid = np.zeros((8, 8), dtype=np.int64)
     after_grid[2, 3] = 4
-    actions = ("1", "2", "click:16:16", "5")
+    after_grid[2, 5] = 7
+    actions = ("right", "left", "click:16:16", "5")
     memory = JEPAAttemptMemory(use_jepa_tokens=False)
     memory.start_attempt()
     before = _obs_grid(0, before_grid, actions)
@@ -618,7 +679,7 @@ def test_live_public_controllability_updates_component_memory_before_ingest() ->
 
     memory.observe_live_transition(
         before,
-        "1",
+        "right",
         ArcAGI3StepResult(after, -0.001, False, False, {"events": ["move"]}),
     )
     object_summary = memory.summary()["object_memory"]
@@ -632,16 +693,18 @@ def test_live_public_controllability_updates_component_memory_before_ingest() ->
 def test_live_public_controllability_activates_component_scoring_before_ingest() -> None:
     before_grid = np.zeros((8, 8), dtype=np.int64)
     before_grid[2, 2] = 4
+    before_grid[2, 5] = 7
     after_grid = np.zeros((8, 8), dtype=np.int64)
     after_grid[2, 3] = 4
-    actions = ("1", "2", "click:16:16", "5")
+    after_grid[2, 5] = 7
+    actions = ("right", "left", "click:16:16", "5")
     memory = JEPAAttemptMemory(use_jepa_tokens=False)
     memory.start_attempt()
     before = _obs_grid(0, before_grid, actions)
     after = _obs_grid(1, after_grid, actions)
     memory.observe_live_transition(
         before,
-        "1",
+        "right",
         ArcAGI3StepResult(after, -0.001, False, False, {"events": ["move"]}),
     )
 
@@ -651,8 +714,8 @@ def test_live_public_controllability_activates_component_scoring_before_ingest()
     assert summary["planner_activation"]["component_chain"]["score_hits"] >= 1
     assert summary["planner_activation"]["component_chain"]["activations"] >= 1
     assert summary["planner_activation"]["relation_delta"]["score_hits"] >= 1
-    assert scores["1"] > scores["click:16:16"]
-    assert scores["2"] > scores["click:16:16"]
+    assert scores["right"] > scores["click:16:16"]
+    assert scores["left"] > scores["click:16:16"]
 
 
 def test_object_region_memory_scores_contact_clicks_from_public_frame_diff() -> None:
@@ -965,7 +1028,7 @@ def test_no_experiment_repeated_after_nuisance_classification() -> None:
     before_grid = np.zeros((8, 8), dtype=np.int64)
     before_grid[2, 2] = 4
     after_grid = np.zeros((8, 8), dtype=np.int64)
-    after_grid[2, 3] = 4
+    after_grid[2, 2] = 5
     observation = _obs_grid(0, before_grid, ("1", "2", "wait"))
     after = _obs_grid(1, after_grid, ("1", "2", "wait"))
 
@@ -1046,15 +1109,17 @@ def test_select_experiment_prioritizes_useful_control_family_over_unproductive_c
     memory.start_attempt()
     before_grid = np.zeros((8, 8), dtype=np.int64)
     before_grid[2, 2] = 4
+    before_grid[2, 5] = 7
     after_grid = np.zeros((8, 8), dtype=np.int64)
     after_grid[2, 3] = 4
-    before = _obs_grid(0, before_grid, ("1", "click:8:8"))
-    after = _obs_grid(1, after_grid, ("1", "click:8:8"))
-    experiment = memory.experiment_for_action(before, "1")
+    after_grid[2, 5] = 7
+    before = _obs_grid(0, before_grid, ("right", "click:8:8"))
+    after = _obs_grid(1, after_grid, ("right", "click:8:8"))
+    experiment = memory.experiment_for_action(before, "right")
     assert experiment is not None
 
     memory.begin_experiment(experiment)
-    memory.observe_live_transition(before, "1", ArcAGI3StepResult(after, -0.001, False, False, {"events": ["move"]}))
+    memory.observe_live_transition(before, "right", ArcAGI3StepResult(after, -0.001, False, False, {"events": ["move"]}))
     no_effect = ArcAGI3StepResult(after, -0.001, False, False, {"events": ["no_effect"]})
     for index in range(8):
         memory.observe_live_transition(after, f"click:{index}:{index}", no_effect)
@@ -1063,12 +1128,12 @@ def test_select_experiment_prioritizes_useful_control_family_over_unproductive_c
 
     selected = memory.select_experiment(
         after,
-        ("1", "click:16:16"),
-        scores={"1": 0.0, "click:16:16": 0.0},
+        ("right", "click:16:16"),
+        scores={"right": 0.0, "click:16:16": 0.0},
     )
 
     assert selected is not None
-    assert selected.action == "1"
+    assert selected.action == "right"
     assert memory.family_useful["move"] >= 1
 
 
@@ -1353,7 +1418,11 @@ def test_run_attempt_counts_posthoc_public_usefulness_without_reward_progress(tm
                 "terminal_win": False,
                 "controllability_effect": True,
                 "reachable_state_class_effect": True,
-                "reasons": ["publicly_supported_controllability"],
+                "instrumental_evidence": False,
+                "goal_entropy_drop": 0.1,
+                "candidate_goal_reachability_improved": 0.2,
+                "attached_goal_predicates": ["g:test"],
+                "reasons": ["goal_attached_public_controllability"],
             }
 
         def finish_attempt(self, record) -> None:

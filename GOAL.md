@@ -1,241 +1,168 @@
-This result falsifies the previous “faithful enough” assessment in the only sense that matters: closed-loop ARC behavior.
+It still fails because the latest patches fixed **behavioral pathologies**, not **goal-forming intelligence**.
 
-A more precise verdict is:
+The updated tracker shows that the old loop failure was largely addressed: the hard anti-attractor gate now vetoes no-progress action cycles, state-action cycles, undo misuse, simple button loops, short local cycles, and coordinate oscillations. The latest one-game four-arm smoke has `loop_attempt_rate=0.0`, `button_loop_attempt_rate=0.0`, and `coordinate_loop_attempt_rate=0.0`. But the same row says it “still fails progress discovery.”
 
-**It implemented many of the architectural nouns, but it did not instantiate the causal-scientific control loop.** The tracker says the system has event journals, transition graphs, semantic memory, plastic memory, posteriors, macro policies, affordance maps, and persistent state. It also claims the selector uses value, information gain, action cost, risk, graph search, rollouts, and posterior-conditioned planning.   But your offline ARC run shows that those mechanisms are not functionally coupled into a competent experimenter.
+So the system no longer just spins. It now fails more quietly: it explores, records some controllability facts, and still does not discover what makes the level advance.
 
-The core failure is not “low model capacity.” It is **attractor control failure** plus **false causal credit**.
+The clearest diagnosis is in B17.6/B17.7. B17.6 says the agent now records public controllability as useful evidence, with `mean_useful_events_per_attempt=3.0`, `transition_graph_useful_edges=4`, and `zero_useful_attempt_rate=0.0`; it also reduced contact probes from 137 to 56. But it “still fails progress.” Immediately after that, B17.7 says the latest smoke has `progress_discovery_rate=0.0`, `progress_events=0`, `score=0.0`, `total_levels_completed=0/8`, and only terminal `step_limit` at the end.
 
-The agent is treating “something changed” as meaningful, when ARC requires distinguishing:
+That means the agent has learned **controllability without teleology**.
 
-[
-\text{visible effect} \neq \text{causally useful effect}
-]
-
-A button press, undo, movement, or coordinate click can change the frame while providing no evidence toward the game rule, no progress toward a level transition, and no reusable policy. Your traces show exactly that: valid actions, real observations, but almost no useful events. A mean useful-event rate of 0.0533 per attempt means the agent is mostly generating experience that cannot update the right posterior. With 54/75 attempts effectively wandering and 16/75 falling into button loops, the posterior and memory layers are being fed low-value trajectories.
-
-The tracker’s existing anti-loop guarantees are too weak. It says no-op/self-loop edges are penalized and unexplored actions are preferred “when model policy is comparable.”  That wording is the problem. Loop suppression cannot be a soft preference. In ARC-AGI-3, a 5,7,5,7 loop, repeated undo, repeated action 5, or a two-click oscillation must be a **hard control veto** unless the loop has proven score/level/goal utility.
-
-The JEPA/memory sidecar is also acting like an ungrounded action perturber. The tracker describes JEPA as local latent/video predictive self-supervision and says fast adaptation is separated from base weights.  But your run shows mean `changed_actions` around 192 against mean 104 frames. That is not useful adaptation; that is action destabilization. The sidecar should not be allowed to directly alter action selection until it has demonstrated positive causal value on the current game.
-
-I would patch this in four layers, in this order.
-
-First, add a **hard anti-attractor gate** above the selector. This gate must run after all value/JEPA/memory/planner scoring and before execution. It should veto actions, not merely penalize them.
-
-Define an action-event signature:
+It can identify that some actions visibly affect public state. It can classify those effects as more useful than random no-ops. But it still cannot infer:
 
 [
-\sigma_t = (
-\text{abstract_state_hash}_t,
-\text{action_class}_t,
-\text{coordinate_equiv_class}_t,
-\text{delta_class}_t,
-\text{score_delta}_t,
-\text{level_delta}_t
-)
+\text{What state relation constitutes progress?}
 ]
 
-Then detect periodicity over the last window:
+or:
 
 [
-\operatorname{cycle}(p)=
-\frac{1}{W-p}\sum_{i=t-W}^{t-p}
-\mathbf{1}[\sigma_i \approx \sigma_{i+p}]
+\text{Which controllable effect should be composed into a winning program?}
 ]
 
-For (p \in {1,2,3,4,5,6}), if cycle score exceeds a threshold and there has been no progress event in the window, every action continuing that cycle gets score (-\infty). This must catch action-only loops, state-action loops, undo loops, and coordinate-equivalence loops. Exact coordinate equality is insufficient; clicks should be grouped by object, component, region, salience bucket, and “empty/background” class.
+That is the central failure.
 
-For undo specifically:
+The second issue is that “useful event” was relaxed into a weaker signal. Public controllability is now counted as useful evidence, but the tracker explicitly distinguishes useful events from progress events. The public-controllability accounting pass says useful gates now pass because of public controllability evidence, while the same smoke still has `solve_rate=0.0`, `score=0.0`, `total_levels_completed=0/8`, `progress_discovery_rate=0.0`, and `progress_events=0`.
 
-```python
-if action == 7:
-    allow_only_if = (
-        last_transition_was_harmful
-        or current_state_is_dead_end
-        or undo_is_part_of_verified_progress_macro
-        or undo_is_needed_to_test_reversibility_once
-    )
-    if not allow_only_if:
-        veto(action)
+So “useful” currently means something like:
+
+[
+\text{I learned an action can affect something}
+]
+
+not:
+
+[
+\text{I learned something that moves me toward solving the game}
+]
+
+That distinction is fatal for ARC-AGI-3. The benchmark is not satisfied by controllability discovery; it requires discovering latent task semantics. A movable object, changing color, or reachable state class is only valuable if it constrains a hypothesis about the goal.
+
+The third issue is that the planner is implemented but not validated as an ARC planner. The tracker downgraded key planning rows to `Implemented`, not `Verified`, because current offline ARC behavioral gates still fail. This applies to experimental action selection, internal simulation, solution-vs-experiment search, graph-anchored planning, and posterior-conditioned search.
+
+That says the code contains the planner machinery, but the machinery is not producing competent ARC behavior. It is planning over weak or misaligned beliefs.
+
+The fourth issue is that the system’s internal tests are still mostly proving component existence, not closed-loop abstraction. The tracker reports hundreds of passing tests, including hard anti-attractor gating, usefulness credit, explicit experiment protocol, sidecar quarantine, behavioral gates, experiment retirement, score-aware contact representatives, component-local contact classes, public-evidence-gated usefulness, and public-controllability accounting.  But those tests coexist with offline ARC failure. That means the test suite has become good at checking that each part exists and handles known pathologies; it still does not force the integrated agent to discover a novel level rule.
+
+The fifth issue is distribution mismatch. The regular `src.evaluate` path passes with strong-looking metrics: `goal_action_success=0.8828`, delayed memory 1.0, object permanence 1.0, provenance 0.9997, grounded language 0.9953, and 10,000 unbroken runtime ticks.  But the ARC offline path still fails. That implies the training/evaluation world is not hard enough in the right way. The agent has learned the local training contract, not the ARC-AGI-3 contract.
+
+This is not surprising from the tracker itself. The file says it is a progress ledger, not the authoritative `GOAL.md`, and `Verified` means backed by tests, reports, or commands—not by official ARC-AGI-3 success.
+
+The sixth issue is that JEPA is no longer the main culprit. Earlier, JEPA/memory was actively perturbing actions. The updated tracker says the sidecar is now read-only/propose-only by default, with 138 active proposals, 0 approved, 0 executed, 0 nonzero applied-bias steps, and `jepa_direct_action=false`.  That is good containment, but it also means the agent is now mostly relying on the base symbolic/experimental controller. The failure has moved from “sidecar destabilizes policy” to “core controller cannot discover progress.”
+
+The seventh issue is experiment selection is still too shallow. The tracker says explicit experiments are recorded with hypotheses, predicted outcomes, useful-if criteria, repeat bounds, retirement rules, and coordinate equivalence classes.  But a prior smoke had 98 active experiments, 96 executed experiments, 23 hard-veto replacements, 41 retired experiment classes, and still `progress_discovery_rate=0.0`.  That means it is performing experiment-shaped actions, but the experiments are not aimed at the right latent variables.
+
+The short version is:
+
+[
+\text{anti-loop} ;\checkmark
+]
+
+[
+\text{visible-effect/usefulness separation} ;\checkmark
+]
+
+[
+\text{JEPA quarantine} ;\checkmark
+]
+
+[
+\text{bounded experiment protocol} ;\checkmark
+]
+
+[
+\text{goal discovery} ;\times
+]
+
+[
+\text{progress-bearing abstraction} ;\times
+]
+
+[
+\text{macro creation from actual success} ;\times
+]
+
+It still fails because there is no strong mechanism forcing the agent to infer **goal predicates** from sparse public structure before, or while, it explores.
+
+Right now the controller appears to ask:
+
+“What action gives me a non-noisy, non-looping, publicly observable causal effect?”
+
+It needs to ask:
+
+“What hidden objective class would make this board meaningful, and what minimum intervention would discriminate between those objective classes?”
+
+That is a different inference problem.
+
+The fix is not more anti-loop logic. It needs a new layer above controllability: **goal-hypothesis search over candidate terminal predicates**.
+
+For every frame, the agent should generate 20–200 candidate latent objectives before selecting actions. Examples:
+
+[
+\text{move controllable object to target-like object}
+]
+
+[
+\text{make two components match in color/shape/count}
+]
+
+[
+\text{clear all objects of a class}
+]
+
+[
+\text{activate all switches}
+]
+
+[
+\text{align object with repeated pattern anomaly}
+]
+
+[
+\text{transform object until it equals exemplar}
+]
+
+[
+\text{reach cell adjacent to marker}
+]
+
+[
+\text{make count/height/area equal across groups}
+]
+
+Then each experiment must be scored by expected reduction in uncertainty over those **goal predicates**, not just action-effect hypotheses.
+
+A transition like “object moved left” should not get much credit by itself. It should get credit only if it updates something like:
+
+[
+Q(g=\text{reach target}) \quad\text{or}\quad Q(g=\text{align with marker})
+]
+
+or if it changes the feasibility frontier for a candidate goal.
+
+The next implementation target should be:
+
+```text
+progress_hypothesis_bank
+goal_predicate_generator
+counterfactual_goal_progress_score
+goal_entropy_reduction
+experiment_value = action_effect_info + goal_predicate_info + reachability_to_candidate_goal
 ```
 
-The repeated `5,7,5,7` loop means undo is currently treated as safe because it is reversible. That is backwards. Reversibility lowers risk for one probe; it does not create value.
-
-Second, replace “visible effect” credit with **usefulness credit**.
-
-Every transition should receive two separate labels:
+Then change useful-event accounting again:
 
 ```python
-visible_effect = changed_cells > 0 or object_moved or color_changed
-
 useful_effect = (
-    score_delta > 0
-    or level_changed
+    progress_event
+    or level_delta
+    or score_delta
     or terminal_win
-    or reduces_goal_posterior_entropy
-    or increases_progress_value_of_state
-    or eliminates a live hypothesis
-    or opens a new reachable state class
-    or creates a reusable controllability fact
+    or goal_posterior_entropy_drop > threshold
+    or candidate_goal_reachability_improved > threshold
 )
 ```
 
-The selector should not reward visible effect directly after the first probing phase. Visible changes are useful only if they update the causal model or improve reachability. A frame delta with no progress, no hypothesis discrimination, and no new controllability fact should be labeled `nuisance_effect`.
+Public controllability should be downgraded to `instrumental_evidence`, not full `useful_effect`, unless it attaches to a live goal predicate.
 
-The revised objective should look more like this:
-
-[
-S(a)=
-G_{\text{hard}}(a)
-\left[
-V_{\text{progress}}(a)
-+\alpha I_{\text{discriminating}}(a)
-+\beta N_{\text{state-class}}(a)
-+\gamma C_{\text{controllability}}(a)
--\lambda L_{\text{loop}}(a)
--\mu R_{\text{nuisance}}(a)
--\nu C_{\text{action}}(a)
-\right]
-]
-
-where (G_{\text{hard}}(a)=0) for loop-continuing actions, exhausted coordinate classes, unsupported sidecar overrides, or repeated visible-but-useless effects.
-
-Third, put the agent into an explicit **experiment protocol** at the start of every game/level. Right now it appears to be choosing actions from a weighted blend of policy, JEPA, memory, posterior, and graph heuristics. That is too unconstrained under sparse reward.
-
-For the first phase, no learned policy should dominate. The agent should perform bounded causal spectroscopy:
-
-1. Test each simple action at most once or twice per abstract state class.
-2. Test undo once only after a nontrivial transition.
-3. For coordinate action, test sparse candidates by equivalence class, not raw coordinates.
-4. Record predicted outcome before acting.
-5. After acting, classify the result as progress, discriminating evidence, controllability evidence, nuisance, no-op, or loop.
-6. Retire an action/equivalence class after repeated nuisance/no-op outcomes.
-
-A real experiment object should have this structure:
-
-```python
-Experiment(
-    hypothesis_ids=[...],
-    action=...,
-    predicted_outcomes={
-        "h1": delta_pattern_1,
-        "h2": delta_pattern_2,
-        "h3": no_change,
-    },
-    useful_if=[
-        "score_delta > 0",
-        "level_changed",
-        "posterior_entropy_drops",
-        "new_controllable_object_found",
-        "new_reachable_state_class_found",
-    ],
-    max_repeats=1,
-    retire_if="nuisance_or_noop_without_entropy_drop"
-)
-```
-
-If an action has no predicted discriminating outcome, it is not an experiment. It is wandering.
-
-Fourth, demote JEPA/memory from actuator to proposer.
-
-For now, the sidecar should not be allowed to directly override selected actions. It should produce candidate futures, salience maps, and action priors, but the symbolic causal controller should approve or reject them. Add an override ledger:
-
-```python
-sidecar_override = {
-    "proposed_action": a_jepa,
-    "base_action": a_base,
-    "approved": bool,
-    "reason": "...",
-    "posthoc_useful": bool,
-    "posthoc_progress": bool,
-    "posthoc_entropy_drop": float,
-}
-```
-
-Then impose this rule:
-
-```python
-if sidecar_recent_overrides > threshold and sidecar_recent_usefulness <= baseline:
-    sidecar_action_weight *= 0.1
-    sidecar_can_override = False
-```
-
-Given your `changed_actions` signal, I would initially run JEPA in read-only mode:
-
-```text
---jepa-action-mode propose_only
---jepa-max-action-bias 0.05
---disable-jepa-direct-override
-```
-
-The sidecar can regain influence only when it improves useful-event rate or progress discovery over a base selector ablation.
-
-The test suite also needs to be changed. The tracker currently says progress value backup, anti-loop behavior, graph planning, and posterior planning are verified.   Your offline run shows those tests are not measuring the relevant failure modes. I would downgrade the relevant tracker rows from `Verified` to something like `Implemented but failed external ARC validation` for B17.2, B17.6, B17.7, L11.1–L11.5, V14.8, K16.2, and the JEPA/fast-adaptation action path.
-
-Add regression tests directly from the failed traces:
-
-```text
-test_no_5757_undo_cycle_sb26
-test_no_repeated_7_without_harm_or_deadend_su15
-test_no_repeated_5_without_useful_effect_g50t
-test_no_coordinate_two_click_oscillation_lf52
-test_visible_delta_without_progress_is_not_macro
-test_jepa_override_requires_posthoc_usefulness
-test_action_selection_reports_experiment_prediction_before_acting
-test_no_experiment_repeated_after_nuisance_classification
-```
-
-The new offline gates should be behavioral, not architectural:
-
-```text
-loop_attempt_rate <= 0.05
-button_loop_attempt_rate <= 0.02
-coordinate_loop_attempt_rate <= 0.02
-mean_useful_events_per_attempt >= 0.25 initially, then raise
-attempts_with_zero_useful_events <= 25%
-sidecar_override_usefulness >= base_usefulness
-sidecar_changed_action_ratio <= capped threshold unless useful
-progress_discovery_rate > base random/exhaustive baseline
-```
-
-A minimal patch sequence would be:
-
-```text
-1. Run ablations:
-   base_only
-   base_plus_hard_loop_gate
-   base_plus_hard_loop_gate_jepa_readonly
-   full_jepa_plus_attempt_memory
-
-2. Implement hard loop veto:
-   action n-gram cycles
-   state-action cycles
-   undo cycles
-   coordinate-equivalence cycles
-
-3. Add usefulness classifier:
-   progress
-   hypothesis entropy drop
-   controllability evidence
-   reachable-state novelty
-   nuisance
-   no-op
-
-4. Force experiment protocol before policy exploitation.
-
-5. Make JEPA propose-only until it earns causal credit.
-
-6. Add failed-game trace fixtures as permanent regression tests.
-
-7. Re-run the exact same 25-game offline command and compare:
-   solved games
-   individual levels completed
-   useful events per attempt
-   zero-useful attempts
-   loop attempts
-   JEPA override usefulness
-```
-
-The expected first improvement is not necessarily solved games. The first valid sign is that 54/75 zero-useful attempts collapses sharply, loops nearly disappear, and progress events become dense enough for posterior and macro mechanisms to learn. Only after that does it make sense to judge the world model or memory layer.
-
-So: **your bottom line is correct.** The system does not yet convert sparse observations into causal rules, subgoals, or reusable action programs. The fix is not another latent model. The fix is a stricter experiment controller with hard anti-loop dynamics, causal-usefulness credit, and sidecar action quarantine.
+The current failure is therefore not mysterious. The agent has crossed from “bad motor behavior” into “ungrounded exploration.” It can now avoid loops and collect some causal facts, but it has not learned how to turn those facts into a theory of what the game wants.

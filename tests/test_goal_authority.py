@@ -16,11 +16,14 @@ def test_goal_file_exists_and_has_current_arc_failure_acceptance_content() -> No
     assert GOAL_PATH.exists(), f"Missing {GOAL_PATH}"
     content = _read_text(GOAL_PATH)
 
-    assert "closed-loop ARC behavior" in content
-    assert "hard anti-attractor gate" in content
-    assert "visible_effect" in content
+    assert "goal-forming intelligence" in content
+    assert "goal-hypothesis search over candidate terminal predicates" in content
+    assert "progress_hypothesis_bank" in content
+    assert "goal_predicate_generator" in content
+    assert "counterfactual_goal_progress_score" in content
+    assert "goal_entropy_reduction" in content
     assert "useful_effect" in content
-    assert "JEPA" in content
+    assert "instrumental_evidence" in content
 
 
 def test_tracker_declares_goal_markdown_as_source_of_truth() -> None:

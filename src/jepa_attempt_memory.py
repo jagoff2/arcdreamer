@@ -44,6 +44,10 @@ PLANNER_DIAGNOSTIC_EVENTS = (
 )
 RELATION_SCORING_ACTION_LIMIT = 96
 EXPERIMENT_CLASS_RETIRE_FAILURES = 2
+MAX_GOAL_PREDICATES_PER_FRAME = 200
+GOAL_SCORING_PREDICATE_LIMIT = 64
+GOAL_REACHABILITY_THRESHOLD = 0.05
+GOAL_ENTROPY_DROP_THRESHOLD = 0.02
 
 
 @dataclass(frozen=True)
@@ -56,6 +60,10 @@ class TransitionUsefulness:
     terminal_win: bool
     controllability_effect: bool
     reachable_state_class_effect: bool
+    instrumental_evidence: bool
+    goal_entropy_drop: float
+    candidate_goal_reachability_improved: float
+    attached_goal_predicates: tuple[str, ...]
     reasons: tuple[str, ...]
 
     def to_dict(self) -> dict[str, Any]:
@@ -68,6 +76,10 @@ class TransitionUsefulness:
             "terminal_win": self.terminal_win,
             "controllability_effect": self.controllability_effect,
             "reachable_state_class_effect": self.reachable_state_class_effect,
+            "instrumental_evidence": self.instrumental_evidence,
+            "goal_entropy_drop": self.goal_entropy_drop,
+            "candidate_goal_reachability_improved": self.candidate_goal_reachability_improved,
+            "attached_goal_predicates": list(self.attached_goal_predicates),
             "reasons": list(self.reasons),
         }
 
@@ -219,6 +231,12 @@ class JEPAAttemptMemory:
         self.last_transition_usefulness: TransitionUsefulness | None = None
         self.undo_probe_state_classes: set[str] = set()
         self.planner_activation_stats = _empty_planner_activation_stats()
+        self.progress_hypothesis_bank: dict[str, dict[str, Any]] = {}
+        self.goal_predicate_score_hits = 0
+        self.goal_predicate_score_activations = 0
+        self.goal_reachability_improvements = 0
+        self.goal_entropy_reduction_total = 0.0
+        self.last_goal_transition_evidence: dict[str, Any] = {}
 
     def reset(self) -> None:
         self.entries.clear()
@@ -308,6 +326,12 @@ class JEPAAttemptMemory:
         self.last_transition_usefulness = None
         self.undo_probe_state_classes.clear()
         self.planner_activation_stats = _empty_planner_activation_stats()
+        self.progress_hypothesis_bank.clear()
+        self.goal_predicate_score_hits = 0
+        self.goal_predicate_score_activations = 0
+        self.goal_reachability_improvements = 0
+        self.goal_entropy_reduction_total = 0.0
+        self.last_goal_transition_evidence = {}
 
     def ingest_attempt(self, record: AttemptRecord, model: VideoJEPA | None = None) -> AttemptMemoryEntry:
         failed: dict[str, int] = {}
@@ -322,6 +346,7 @@ class JEPAAttemptMemory:
         nuisance_effect = 0
         controllability_effect = 0
         reachable_state_class_effect = 0
+        instrumental_evidence = 0
         positive = 0
         attempt_family_counts: dict[str, int] = {}
         for index, step in enumerate(record.steps):
@@ -338,6 +363,12 @@ class JEPAAttemptMemory:
             next_state_class = _abstract_frame_state_class(after_frame) if after_frame is not None else ""
             state_class_seen = bool(next_state_class and next_state_class in self.reachable_state_classes)
             public_controllability = _public_controllability_evidence(step.frame, after_frame, action)
+            goal_evidence = self._update_goal_hypotheses_from_transition(
+                step.frame,
+                after_frame,
+                action,
+                public_controllability_evidence=public_controllability,
+            )
             label = _classify_transition_usefulness(
                 visible_effect=changed,
                 events=step.event_delta,
@@ -351,6 +382,9 @@ class JEPAAttemptMemory:
                 public_controllability_evidence=public_controllability,
                 public_reachable_state_evidence=bool(public_controllability and not state_class_seen),
                 state_class_seen=state_class_seen,
+                goal_entropy_drop=float(goal_evidence.get("goal_entropy_drop", 0.0)),
+                candidate_goal_reachability_improved=float(goal_evidence.get("reachability_delta", 0.0)),
+                attached_goal_predicates=tuple(goal_evidence.get("attached_goal_predicates", ())),
             )
             outcome_value = _transition_credit(
                 useful=label,
@@ -375,6 +409,10 @@ class JEPAAttemptMemory:
                     "progress_effect": label.progress_effect,
                     "controllability_effect": label.controllability_effect,
                     "reachable_state_class_effect": label.reachable_state_class_effect,
+                    "instrumental_evidence": label.instrumental_evidence,
+                    "goal_entropy_drop": label.goal_entropy_drop,
+                    "candidate_goal_reachability_improved": label.candidate_goal_reachability_improved,
+                    "attached_goal_predicates": list(label.attached_goal_predicates),
                     "usefulness_reasons": list(label.reasons),
                 }
             )
@@ -395,6 +433,8 @@ class JEPAAttemptMemory:
                 controllability_effect += 1
             if label.reachable_state_class_effect:
                 reachable_state_class_effect += 1
+            if label.instrumental_evidence:
+                instrumental_evidence += 1
             if label.visible_effect and not label.no_effect:
                 effects[action] = effects.get(action, 0) + 1
         object_hypotheses = _object_hypotheses_from_record(record, transition_outcomes)
@@ -438,6 +478,7 @@ class JEPAAttemptMemory:
             "nuisance_effect_rate": float(nuisance_effect / total),
             "controllability_effect_rate": float(controllability_effect / total),
             "reachable_state_class_effect_rate": float(reachable_state_class_effect / total),
+            "instrumental_evidence_rate": float(instrumental_evidence / total),
             "positive_event_rate": float(positive / total),
             "terminal_seen": float(any(step.terminal for step in record.steps)),
             "max_repeated_action_fraction": float(max(repeated.values(), default=0.0)),
@@ -511,6 +552,10 @@ class JEPAAttemptMemory:
                 "sequence_contradictions": float(object_summary["sequence_contradictions"]),
                 "sequence_candidates_added": float(sequence_candidates_added),
                 "sequence_candidate_count": float(object_summary["sequence_candidate_count"]),
+                "goal_predicate_count": float(self.progress_hypothesis_summary()["predicate_count"]),
+                "goal_supported_predicate_count": float(self.progress_hypothesis_summary()["supported_predicate_count"]),
+                "goal_reachability_improvements": float(self.progress_hypothesis_summary()["reachability_improvements"]),
+                "goal_entropy_reduction_total": float(self.progress_hypothesis_summary()["goal_entropy_reduction_total"]),
             }
         )
         for planner_name, stats in planner_stats.items():
@@ -607,6 +652,65 @@ class JEPAAttemptMemory:
             for kind in PLANNER_DIAGNOSTIC_KINDS
         }
 
+    def goal_predicates_for_observation(self, observation: Any) -> list[dict[str, Any]]:
+        frame = _public_frame(observation)
+        components = _frame_components(frame) if frame is not None and frame.size else None
+        return [dict(item) for item in self._ensure_goal_predicates(frame, components)]
+
+    def counterfactual_goal_progress_score(self, observation: Any, action: str) -> dict[str, Any]:
+        frame = _public_frame(observation)
+        components = _frame_components(frame) if frame is not None and frame.size else None
+        predicates = self._ensure_goal_predicates(frame, components)
+        score, attached = _counterfactual_goal_progress_score(
+            str(action),
+            frame,
+            components=components,
+            predicates=predicates,
+            preferred_component_values=self._positive_component_values(),
+            return_attached=True,
+        )
+        return {
+            "score": float(score),
+            "attached_goal_predicates": list(attached),
+            "predicate_count": len(predicates),
+        }
+
+    def progress_hypothesis_summary(self) -> dict[str, Any]:
+        supported = [
+            item
+            for item in self.progress_hypothesis_bank.values()
+            if int(item.get("support", 0)) > 0 or float(item.get("reachability_delta", 0.0)) > 0.0
+        ]
+        active = sorted(
+            self.progress_hypothesis_bank.values(),
+            key=lambda item: (
+                float(item.get("posterior_score", 0.0)),
+                float(item.get("reachability_delta", 0.0)),
+                str(item.get("id", "")),
+            ),
+            reverse=True,
+        )[:8]
+        return {
+            "schema": "progress_hypothesis_bank_v1",
+            "predicate_count": int(len(self.progress_hypothesis_bank)),
+            "supported_predicate_count": int(len(supported)),
+            "goal_predicate_score_hits": int(self.goal_predicate_score_hits),
+            "goal_predicate_score_activations": int(self.goal_predicate_score_activations),
+            "reachability_improvements": int(self.goal_reachability_improvements),
+            "goal_entropy_reduction_total": float(round(self.goal_entropy_reduction_total, 6)),
+            "last_transition_evidence": dict(self.last_goal_transition_evidence),
+            "top_predicates": [
+                {
+                    "id": str(item.get("id", "")),
+                    "type": str(item.get("type", "")),
+                    "posterior_score": float(round(float(item.get("posterior_score", 0.0)), 6)),
+                    "support": int(item.get("support", 0)),
+                    "reachability_delta": float(round(float(item.get("reachability_delta", 0.0)), 6)),
+                }
+                for item in active
+            ],
+        }
+
     def score_action(self, action: str) -> float:
         if not self.entries:
             return 0.0
@@ -637,6 +741,7 @@ class JEPAAttemptMemory:
                     _action_target_cell(action, frame),
                     components,
                 )
+        goal_predicates = self._ensure_goal_predicates(frame, components)
         scores = self.plan_scores(legal_actions)
         seen_here = self.state_seen_actions.get(obs_key, set()) if obs_key else set()
         phase_seen_here = self.phase_state_seen_actions.get((self.discovery_phase, obs_key), set()) if obs_key else set()
@@ -708,6 +813,17 @@ class JEPAAttemptMemory:
                     if relation_delta_score > 0.0:
                         self._record_planner_event("component_relation_delta_event_miner", "activations")
                         self._record_planner_event("component_relation_delta_event_miner", "legal_resolutions")
+            goal_score = self._counterfactual_goal_progress_score(
+                action,
+                frame,
+                components=components,
+                predicates=goal_predicates,
+            )
+            scores[action] += goal_score
+            if abs(goal_score) > 1.0e-9:
+                self.goal_predicate_score_hits += 1
+                if goal_score > 0.0:
+                    self.goal_predicate_score_activations += 1
         chain_plan = self._component_chain_plan(frame, legal_actions, components)
         relation_chain_plan = self._component_relation_chain_plan(frame, relation_actions, components)
         selected_plan = chain_plan
@@ -739,7 +855,13 @@ class JEPAAttemptMemory:
                     self.action_useful.get(action, 0) > 0
                     or (family in {"move", "object"} and self.family_useful.get(family, 0) > 0)
                 )
-                upper_bound = 0.45 if has_public_control else 0.0
+                goal_support = self._counterfactual_goal_progress_score(
+                    action,
+                    frame,
+                    components=components,
+                    predicates=goal_predicates,
+                )
+                upper_bound = 0.45 if has_public_control else (0.34 if goal_support > 0.0 else 0.0)
                 capped_scores[action] = min(float(score), upper_bound)
             scores = capped_scores
         lower_bound = -1.75 if not has_goal_evidence else -0.75
@@ -757,6 +879,110 @@ class JEPAAttemptMemory:
             or self.component_relation_delta_goal_values
             or any(entry.event_candidates for entry in self.entries)
         )
+
+    def _ensure_goal_predicates(
+        self,
+        frame: np.ndarray | None,
+        components: list[_FrameComponent] | None = None,
+    ) -> list[dict[str, Any]]:
+        predicates = _goal_predicate_generator(frame, components)
+        for predicate in predicates:
+            predicate_id = str(predicate.get("id", ""))
+            if not predicate_id:
+                continue
+            current = self.progress_hypothesis_bank.get(predicate_id)
+            if current is None:
+                current = dict(predicate)
+                current["observations"] = 0
+                current["support"] = 0
+                current["posterior_score"] = 0.0
+                current["reachability_delta"] = 0.0
+                self.progress_hypothesis_bank[predicate_id] = current
+            current["observations"] = int(current.get("observations", 0)) + 1
+            current["last_seen_type"] = str(predicate.get("type", ""))
+        if len(self.progress_hypothesis_bank) > MAX_GOAL_PREDICATES_PER_FRAME * 4:
+            ranked = sorted(
+                self.progress_hypothesis_bank.items(),
+                key=lambda item: (
+                    float(item[1].get("posterior_score", 0.0)),
+                    int(item[1].get("support", 0)),
+                    int(item[1].get("observations", 0)),
+                    item[0],
+                ),
+                reverse=True,
+            )
+            self.progress_hypothesis_bank = dict(ranked[: MAX_GOAL_PREDICATES_PER_FRAME * 4])
+        return predicates
+
+    def _counterfactual_goal_progress_score(
+        self,
+        action: str,
+        frame: np.ndarray | None,
+        *,
+        components: list[_FrameComponent] | None = None,
+        predicates: list[dict[str, Any]] | None = None,
+    ) -> float:
+        score, _attached = _counterfactual_goal_progress_score(
+            str(action),
+            frame,
+            components=components,
+            predicates=predicates,
+            preferred_component_values=self._positive_component_values(),
+            return_attached=True,
+        )
+        return float(score)
+
+    def _positive_component_values(self) -> set[int]:
+        return {
+            int(value)
+            for value, count in self.component_value_counts.items()
+            if int(count) > 0 and float(self.component_value_scores.get(value, 0.0)) > 0.0
+        }
+
+    def _update_goal_hypotheses_from_transition(
+        self,
+        before: Any,
+        after: Any,
+        action: str,
+        *,
+        public_controllability_evidence: bool,
+    ) -> dict[str, Any]:
+        evidence = _goal_transition_evidence(before, after, action)
+        predicates = self._ensure_goal_predicates(
+            np.asarray(before, dtype=np.int64) if before is not None else None,
+            None,
+        )
+        predicate_count = max(len(predicates), int(evidence.get("predicate_count", 0)))
+        attached = [str(item) for item in evidence.get("attached_goal_predicates", []) if str(item)]
+        reachability_delta = float(evidence.get("reachability_delta", 0.0))
+        entropy_drop = float(evidence.get("goal_entropy_drop", 0.0))
+        if attached and (reachability_delta > 0.0 or entropy_drop > 0.0):
+            for predicate_id in attached:
+                item = self.progress_hypothesis_bank.get(predicate_id)
+                if item is None:
+                    item = {
+                        "id": predicate_id,
+                        "type": "transition_attached_goal",
+                        "observations": 0,
+                        "support": 0,
+                        "posterior_score": 0.0,
+                        "reachability_delta": 0.0,
+                    }
+                    self.progress_hypothesis_bank[predicate_id] = item
+                item["support"] = int(item.get("support", 0)) + 1
+                item["posterior_score"] = float(item.get("posterior_score", 0.0)) + reachability_delta + entropy_drop
+                item["reachability_delta"] = float(item.get("reachability_delta", 0.0)) + reachability_delta
+            self.goal_reachability_improvements += 1
+            self.goal_entropy_reduction_total += entropy_drop
+        result = {
+            "predicate_count": int(predicate_count),
+            "reachability_delta": float(reachability_delta),
+            "goal_entropy_drop": float(entropy_drop),
+            "attached_goal_predicates": attached[:8],
+            "instrumental_public_controllability": bool(public_controllability_evidence),
+        }
+        self.last_goal_transition_evidence = result
+        return result
 
     def action_distribution(self, legal_actions: tuple[str, ...] | list[str]) -> dict[str, float]:
         actions = [str(action) for action in legal_actions]
@@ -1019,17 +1245,27 @@ class JEPAAttemptMemory:
         action_class = _experiment_action_class(action)
         coordinate_class = _experiment_coordinate_equiv_class(action, frame)
         hypothesis_ids = _experiment_hypothesis_ids(action, frame)
+        predicates = self._ensure_goal_predicates(frame)
+        _goal_score, attached_goal_predicates = _counterfactual_goal_progress_score(
+            str(action),
+            frame,
+            predicates=predicates,
+            return_attached=True,
+        )
+        hypothesis_ids.extend(f"goal:{predicate_id}" for predicate_id in attached_goal_predicates[:6])
         if not hypothesis_ids:
             return None
         predicted_outcomes = _experiment_predicted_outcomes(action, family, coordinate_class)
+        for predicate_id in attached_goal_predicates[:4]:
+            predicted_outcomes[f"goal:{predicate_id}"] = "candidate_goal_reachability_improves"
         if len(set(predicted_outcomes.values())) < 2:
             return None
         useful_if = [
             "score_delta > 0",
             "level_changed",
             "posterior_entropy_drops",
-            "new_controllable_object_found",
-            "new_reachable_state_class_found",
+            "goal_posterior_entropy_drop > threshold",
+            "candidate_goal_reachability_improved > threshold",
         ]
         return Experiment(
             hypothesis_ids=hypothesis_ids,
@@ -1257,6 +1493,12 @@ class JEPAAttemptMemory:
             else True
         )
         public_controllability = _public_controllability_evidence(before, after, action)
+        goal_evidence = self._update_goal_hypotheses_from_transition(
+            before,
+            after,
+            action,
+            public_controllability_evidence=public_controllability,
+        )
         label = _classify_transition_usefulness(
             visible_effect=changed,
             events=events,
@@ -1270,6 +1512,9 @@ class JEPAAttemptMemory:
             public_controllability_evidence=public_controllability,
             public_reachable_state_evidence=bool(public_controllability and not state_class_seen),
             state_class_seen=state_class_seen,
+            goal_entropy_drop=float(goal_evidence.get("goal_entropy_drop", 0.0)),
+            candidate_goal_reachability_improved=float(goal_evidence.get("reachability_delta", 0.0)),
+            attached_goal_predicates=tuple(goal_evidence.get("attached_goal_predicates", ())),
         )
         self.last_transition_usefulness = label
         if after is not None and after.size:
@@ -1298,6 +1543,10 @@ class JEPAAttemptMemory:
                 "progress_effect": label.progress_effect,
                 "controllability_effect": label.controllability_effect,
                 "reachable_state_class_effect": label.reachable_state_class_effect,
+                "instrumental_evidence": label.instrumental_evidence,
+                "goal_entropy_drop": label.goal_entropy_drop,
+                "candidate_goal_reachability_improved": label.candidate_goal_reachability_improved,
+                "attached_goal_predicates": list(label.attached_goal_predicates),
                 "usefulness_reasons": list(label.reasons),
             }
             self._update_transition_graph([outcome])
@@ -1447,7 +1696,10 @@ class JEPAAttemptMemory:
             "classification": classification,
             "posthoc_useful": posthoc_useful,
             "posthoc_progress": posthoc_progress,
-            "posthoc_entropy_drop": 0.0,
+            "posthoc_entropy_drop": float(label.goal_entropy_drop),
+            "posthoc_goal_reachability_delta": float(label.candidate_goal_reachability_improved),
+            "posthoc_instrumental": bool(label.instrumental_evidence),
+            "attached_goal_predicates": list(label.attached_goal_predicates),
             "retired": bool(key in self.experiment_retired),
             "class_retired": bool(class_key in self.experiment_class_retired),
             "usefulness_reasons": list(label.reasons),
@@ -1495,11 +1747,15 @@ class JEPAAttemptMemory:
                 "component_relation_goal_chain_search",
                 "component_relation_delta_event_miner",
                 "relation_delta_sequence_planner",
+                "goal_predicate_generator",
+                "counterfactual_goal_progress_score",
+                "goal_entropy_reduction",
                 "targeted_next_attempt_experiment",
             ],
             "transition_graph": self.transition_graph_summary(),
             "object_memory": self.object_memory_summary(),
             "planner_activation": self.planner_activation_summary(),
+            "progress_hypothesis_bank": self.progress_hypothesis_summary(),
             "experiment_protocol": self.experiment_protocol_summary(),
             "jepa_evidence_state": [entry.jepa_planner_state for entry in self.entries[-3:]],
             "causal_substrate_active": any(entry.causal_substrate_active for entry in self.entries),
@@ -2463,17 +2719,27 @@ def _classify_transition_usefulness(
     public_controllability_evidence: bool = False,
     public_reachable_state_evidence: bool = False,
     state_class_seen: bool = True,
+    goal_entropy_drop: float = 0.0,
+    candidate_goal_reachability_improved: float = 0.0,
+    attached_goal_predicates: tuple[str, ...] = (),
 ) -> TransitionUsefulness:
     progress_effect = bool(POSITIVE_EVENTS.intersection(str(event) for event in events)) or float(score_delta) > 0.0
     terminal_win = bool(terminal and _is_terminal_win_event(events))
     no_effect = bool((not visible_effect) or no_effect_event or invalid_action)
     has_prior_public_usefulness = bool(prior_useful_action_count > 0)
+    goal_entropy_drop = max(float(goal_entropy_drop), 0.0)
+    candidate_goal_reachability_improved = max(float(candidate_goal_reachability_improved), 0.0)
+    goal_attached = bool(
+        goal_entropy_drop > GOAL_ENTROPY_DROP_THRESHOLD
+        or candidate_goal_reachability_improved > GOAL_REACHABILITY_THRESHOLD
+    )
     controllability_effect = bool(
         visible_effect
         and not no_effect
         and not progress_effect
         and (public_controllability_evidence or has_prior_public_usefulness)
         and prior_family_count < 8
+        and goal_attached
     )
     reachable_state_class_effect = bool(
         visible_effect
@@ -2482,12 +2748,22 @@ def _classify_transition_usefulness(
         and public_reachable_state_evidence
         and not state_class_seen
         and prior_family_count < 4
+        and goal_attached
     )
     useful_effect = bool(
         progress_effect
         or terminal_win
+        or goal_entropy_drop > GOAL_ENTROPY_DROP_THRESHOLD
+        or candidate_goal_reachability_improved > GOAL_REACHABILITY_THRESHOLD
         or controllability_effect
         or reachable_state_class_effect
+    )
+    instrumental_evidence = bool(
+        visible_effect
+        and not no_effect
+        and not progress_effect
+        and not useful_effect
+        and (public_controllability_evidence or public_reachable_state_evidence or has_prior_public_usefulness)
     )
     nuisance_effect = bool(visible_effect and not useful_effect)
     reasons: list[str] = []
@@ -2495,10 +2771,16 @@ def _classify_transition_usefulness(
         reasons.append("progress")
     if terminal_win:
         reasons.append("terminal_win")
+    if goal_entropy_drop > GOAL_ENTROPY_DROP_THRESHOLD:
+        reasons.append("goal_posterior_entropy_drop")
+    if candidate_goal_reachability_improved > GOAL_REACHABILITY_THRESHOLD:
+        reasons.append("candidate_goal_reachability_improved")
     if controllability_effect:
-        reasons.append("publicly_supported_controllability")
+        reasons.append("goal_attached_public_controllability")
     if reachable_state_class_effect:
-        reasons.append("publicly_supported_reachable_state_class")
+        reasons.append("goal_attached_reachable_state_class")
+    if instrumental_evidence:
+        reasons.append("instrumental_public_controllability")
     if nuisance_effect:
         reasons.append("visible_without_useful_effect")
     if no_effect:
@@ -2512,6 +2794,10 @@ def _classify_transition_usefulness(
         terminal_win=terminal_win,
         controllability_effect=controllability_effect,
         reachable_state_class_effect=reachable_state_class_effect,
+        instrumental_evidence=instrumental_evidence,
+        goal_entropy_drop=float(goal_entropy_drop),
+        candidate_goal_reachability_improved=float(candidate_goal_reachability_improved),
+        attached_goal_predicates=tuple(str(item) for item in attached_goal_predicates if str(item))[:8],
         reasons=tuple(reasons),
     )
 
@@ -2702,6 +2988,8 @@ def _experiment_result_class(label: TransitionUsefulness) -> str:
         return "controllability"
     if label.reachable_state_class_effect:
         return "reachable_state_class"
+    if label.instrumental_evidence:
+        return "instrumental"
     if label.nuisance_effect:
         return "nuisance"
     if label.no_effect:
@@ -3161,6 +3449,439 @@ def _area_bucket(area: int) -> int:
     if area <= 16:
         return 16
     return 64
+
+
+def _goal_component_token(component: _FrameComponent) -> str:
+    y0, x0, y1, x1 = component.bbox
+    return (
+        f"value:{int(component.value)}:area:{_area_bucket(component.area)}:"
+        f"bbox:{int(y0)}:{int(x0)}:{int(y1)}:{int(x1)}"
+    )
+
+
+def _goal_predicate_id(predicate: dict[str, Any]) -> str:
+    payload = {
+        key: value
+        for key, value in sorted(predicate.items())
+        if key not in {"id", "description", "posterior_score", "support", "observations"}
+    }
+    return f"g:{stable_hash(payload)}"
+
+
+def _make_goal_predicate(predicate_type: str, **payload: Any) -> dict[str, Any]:
+    predicate = {"type": str(predicate_type), **payload}
+    predicate["id"] = _goal_predicate_id(predicate)
+    return predicate
+
+
+def _goal_predicate_generator(
+    frame: np.ndarray | None,
+    components: list[_FrameComponent] | None = None,
+    *,
+    limit: int = MAX_GOAL_PREDICATES_PER_FRAME,
+) -> list[dict[str, Any]]:
+    if frame is None:
+        return []
+    try:
+        arr = np.asarray(frame, dtype=np.int64)
+    except Exception:
+        return []
+    if arr.ndim != 2 or arr.size == 0:
+        return []
+    components = _frame_components(arr) if components is None else components
+    ranked = sorted(components, key=lambda item: (-item.area, item.value, item.bbox, item.component_id))[:12]
+    if not ranked:
+        return []
+    height = max(int(arr.shape[0]), 1)
+    width = max(int(arr.shape[1]), 1)
+    predicates: list[dict[str, Any]] = []
+
+    def add(predicate: dict[str, Any]) -> None:
+        if len(predicates) >= max(int(limit), 1):
+            return
+        predicate_id = str(predicate.get("id", ""))
+        if predicate_id and all(str(item.get("id", "")) != predicate_id for item in predicates):
+            predicates.append(predicate)
+
+    for component in ranked:
+        token = _goal_component_token(component)
+        centroid = [round(float(component.centroid[0]), 3), round(float(component.centroid[1]), 3)]
+        bbox = [int(item) for item in component.bbox]
+        base = {
+            "component_token": token,
+            "component_value": int(component.value),
+            "component_area_bucket": _area_bucket(component.area),
+            "component_bbox": bbox,
+            "component_centroid": centroid,
+        }
+        add(
+            _make_goal_predicate(
+                "reach_component",
+                target_token=token,
+                target_value=int(component.value),
+                target_area_bucket=_area_bucket(component.area),
+                target_bbox=bbox,
+                target_centroid=centroid,
+                terminal_candidate=True,
+            )
+        )
+        add(
+            _make_goal_predicate(
+                "reach_adjacent_component",
+                target_token=token,
+                target_value=int(component.value),
+                target_bbox=bbox,
+                target_centroid=centroid,
+                terminal_candidate=True,
+            )
+        )
+        add(_make_goal_predicate("clear_value", value=int(component.value), terminal_candidate=True))
+        add(_make_goal_predicate("transform_to_value", target_value=int(component.value), terminal_candidate=True))
+        add(_make_goal_predicate("preserve_value", value=int(component.value), terminal_candidate=False))
+        add(
+            _make_goal_predicate(
+                "move_to_grid_center",
+                **base,
+                target_centroid=[round(float((height - 1) / 2.0), 3), round(float((width - 1) / 2.0), 3)],
+                terminal_candidate=False,
+            )
+        )
+        for edge_name, target_centroid in (
+            ("top", [0.0, centroid[1]]),
+            ("bottom", [float(height - 1), centroid[1]]),
+            ("left", [centroid[0], 0.0]),
+            ("right", [centroid[0], float(width - 1)]),
+        ):
+            add(
+                _make_goal_predicate(
+                    "reach_edge",
+                    **base,
+                    edge=edge_name,
+                    target_centroid=[round(float(target_centroid[0]), 3), round(float(target_centroid[1]), 3)],
+                    terminal_candidate=False,
+                )
+            )
+        for corner_name, target_centroid in (
+            ("top_left", [0.0, 0.0]),
+            ("top_right", [0.0, float(width - 1)]),
+            ("bottom_left", [float(height - 1), 0.0]),
+            ("bottom_right", [float(height - 1), float(width - 1)]),
+        ):
+            add(
+                _make_goal_predicate(
+                    "reach_corner",
+                    **base,
+                    corner=corner_name,
+                    target_centroid=[round(float(target_centroid[0]), 3), round(float(target_centroid[1]), 3)],
+                    terminal_candidate=False,
+                )
+            )
+        for axis in ("row", "col"):
+            for bucket in range(4):
+                center = (float(bucket) + 0.5) / 4.0
+                target_value = center * float(height - 1 if axis == "row" else width - 1)
+                add(
+                    _make_goal_predicate(
+                        "align_axis_bucket",
+                        **base,
+                        axis=axis,
+                        bucket=int(bucket),
+                        target_scalar=round(float(target_value), 3),
+                        terminal_candidate=False,
+                    )
+                )
+
+    directed_pairs = 0
+    for source in ranked:
+        for target in ranked:
+            if source.component_id == target.component_id:
+                continue
+            directed_pairs += 1
+            if directed_pairs > 80:
+                break
+            source_token = _goal_component_token(source)
+            target_token = _goal_component_token(target)
+            source_base = {
+                "source_token": source_token,
+                "source_value": int(source.value),
+                "source_area_bucket": _area_bucket(source.area),
+                "target_token": target_token,
+                "target_value": int(target.value),
+                "target_area_bucket": _area_bucket(target.area),
+                "target_bbox": [int(item) for item in target.bbox],
+                "target_centroid": [
+                    round(float(target.centroid[0]), 3),
+                    round(float(target.centroid[1]), 3),
+                ],
+                "terminal_candidate": True,
+            }
+            add(_make_goal_predicate("move_to_target_component", **source_base))
+            add(_make_goal_predicate("touch_target_component", **source_base))
+            add(_make_goal_predicate("align_row_with_target", **source_base))
+            add(_make_goal_predicate("align_col_with_target", **source_base))
+            add(
+                _make_goal_predicate(
+                    "make_components_match_value",
+                    source_token=source_token,
+                    source_value=int(source.value),
+                    target_token=target_token,
+                    target_value=int(target.value),
+                    terminal_candidate=True,
+                )
+            )
+            add(
+                _make_goal_predicate(
+                    "make_components_match_area",
+                    source_token=source_token,
+                    source_area_bucket=_area_bucket(source.area),
+                    target_token=target_token,
+                    target_area_bucket=_area_bucket(target.area),
+                    terminal_candidate=True,
+                )
+            )
+        if len(predicates) >= max(int(limit), 1):
+            break
+    return predicates[: max(int(limit), 1)]
+
+
+def _action_direction_delta(action: str) -> tuple[float, float] | None:
+    lowered = str(action).lower()
+    mapping = {
+        "up": (-1.0, 0.0),
+        "north": (-1.0, 0.0),
+        "1": (-1.0, 0.0),
+        "right": (0.0, 1.0),
+        "east": (0.0, 1.0),
+        "2": (0.0, 1.0),
+        "down": (1.0, 0.0),
+        "south": (1.0, 0.0),
+        "3": (1.0, 0.0),
+        "left": (0.0, -1.0),
+        "west": (0.0, -1.0),
+        "4": (0.0, -1.0),
+    }
+    return mapping.get(lowered)
+
+
+def _shift_bbox(bbox: tuple[int, int, int, int], dy: float, dx: float) -> tuple[int, int, int, int]:
+    return (
+        int(round(float(bbox[0]) + dy)),
+        int(round(float(bbox[1]) + dx)),
+        int(round(float(bbox[2]) + dy)),
+        int(round(float(bbox[3]) + dx)),
+    )
+
+
+def _bbox_gap(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
+    ay0, ax0, ay1, ax1 = a
+    by0, bx0, by1, bx1 = b
+    y_gap = max(float(by0 - ay1 - 1), float(ay0 - by1 - 1), 0.0)
+    x_gap = max(float(bx0 - ax1 - 1), float(ax0 - bx1 - 1), 0.0)
+    return math.sqrt(y_gap * y_gap + x_gap * x_gap)
+
+
+def _goal_predicate_movement_progress(
+    predicate: dict[str, Any],
+    source: _FrameComponent,
+    new_centroid: tuple[float, float],
+    new_bbox: tuple[int, int, int, int],
+    *,
+    terminal_only: bool,
+) -> float:
+    if terminal_only and not bool(predicate.get("terminal_candidate", False)):
+        return 0.0
+    source_token = str(predicate.get("source_token", ""))
+    component_token = str(predicate.get("component_token", ""))
+    current_token = _goal_component_token(source)
+    if source_token and source_token != current_token:
+        return 0.0
+    if component_token and component_token != current_token:
+        return 0.0
+    target_token = str(predicate.get("target_token", ""))
+    if target_token and target_token == current_token:
+        return 0.0
+    predicate_type = str(predicate.get("type", ""))
+    if predicate_type in {
+        "reach_component",
+        "move_to_target_component",
+        "reach_adjacent_component",
+        "touch_target_component",
+    }:
+        target_centroid = predicate.get("target_centroid", [])
+        target_bbox = predicate.get("target_bbox", [])
+        if not isinstance(target_centroid, list) or len(target_centroid) < 2:
+            return 0.0
+        before_distance = math.dist(source.centroid, (float(target_centroid[0]), float(target_centroid[1])))
+        after_distance = math.dist(new_centroid, (float(target_centroid[0]), float(target_centroid[1])))
+        distance_gain = (before_distance - after_distance) / max(before_distance, 1.0)
+        if predicate_type in {"reach_adjacent_component", "touch_target_component"} and isinstance(target_bbox, list) and len(target_bbox) >= 4:
+            before_gap = _bbox_gap(source.bbox, tuple(int(item) for item in target_bbox[:4]))
+            after_gap = _bbox_gap(new_bbox, tuple(int(item) for item in target_bbox[:4]))
+            gap_gain = (before_gap - after_gap) / max(before_gap, 1.0)
+            distance_gain = max(distance_gain, gap_gain)
+        return max(float(distance_gain), 0.0)
+    if predicate_type == "align_row_with_target":
+        target_centroid = predicate.get("target_centroid", [])
+        if not isinstance(target_centroid, list) or len(target_centroid) < 2:
+            return 0.0
+        before_gap = abs(float(source.centroid[0]) - float(target_centroid[0]))
+        after_gap = abs(float(new_centroid[0]) - float(target_centroid[0]))
+        return max((before_gap - after_gap) / max(before_gap, 1.0), 0.0)
+    if predicate_type == "align_col_with_target":
+        target_centroid = predicate.get("target_centroid", [])
+        if not isinstance(target_centroid, list) or len(target_centroid) < 2:
+            return 0.0
+        before_gap = abs(float(source.centroid[1]) - float(target_centroid[1]))
+        after_gap = abs(float(new_centroid[1]) - float(target_centroid[1]))
+        return max((before_gap - after_gap) / max(before_gap, 1.0), 0.0)
+    if predicate_type in {"move_to_grid_center", "reach_edge", "reach_corner"}:
+        target_centroid = predicate.get("target_centroid", [])
+        if not isinstance(target_centroid, list) or len(target_centroid) < 2:
+            return 0.0
+        before_distance = math.dist(source.centroid, (float(target_centroid[0]), float(target_centroid[1])))
+        after_distance = math.dist(new_centroid, (float(target_centroid[0]), float(target_centroid[1])))
+        return max((before_distance - after_distance) / max(before_distance, 1.0), 0.0)
+    if predicate_type == "align_axis_bucket":
+        axis = str(predicate.get("axis", ""))
+        target_scalar = float(predicate.get("target_scalar", 0.0))
+        before_scalar = float(source.centroid[0] if axis == "row" else source.centroid[1])
+        after_scalar = float(new_centroid[0] if axis == "row" else new_centroid[1])
+        before_gap = abs(before_scalar - target_scalar)
+        after_gap = abs(after_scalar - target_scalar)
+        return max((before_gap - after_gap) / max(before_gap, 1.0), 0.0)
+    return 0.0
+
+
+def _counterfactual_goal_progress_score(
+    action: str,
+    frame: np.ndarray | None,
+    *,
+    components: list[_FrameComponent] | None = None,
+    predicates: list[dict[str, Any]] | None = None,
+    preferred_component_values: set[int] | None = None,
+    return_attached: bool = False,
+) -> float | tuple[float, list[str]]:
+    if frame is None:
+        return (0.0, []) if return_attached else 0.0
+    try:
+        arr = np.asarray(frame, dtype=np.int64)
+    except Exception:
+        return (0.0, []) if return_attached else 0.0
+    if arr.ndim != 2 or arr.size == 0:
+        return (0.0, []) if return_attached else 0.0
+    components = _frame_components(arr) if components is None else components
+    predicates = _goal_predicate_generator(arr, components) if predicates is None else predicates
+    predicates = list(predicates)[:GOAL_SCORING_PREDICATE_LIMIT]
+    improvements: list[tuple[float, str]] = []
+    direction = _action_direction_delta(action)
+    if direction is not None and _action_family(action) == "move":
+        dy, dx = direction
+        for component in components[:12]:
+            if preferred_component_values and int(component.value) not in preferred_component_values:
+                continue
+            shifted_centroid = (float(component.centroid[0]) + dy, float(component.centroid[1]) + dx)
+            shifted_bbox = _shift_bbox(component.bbox, dy, dx)
+            for predicate in predicates:
+                progress = _goal_predicate_movement_progress(
+                    predicate,
+                    component,
+                    shifted_centroid,
+                    shifted_bbox,
+                    terminal_only=False,
+                )
+                if progress > 0.0:
+                    weight = 1.0 if bool(predicate.get("terminal_candidate", False)) else 0.25
+                    improvements.append((float(progress) * weight, str(predicate.get("id", ""))))
+    elif _action_family(action) == "contact":
+        relation = _component_target_relation(arr, _action_target_cell(action, arr), components)
+        value = int(relation.get("value", 0) or 0)
+        if value:
+            for predicate in predicates:
+                predicate_type = str(predicate.get("type", ""))
+                if predicate_type == "clear_value" and int(predicate.get("value", 0) or 0) == value:
+                    improvements.append((0.05, str(predicate.get("id", ""))))
+                elif predicate_type == "transform_to_value" and int(predicate.get("target_value", 0) or 0) != value:
+                    improvements.append((0.035, str(predicate.get("id", ""))))
+    improvements = sorted(improvements, key=lambda item: (item[0], item[1]), reverse=True)[:8]
+    score = min(sum(value for value, _predicate_id in improvements) * 0.24, 0.34)
+    attached = [predicate_id for _value, predicate_id in improvements if predicate_id][:6]
+    if return_attached:
+        return float(score), attached
+    return float(score)
+
+
+def _goal_transition_evidence(before: Any, after: Any, action: str) -> dict[str, Any]:
+    try:
+        before_arr = np.asarray(before, dtype=np.int64)
+        after_arr = np.asarray(after, dtype=np.int64)
+    except Exception:
+        return {"predicate_count": 0, "reachability_delta": 0.0, "goal_entropy_drop": 0.0, "attached_goal_predicates": []}
+    if before_arr.ndim != 2 or after_arr.ndim != 2 or before_arr.shape != after_arr.shape or before_arr.size == 0:
+        return {"predicate_count": 0, "reachability_delta": 0.0, "goal_entropy_drop": 0.0, "attached_goal_predicates": []}
+    before_components = _frame_components(before_arr)
+    after_components = _frame_components(after_arr)
+    predicates = _goal_predicate_generator(before_arr, before_components)
+    improvements: list[tuple[float, str]] = []
+    matches = _match_components(before_components, after_components)
+    for before_idx, after_idx in matches.items():
+        old = before_components[before_idx]
+        new = after_components[after_idx]
+        distance = math.dist(old.centroid, new.centroid)
+        if distance < 0.25:
+            continue
+        for predicate in predicates:
+            progress = _goal_predicate_movement_progress(
+                predicate,
+                old,
+                new.centroid,
+                new.bbox,
+                terminal_only=True,
+            )
+            if progress > GOAL_REACHABILITY_THRESHOLD:
+                improvements.append((float(progress), str(predicate.get("id", ""))))
+
+    matched_before = set(matches)
+    matched_after = set(matches.values())
+    transformed = _component_transforms(before_components, after_components, matched_before, matched_after)
+    disappeared: list[_FrameComponent] = []
+    unmatched_after_cells = [
+        set(component.cells)
+        for idx, component in enumerate(after_components)
+        if idx not in matched_after
+    ]
+    for idx, component in enumerate(before_components):
+        if idx in matched_before:
+            continue
+        old_cells = set(component.cells)
+        if any(old_cells & new_cells for new_cells in unmatched_after_cells):
+            continue
+        disappeared.append(component)
+    for component in disappeared:
+        for predicate in predicates:
+            if str(predicate.get("type", "")) == "clear_value" and int(predicate.get("value", 0) or 0) == int(component.value):
+                improvements.append((0.45, str(predicate.get("id", ""))))
+    for transform in transformed:
+        after_value = int(transform.get("after_value", 0) or 0)
+        for predicate in predicates:
+            if str(predicate.get("type", "")) == "transform_to_value" and int(predicate.get("target_value", 0) or 0) == after_value:
+                improvements.append((0.38, str(predicate.get("id", ""))))
+
+    improvements = sorted(improvements, key=lambda item: (item[0], item[1]), reverse=True)[:8]
+    attached = [predicate_id for _value, predicate_id in improvements if predicate_id]
+    reachability_delta = min(sum(value for value, _predicate_id in improvements), 1.0)
+    if attached and predicates:
+        entropy_drop = min(
+            1.0,
+            (math.log1p(float(len(attached))) / max(math.log1p(float(len(predicates))), 1.0e-9)) * max(reachability_delta, 0.0),
+        )
+    else:
+        entropy_drop = 0.0
+    return {
+        "predicate_count": int(len(predicates)),
+        "reachability_delta": float(reachability_delta),
+        "goal_entropy_drop": float(entropy_drop),
+        "attached_goal_predicates": attached[:8],
+    }
 
 
 def _candidate_relation_keys(family: str, relation: dict[str, Any]) -> list[tuple[str, float]]:
