@@ -1,4 +1,7 @@
-"""Compact runtime package for the recurrent latent scientist agent."""
+"""Compact runtime package for the recurrent latent scientist agent.
+
+Startup hooks are applied during import.
+"""
 
 from __future__ import annotations
 
