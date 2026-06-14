@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+try:
+    from .goal_credit_patch_runtime import apply_goal_credit_patch_runtime
+
+    apply_goal_credit_patch_runtime()
+except Exception:
+    pass
+
 REQUIRED_RUNTIME_MODULES: tuple[str, ...] = (
     "env",
     "model",
