@@ -103,6 +103,9 @@ def test_external_base_affordance_diagnostic_uses_sigmoid_scale() -> None:
     _, diagnostics, _ = model.score_actions(observation, observation.available_actions)
 
     assert all(0.0 <= row["affordance"] <= 1.0 for row in diagnostics.values())
+    assert all(0.0 <= row["progress"] <= 1.0 for row in diagnostics.values())
+    assert all(0.0 <= row["future_progress"] <= 1.0 for row in diagnostics.values())
+    assert all(-1.0 <= row["action_prior"] <= 1.0 for row in diagnostics.values())
 
 
 def test_generated_pretraining_balances_clicks_with_controls() -> None:
@@ -150,6 +153,9 @@ def test_train_arm_reports_all_self_supervised_objectives() -> None:
         "next_observation",
         "change_mask",
         "reward_event_noop",
+        "progress_event",
+        "future_progress",
+        "action_policy_prior",
         "inverse_dynamics",
         "action_affordance",
         "temporal_object_persistence",

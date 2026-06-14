@@ -31,6 +31,7 @@ from .device import AUTO_DEVICE, DeviceLike, resolve_device
 GRID_SIZE = 8
 NUM_CELLS = 9
 ACTION_FEATURE_DIM = 16
+ACTION_BUCKETS = 512
 FAMILY_TO_INDEX = {"move": 0, "click": 1, "wait": 2, "reset": 3, "other": 4}
 POOL_PRIORITY = np.zeros(NUM_CELLS, dtype=np.int64)
 for _value, _priority in {
@@ -54,6 +55,7 @@ class ExternalBaseConfig:
     hidden_dim: int = 96
     latent_dim: int = 64
     max_cell_value: int = NUM_CELLS - 1
+    action_buckets: int = ACTION_BUCKETS
 
 
 def sha256_file(path: str | Path) -> str:
@@ -123,6 +125,11 @@ def _hash_features(action: str, width: int = 6) -> list[float]:
 
 def action_hash_features(action: str, width: int = 6) -> np.ndarray:
     return np.asarray(_hash_features(str(action), width=width), dtype=np.float32)
+
+
+def action_bucket_id(action: str, buckets: int = ACTION_BUCKETS) -> int:
+    digest = hashlib.sha256(str(action).encode("utf-8")).digest()
+    return int.from_bytes(digest[:4], "little") % int(buckets)
 
 
 def action_to_features(
@@ -197,11 +204,18 @@ class ExternalBaseWorldModel(nn.Module):
         self.next_obs_head = nn.Linear(self.config.hidden_dim, obs_dim)
         self.change_head = nn.Linear(self.config.hidden_dim, obs_dim)
         self.reward_head = nn.Linear(self.config.hidden_dim, 1)
+        self.progress_head = nn.Linear(self.config.hidden_dim, 1)
+        self.future_progress_head = nn.Linear(self.config.hidden_dim, 1)
+        self.action_prior_head = nn.Linear(self.config.hidden_dim + self.config.latent_dim, self.config.action_buckets)
         self.noop_head = nn.Linear(self.config.hidden_dim, 1)
         self.inverse_head = nn.Linear(self.config.hidden_dim, len(FAMILY_TO_INDEX))
         self.affordance_head = nn.Linear(self.config.hidden_dim, 1)
         self.rollout_head = nn.Linear(self.config.latent_dim, self.config.latent_dim)
         self.memory_obs_head = nn.Linear(self.config.latent_dim, obs_dim)
+        nn.init.zeros_(self.progress_head.weight)
+        nn.init.constant_(self.progress_head.bias, -4.0)
+        nn.init.zeros_(self.future_progress_head.weight)
+        nn.init.constant_(self.future_progress_head.bias, -4.0)
         self.to(resolve_device(device))
 
     def initial_memory(self, batch_size: int, device: DeviceLike | None = None) -> torch.Tensor:
@@ -215,7 +229,13 @@ class ExternalBaseWorldModel(nn.Module):
         action_state = self.action_encoder(action_features)
         memory_next = self.memory_cell(torch.cat([obs_state, action_state], dim=-1), memory)
         state = self.joint(torch.cat([obs_state, action_state, memory_next], dim=-1))
-        return {"state": state, "memory": memory_next, "obs_state": obs_state, "action_state": action_state}
+        return {
+            "state": state,
+            "memory": memory_next,
+            "obs_state": obs_state,
+            "action_state": action_state,
+            "policy_context": torch.cat([obs_state, memory], dim=-1),
+        }
 
     def forward(self, obs: torch.Tensor, action_features: torch.Tensor, memory: torch.Tensor | None = None) -> dict[str, torch.Tensor]:
         encoded = self.encode(obs, action_features, memory)
@@ -225,6 +245,9 @@ class ExternalBaseWorldModel(nn.Module):
             "next_obs": torch.sigmoid(self.next_obs_head(state)),
             "change_logits": self.change_head(state),
             "reward": self.reward_head(state).squeeze(-1),
+            "progress_logits": self.progress_head(state).squeeze(-1),
+            "future_progress_logits": self.future_progress_head(state).squeeze(-1),
+            "action_prior_logits": self.action_prior_head(encoded["policy_context"]),
             "noop_logits": self.noop_head(state).squeeze(-1),
             "inverse_logits": self.inverse_head(state),
             "affordance": self.affordance_head(state).squeeze(-1),
@@ -264,13 +287,27 @@ class ExternalBaseWorldModel(nn.Module):
         output = self(obs, action_features, base_memory)
         change = torch.sigmoid(output["change_logits"]).mean(dim=-1)
         reward = output["reward"].tanh()
+        progress = torch.sigmoid(output["progress_logits"])
+        future_progress = torch.sigmoid(output["future_progress_logits"])
+        action_prior = torch.log_softmax(output["action_prior_logits"], dim=-1)
         noop = torch.sigmoid(output["noop_logits"])
         affordance = torch.sigmoid(output["affordance"])
         scores = {}
         diagnostics = {}
         for index, action in enumerate(actions):
+            bucket = action_bucket_id(action, self.config.action_buckets)
+            prior = torch.tanh(action_prior[index, bucket] / 4.0)
             world_score = (
-                float((1.6 * reward[index] + 0.35 * change[index] - 0.45 * noop[index]).item())
+                float(
+                    (
+                        3.0 * future_progress[index]
+                        + 2.0 * progress[index]
+                        + 0.75 * prior
+                        + 1.2 * reward[index]
+                        + 0.20 * change[index]
+                        - 0.35 * noop[index]
+                    ).item()
+                )
                 if not disable_world_model
                 else 0.0
             )
@@ -278,6 +315,9 @@ class ExternalBaseWorldModel(nn.Module):
             scores[action] = world_score + affordance_score
             diagnostics[action] = {
                 "reward": round(float(reward[index].item()), 6),
+                "progress": round(float(progress[index].item()), 6),
+                "future_progress": round(float(future_progress[index].item()), 6),
+                "action_prior": round(float(prior.item()), 6),
                 "change": round(float(change[index].item()), 6),
                 "noop": round(float(noop[index].item()), 6),
                 "affordance": round(float(affordance[index].item()), 6),
@@ -293,12 +333,18 @@ def training_targets(batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
     change_mask = (torch.abs(next_obs - obs) > 1.0e-6).float()
     noop = (change_mask.mean(dim=-1) <= 1.0e-6).float()
     reward = torch.clamp(batch["reward"], -1.0, 1.0)
+    if "future_progress" in batch:
+        future_progress = torch.clamp(batch["future_progress"], 0.0, 1.0)
+    else:
+        future_progress = (batch["reward"] > 0.0).float()
     affordance = torch.clamp(change_mask.mean(dim=-1) + torch.relu(reward), 0.0, 2.0) / 2.0
     return {
         "next_obs": next_obs,
         "change_mask": change_mask,
         "noop": noop,
         "reward": reward,
+        "progress": (batch["reward"] > 0.0).float(),
+        "future_progress": future_progress,
         "family": batch["family"].long(),
         "affordance": affordance,
     }
@@ -338,7 +384,22 @@ def load_external_arm(path: str | Path, arm: str, device: DeviceLike = AUTO_DEVI
     config = ExternalBaseConfig(**payload["external_config"])
     model = ExternalBaseWorldModel(config, device=device)
     state = payload["external_arms"][arm]["state_dict"]
-    model.load_state_dict(state)
+    incompatible = model.load_state_dict(state, strict=False)
+    missing = set(getattr(incompatible, "missing_keys", ()))
+    unexpected = set(getattr(incompatible, "unexpected_keys", ()))
+    allowed_missing = {
+        "progress_head.weight",
+        "progress_head.bias",
+        "future_progress_head.weight",
+        "future_progress_head.bias",
+        "action_prior_head.weight",
+        "action_prior_head.bias",
+    }
+    if unexpected or missing - allowed_missing:
+        raise RuntimeError(
+            f"external arm {arm} is incompatible: missing={sorted(missing)}, unexpected={sorted(unexpected)}"
+        )
+    model.external_manifest = payload.get("external_manifest", {})  # type: ignore[attr-defined]
     model.eval()
     return model
 

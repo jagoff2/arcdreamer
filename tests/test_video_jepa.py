@@ -563,16 +563,27 @@ def test_object_causal_hypothesis_detects_public_movement() -> None:
 def test_goal_predicate_generator_populates_progress_hypothesis_bank() -> None:
     grid = np.zeros((8, 8), dtype=np.int64)
     grid[2, 2] = 4
+    grid[2, 5] = 7
+    grid[4, 2] = 7
     memory = JEPAAttemptMemory(use_jepa_tokens=False)
     observation = _obs_grid(0, grid, ("right", "left", "wait"))
 
     predicates = memory.goal_predicates_for_observation(observation)
     summary = memory.summary()["progress_hypothesis_bank"]
+    predicate_types = {str(predicate["type"]) for predicate in predicates}
 
     assert 20 <= len(predicates) <= 200
     assert summary["predicate_count"] >= 20
-    assert any(predicate["type"] == "reach_component" for predicate in predicates)
-    assert any(predicate["type"] == "align_axis_bucket" for predicate in predicates)
+    assert "reach_component" in predicate_types
+    assert "align_axis_bucket" in predicate_types
+    assert "clear_value" in predicate_types
+    assert "activate_all_switches" in predicate_types
+    assert "align_repeated_pattern_anomaly" in predicate_types
+    assert "transform_to_exemplar" in predicate_types
+    assert "reach_adjacent_component" in predicate_types
+    assert "equalize_group_count" in predicate_types
+    assert "equalize_group_height" in predicate_types
+    assert "equalize_group_area" in predicate_types
     assert "goal_predicate_generator" in memory.summary()["planner_chain"]
 
 
@@ -662,6 +673,81 @@ def test_goal_predicate_scores_public_control_above_unproven_contact_without_rew
     assert memory.last_transition_usefulness.attached_goal_predicates
     assert scores["right"] > 0.0
     assert scores["right"] > scores["click:16:16"]
+
+
+def test_experiment_value_decomposes_action_goal_info_and_reachability() -> None:
+    grid = np.zeros((8, 8), dtype=np.int64)
+    grid[2, 2] = 4
+    grid[2, 5] = 7
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    observation = _obs_grid(0, grid, ("right", "5", "wait"))
+
+    experiment = memory.experiment_for_action(observation, "right")
+    value = memory.experiment_value_for_action(observation, "right")
+
+    assert experiment is not None
+    assert experiment.attached_goal_predicates
+    assert experiment.experiment_value["goal_predicate_info"] > 0.0
+    assert experiment.experiment_value["reachability_to_candidate_goal"] > 0.0
+    assert experiment.experiment_value["expected_goal_reachability_delta"] > 0.0
+    assert experiment.experiment_value["expected_goal_entropy_reduction"] > 0.0
+    assert experiment.experiment_value["expected_goal_entropy_reduction"] != experiment.experiment_value["goal_predicate_info"]
+    assert set(experiment.experiment_value) >= {
+        "action_effect_info",
+        "goal_predicate_info",
+        "reachability_to_candidate_goal",
+        "expected_goal_reachability_delta",
+        "expected_goal_entropy_reduction",
+        "total",
+    }
+    assert value["goal_predicate_info"] == experiment.experiment_value["goal_predicate_info"]
+    assert value["reachability_to_candidate_goal"] == experiment.experiment_value["reachability_to_candidate_goal"]
+    assert experiment.experiment_value["total"] >= (
+        experiment.experiment_value["action_effect_info"]
+        + experiment.experiment_value["goal_predicate_info"]
+        + experiment.experiment_value["expected_goal_entropy_reduction"]
+        + experiment.experiment_value["reachability_to_candidate_goal"]
+        - 1.0e-6
+    )
+    before = observation
+    after_grid = np.zeros((8, 8), dtype=np.int64)
+    after_grid[2, 3] = 4
+    after_grid[2, 5] = 7
+    label = memory.observe_live_transition(
+        before,
+        "right",
+        ArcAGI3StepResult(_obs_grid(1, after_grid, ("right", "5", "wait")), -0.001, False, False, {"events": ["move"]}),
+    )
+    assert label is not None
+    assert label.goal_entropy_drop > 0.0
+    assert experiment.experiment_value["expected_goal_entropy_reduction"] > 0.0
+
+
+def test_select_experiment_prioritizes_goal_value_over_raw_action_score() -> None:
+    grid = np.zeros((8, 8), dtype=np.int64)
+    grid[2, 2] = 4
+    grid[2, 5] = 7
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    memory.start_attempt()
+    memory.phase_family_counts[(memory.discovery_phase, "move")] = 50
+    memory.phase_action_counts[(memory.discovery_phase, "right")] = 50
+    observation = _obs_grid(0, grid, ("right", "5", "wait"))
+
+    selected = memory.select_experiment(
+        observation,
+        ("right", "5", "wait"),
+        scores={"right": 0.0, "5": 0.9, "wait": 0.0},
+    )
+
+    assert selected is not None
+    assert selected.action == "right"
+    assert selected.experiment_value["goal_predicate_info"] > 0.0
+    assert selected.experiment_value["reachability_to_candidate_goal"] > 0.0
+    assert selected.experiment_value["total"] > memory.experiment_value_for_action(
+        observation,
+        "5",
+        supplied_action_score=0.9,
+    )["total"]
 
 
 def test_live_public_controllability_updates_component_memory_before_ingest() -> None:
@@ -826,7 +912,7 @@ def test_post_level_discovery_candidates_include_new_legal_family() -> None:
     assert "wait" not in candidates
 
 
-def test_controller_uses_post_level_discovery_after_prefix_source_is_retired() -> None:
+def test_controller_uses_goal_value_for_post_level_discovery_after_prefix_source_is_retired() -> None:
     class DummyBase:
         def choose_action(self, observation: ArcAGI3Observation):
             del observation
@@ -875,11 +961,15 @@ def test_controller_uses_post_level_discovery_after_prefix_source_is_retired() -
         ("1", "2", "5", "click:2:1", "7"),
     )
     action, diagnostics = controller.choose_action(observation)
+    experiment = diagnostics["jepa_policy"]["experiment_protocol"]["experiment"]
 
-    assert action == "click:2:1"
+    assert action in {"1", "2"}
     assert diagnostics["jepa_policy"]["public_post_prefix_exploration"] is False
     assert diagnostics["jepa_policy"]["experiment_protocol"]["active"] is True
-    assert diagnostics["jepa_policy"]["experiment_protocol"]["experiment"]["action"] == "click:2:1"
+    assert experiment["action"] == action
+    assert experiment["experiment_value"]["goal_predicate_info"] > 0.0
+    assert experiment["experiment_value"]["reachability_to_candidate_goal"] > 0.0
+    assert experiment["attached_goal_predicates"]
 
 
 def test_action_selection_reports_experiment_prediction_before_acting() -> None:
@@ -927,6 +1017,68 @@ def test_action_selection_reports_experiment_prediction_before_acting() -> None:
     assert "score_delta > 0" in experiment["experiment"]["useful_if"]
     assert controller.memory.pending_experiment is not None
     assert controller.memory.pending_experiment["predicted_outcomes"] == experiment["experiment"]["predicted_outcomes"]
+
+
+def test_learned_future_progress_authority_preempts_experiment_selection() -> None:
+    class DummyBase:
+        def choose_action(self, observation: ArcAGI3Observation):
+            return (
+                "1",
+                {
+                    "action_scores": {"1": 0.4, "2": 0.35, "click:2:1": 0.8, "7": 0.0},
+                    "policy": {
+                        "external_diagnostics": {
+                            "1": {"future_progress": 0.02, "progress": 0.0, "score": 0.0},
+                            "2": {"future_progress": 0.72, "progress": 0.0, "score": 1.4},
+                            "click:2:1": {"future_progress": 0.01, "progress": 0.0, "score": 0.1},
+                            "7": {"future_progress": 0.0, "progress": 0.0, "score": -0.2},
+                        }
+                    },
+                },
+            )
+
+        def observe_transition(self, action: str, result: ArcAGI3StepResult) -> None:
+            del action, result
+
+        def summary(self) -> dict[str, object]:
+            return {}
+
+    controller = object.__new__(jepa_arc_eval.JEPAAugmentedController)
+    controller.variant = jepa_arc_eval.JEPAVariant("unit", use_memory=True)
+    controller.base = DummyBase()
+    controller.memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    controller.memory.start_attempt()
+    controller.jepa_model = None
+    controller.device = torch.device("cpu")
+    controller.changed_actions = 0
+    controller.frames = 0
+    controller.last_base_action = None
+    controller.last_observation = None
+    controller.bridge_history_frames = []
+    controller.bridge_history_action_ids = []
+    controller.bridge_history_action_features = []
+    controller.bridge_history_legal_counts = []
+    controller.rng = jepa_arc_eval.random.Random(0)
+    controller.post_prefix_rng = jepa_arc_eval.random.Random(0)
+    controller.anti_attractor = jepa_arc_eval.HardAntiAttractorGate()
+
+    observation = _obs_grid(0, np.zeros((8, 8), dtype=np.int64), ("1", "2", "click:2:1", "7"))
+    for _ in range(3):
+        controller.anti_attractor.observe_transition(
+            observation,
+            "2",
+            ArcAGI3StepResult(observation, -0.001, False, False, {"events": []}),
+        )
+    action, diagnostics = controller.choose_action(observation)
+    authority = diagnostics["jepa_policy"]["learned_progress_authority"]
+
+    assert action == "2"
+    assert authority["active"] is True
+    assert authority["selected"] is True
+    assert authority["action"] == "2"
+    assert diagnostics["jepa_policy"]["action_source"] == "learned_progress_authority"
+    assert diagnostics["jepa_policy"]["hard_anti_attractor"]["bypassed_by_learned_progress_authority"] is True
+    assert diagnostics["jepa_policy"]["learned_simple_prefix_gate"]["active"] is True
 
 
 def test_hard_veto_fallback_reports_experiment_for_executed_action() -> None:

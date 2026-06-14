@@ -95,6 +95,8 @@ class Experiment:
     action_class: str
     coordinate_equiv_class: str
     abstract_state_class: str
+    experiment_value: dict[str, float] = field(default_factory=dict)
+    attached_goal_predicates: list[str] = field(default_factory=list)
     repeat_count: int = 0
     retired: bool = False
 
@@ -675,6 +677,24 @@ class JEPAAttemptMemory:
             "predicate_count": len(predicates),
         }
 
+    def experiment_value_for_action(
+        self,
+        observation: Any,
+        action: str,
+        *,
+        supplied_action_score: float = 0.0,
+    ) -> dict[str, float]:
+        frame = _public_frame(observation)
+        components = _frame_components(frame) if frame is not None and frame.size else None
+        predicates = self._ensure_goal_predicates(frame, components)
+        return self._experiment_value_components(
+            str(action),
+            frame,
+            predicates=predicates,
+            components=components,
+            supplied_action_score=float(supplied_action_score),
+        )
+
     def progress_hypothesis_summary(self) -> dict[str, Any]:
         supported = [
             item
@@ -939,6 +959,88 @@ class JEPAAttemptMemory:
             if int(count) > 0 and float(self.component_value_scores.get(value, 0.0)) > 0.0
         }
 
+    def _experiment_value_components(
+        self,
+        action: str,
+        frame: np.ndarray | None,
+        *,
+        predicates: list[dict[str, Any]] | None = None,
+        components: list[_FrameComponent] | None = None,
+        supplied_action_score: float = 0.0,
+    ) -> dict[str, float]:
+        predicates = self._ensure_goal_predicates(frame, components) if predicates is None else predicates
+        try:
+            supplied = float(supplied_action_score)
+        except (TypeError, ValueError):
+            supplied = 0.0
+        if not math.isfinite(supplied):
+            supplied = 0.0
+        family = _action_family(action)
+        action_count = int(self.action_counts.get(action, 0))
+        family_count = int(self.family_counts.get(family, 0))
+        action_mean = self.action_values.get(action, 0.0) / max(action_count, 1)
+        family_mean = self.family_values.get(family, 0.0) / max(family_count, 1)
+        action_useful = min(float(self.action_useful.get(action, 0)), 4.0)
+        family_useful = min(float(self.family_useful.get(family, 0)), 4.0)
+        action_nuisance = min(float(self.action_nuisance.get(action, 0)), 4.0)
+        family_nuisance = min(float(self.family_nuisance.get(family, 0)), 4.0)
+        action_effect_info = (
+            0.35 * max(supplied, 0.0)
+            + 0.18 * max(action_mean, 0.0)
+            + 0.10 * max(family_mean, 0.0)
+            + 0.055 * action_useful
+            + 0.030 * family_useful
+            - 0.050 * action_nuisance
+            - 0.025 * family_nuisance
+        )
+        goal_score, attached = _counterfactual_goal_progress_score(
+            str(action),
+            frame,
+            components=components,
+            predicates=predicates,
+            preferred_component_values=self._positive_component_values(),
+            return_attached=True,
+        )
+        goal_evidence = _counterfactual_goal_progress_score(
+            str(action),
+            frame,
+            components=components,
+            predicates=predicates,
+            preferred_component_values=self._positive_component_values(),
+            return_evidence=True,
+        )
+        predicate_count = max(len(predicates), 1)
+        attached_count = len(attached)
+        goal_predicate_info = 0.0
+        if attached_count:
+            goal_predicate_info = min(
+                0.40,
+                math.log1p(float(attached_count)) / max(math.log1p(float(predicate_count)), 1.0e-9),
+            )
+        reachability_to_candidate_goal = min(max(float(goal_score), 0.0), 0.40)
+        expected_goal_reachability_delta = float(goal_evidence.get("reachability_delta", 0.0))
+        expected_goal_entropy_reduction = _goal_entropy_reduction_from_attachment(
+            attached_count,
+            predicate_count,
+            expected_goal_reachability_delta,
+        )
+        total = (
+            action_effect_info
+            + goal_predicate_info
+            + expected_goal_entropy_reduction
+            + reachability_to_candidate_goal
+        )
+        return {
+            "action_effect_info": float(round(action_effect_info, 6)),
+            "goal_predicate_info": float(round(goal_predicate_info, 6)),
+            "reachability_to_candidate_goal": float(round(reachability_to_candidate_goal, 6)),
+            "expected_goal_reachability_delta": float(round(expected_goal_reachability_delta, 6)),
+            "expected_goal_entropy_reduction": float(round(expected_goal_entropy_reduction, 6)),
+            "attached_goal_predicate_count": float(attached_count),
+            "candidate_goal_predicate_count": float(len(predicates)),
+            "total": float(round(total, 6)),
+        }
+
     def _update_goal_hypotheses_from_transition(
         self,
         before: Any,
@@ -1084,10 +1186,12 @@ class JEPAAttemptMemory:
         fallback_abstract_state = _abstract_frame_state_class(frame)
         if not fallback_abstract_state:
             fallback_abstract_state = _observation_key(observation)
-        candidates: list[tuple[tuple[float, float, float, float, float, int, float, int], Experiment]] = []
+        components = _frame_components(frame) if frame is not None and frame.size else None
+        goal_predicates = self._ensure_goal_predicates(frame, components)
+        candidates: list[tuple[tuple[float, ...], Experiment]] = []
         contact_by_coordinate_class: dict[
             str,
-            tuple[tuple[float, int], tuple[float, float, float, float, float, int, float, int], Experiment],
+            tuple[tuple[float, float, int], tuple[float, ...], Experiment],
         ] = {}
         useful_family_total = int(sum(max(int(value), 0) for value in self.family_useful.values()))
         for legal_index, action in enumerate(legal):
@@ -1095,6 +1199,8 @@ class JEPAAttemptMemory:
                 action,
                 frame,
                 _experiment_abstract_state_class(action, frame, fallback_abstract_state),
+                predicates=goal_predicates,
+                components=components,
             )
             if experiment is None:
                 continue
@@ -1117,8 +1223,37 @@ class JEPAAttemptMemory:
             family_count = int(self.family_counts.get(family, 0))
             family_mean = self.family_values.get(family, 0.0) / max(family_count, 1)
             family_nuisance_rate = float(self.family_nuisance.get(family, 0)) / max(float(family_count), 1.0)
+            value_components = self._experiment_value_components(
+                action,
+                frame,
+                predicates=goal_predicates,
+                components=components,
+                supplied_action_score=action_score,
+            )
+            value_total = float(value_components.get("total", 0.0))
+            goal_value = float(value_components.get("goal_predicate_info", 0.0)) + float(
+                value_components.get("reachability_to_candidate_goal", 0.0)
+            ) + float(
+                value_components.get("expected_goal_entropy_reduction", 0.0)
+            )
+            experiment = Experiment(
+                hypothesis_ids=list(experiment.hypothesis_ids),
+                action=str(experiment.action),
+                predicted_outcomes=dict(experiment.predicted_outcomes),
+                useful_if=list(experiment.useful_if),
+                max_repeats=int(experiment.max_repeats),
+                retire_if=str(experiment.retire_if),
+                action_class=str(experiment.action_class),
+                coordinate_equiv_class=str(experiment.coordinate_equiv_class),
+                abstract_state_class=str(experiment.abstract_state_class),
+                experiment_value=value_components,
+                attached_goal_predicates=list(experiment.attached_goal_predicates),
+                repeat_count=repeat_count,
+                retired=False,
+            )
             has_planner_support = bool(
                 action_score > 0.02
+                or value_total > 0.04
                 or int(self.action_useful.get(action, 0)) > 0
                 or (family in {"move", "object"} and family_useful > 0)
             )
@@ -1133,6 +1268,8 @@ class JEPAAttemptMemory:
             candidate_key = (
                 useful_family_priority,
                 0.0 if has_planner_support else 1.0,
+                -goal_value,
+                -value_total,
                 float(phase_family_count),
                 float(priority),
                 float(phase_action_count),
@@ -1141,7 +1278,7 @@ class JEPAAttemptMemory:
                 legal_index,
             )
             if family == "contact":
-                representative_key = (-action_score, legal_index)
+                representative_key = (-value_total, -action_score, legal_index)
                 current = contact_by_coordinate_class.get(experiment.coordinate_equiv_class)
                 if current is None or representative_key < current[0]:
                     contact_by_coordinate_class[experiment.coordinate_equiv_class] = (
@@ -1167,6 +1304,8 @@ class JEPAAttemptMemory:
             action_class=str(experiment.action_class),
             coordinate_equiv_class=str(experiment.coordinate_equiv_class),
             abstract_state_class=str(experiment.abstract_state_class),
+            experiment_value=dict(experiment.experiment_value),
+            attached_goal_predicates=list(experiment.attached_goal_predicates),
             repeat_count=repeat_count,
             retired=False,
         )
@@ -1209,6 +1348,8 @@ class JEPAAttemptMemory:
             action_class=str(experiment.action_class),
             coordinate_equiv_class=str(experiment.coordinate_equiv_class),
             abstract_state_class=str(experiment.abstract_state_class),
+            experiment_value=dict(experiment.experiment_value),
+            attached_goal_predicates=list(experiment.attached_goal_predicates),
             repeat_count=repeat_count,
             retired=bool(key in self.experiment_retired),
         )
@@ -1235,7 +1376,15 @@ class JEPAAttemptMemory:
             "recent_results": list(self.experiment_history[-8:]),
         }
 
-    def _build_experiment(self, action: str, frame: np.ndarray | None, abstract_state: str) -> Experiment | None:
+    def _build_experiment(
+        self,
+        action: str,
+        frame: np.ndarray | None,
+        abstract_state: str,
+        *,
+        predicates: list[dict[str, Any]] | None = None,
+        components: list[_FrameComponent] | None = None,
+    ) -> Experiment | None:
         family = _action_family(action)
         if family == "wait" and str(action) != "7":
             return None
@@ -1245,12 +1394,21 @@ class JEPAAttemptMemory:
         action_class = _experiment_action_class(action)
         coordinate_class = _experiment_coordinate_equiv_class(action, frame)
         hypothesis_ids = _experiment_hypothesis_ids(action, frame)
-        predicates = self._ensure_goal_predicates(frame)
+        components = _frame_components(frame) if components is None and frame is not None and frame.size else components
+        predicates = self._ensure_goal_predicates(frame, components) if predicates is None else predicates
         _goal_score, attached_goal_predicates = _counterfactual_goal_progress_score(
             str(action),
             frame,
+            components=components,
             predicates=predicates,
+            preferred_component_values=self._positive_component_values(),
             return_attached=True,
+        )
+        experiment_value = self._experiment_value_components(
+            str(action),
+            frame,
+            predicates=predicates,
+            components=components,
         )
         hypothesis_ids.extend(f"goal:{predicate_id}" for predicate_id in attached_goal_predicates[:6])
         if not hypothesis_ids:
@@ -1277,6 +1435,8 @@ class JEPAAttemptMemory:
             action_class=action_class,
             coordinate_equiv_class=coordinate_class,
             abstract_state_class=str(abstract_state),
+            experiment_value=experiment_value,
+            attached_goal_predicates=list(attached_goal_predicates[:8]),
         )
 
     def _experiment_key(self, experiment: Experiment | dict[str, Any]) -> str:
@@ -3537,6 +3697,34 @@ def _goal_predicate_generator(
         )
         add(_make_goal_predicate("clear_value", value=int(component.value), terminal_candidate=True))
         add(_make_goal_predicate("transform_to_value", target_value=int(component.value), terminal_candidate=True))
+        add(
+            _make_goal_predicate(
+                "activate_all_switches",
+                switch_value=int(component.value),
+                switch_area_bucket=_area_bucket(component.area),
+                terminal_candidate=True,
+            )
+        )
+        add(
+            _make_goal_predicate(
+                "transform_to_exemplar",
+                exemplar_token=token,
+                exemplar_value=int(component.value),
+                exemplar_area_bucket=_area_bucket(component.area),
+                exemplar_bbox=bbox,
+                terminal_candidate=True,
+            )
+        )
+        add(
+            _make_goal_predicate(
+                "align_repeated_pattern_anomaly",
+                anomaly_token=token,
+                anomaly_value=int(component.value),
+                anomaly_area_bucket=_area_bucket(component.area),
+                anomaly_centroid=centroid,
+                terminal_candidate=True,
+            )
+        )
         add(_make_goal_predicate("preserve_value", value=int(component.value), terminal_candidate=False))
         add(
             _make_goal_predicate(
@@ -3639,6 +3827,38 @@ def _goal_predicate_generator(
                     terminal_candidate=True,
                 )
             )
+            add(
+                _make_goal_predicate(
+                    "equalize_group_area",
+                    source_token=source_token,
+                    source_area_bucket=_area_bucket(source.area),
+                    target_token=target_token,
+                    target_area_bucket=_area_bucket(target.area),
+                    terminal_candidate=True,
+                )
+            )
+            source_height = int(source.bbox[2] - source.bbox[0] + 1)
+            target_height = int(target.bbox[2] - target.bbox[0] + 1)
+            add(
+                _make_goal_predicate(
+                    "equalize_group_height",
+                    source_token=source_token,
+                    source_height_bucket=_area_bucket(source_height),
+                    target_token=target_token,
+                    target_height_bucket=_area_bucket(target_height),
+                    terminal_candidate=True,
+                )
+            )
+            add(
+                _make_goal_predicate(
+                    "equalize_group_count",
+                    source_value=int(source.value),
+                    target_value=int(target.value),
+                    source_count=sum(1 for item in ranked if int(item.value) == int(source.value)),
+                    target_count=sum(1 for item in ranked if int(item.value) == int(target.value)),
+                    terminal_candidate=True,
+                )
+            )
         if len(predicates) >= max(int(limit), 1):
             break
     return predicates[: max(int(limit), 1)]
@@ -3678,6 +3898,20 @@ def _bbox_gap(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> flo
     y_gap = max(float(by0 - ay1 - 1), float(ay0 - by1 - 1), 0.0)
     x_gap = max(float(bx0 - ax1 - 1), float(ax0 - bx1 - 1), 0.0)
     return math.sqrt(y_gap * y_gap + x_gap * x_gap)
+
+
+def _goal_entropy_reduction_from_attachment(
+    attached_count: int,
+    predicate_count: int,
+    reachability_delta: float,
+) -> float:
+    if int(attached_count) <= 0 or int(predicate_count) <= 0:
+        return 0.0
+    reachability = max(float(reachability_delta), 0.0)
+    if reachability <= 0.0:
+        return 0.0
+    coverage = math.log1p(float(attached_count)) / max(math.log1p(float(predicate_count)), 1.0e-9)
+    return float(min(1.0, coverage * reachability))
 
 
 def _goal_predicate_movement_progress(
@@ -3760,14 +3994,21 @@ def _counterfactual_goal_progress_score(
     predicates: list[dict[str, Any]] | None = None,
     preferred_component_values: set[int] | None = None,
     return_attached: bool = False,
-) -> float | tuple[float, list[str]]:
+    return_evidence: bool = False,
+) -> float | tuple[float, list[str]] | dict[str, Any]:
     if frame is None:
+        if return_evidence:
+            return {"score": 0.0, "attached": [], "reachability_delta": 0.0}
         return (0.0, []) if return_attached else 0.0
     try:
         arr = np.asarray(frame, dtype=np.int64)
     except Exception:
+        if return_evidence:
+            return {"score": 0.0, "attached": [], "reachability_delta": 0.0}
         return (0.0, []) if return_attached else 0.0
     if arr.ndim != 2 or arr.size == 0:
+        if return_evidence:
+            return {"score": 0.0, "attached": [], "reachability_delta": 0.0}
         return (0.0, []) if return_attached else 0.0
     components = _frame_components(arr) if components is None else components
     predicates = _goal_predicate_generator(arr, components) if predicates is None else predicates
@@ -3805,6 +4046,13 @@ def _counterfactual_goal_progress_score(
     improvements = sorted(improvements, key=lambda item: (item[0], item[1]), reverse=True)[:8]
     score = min(sum(value for value, _predicate_id in improvements) * 0.24, 0.34)
     attached = [predicate_id for _value, predicate_id in improvements if predicate_id][:6]
+    reachability_delta = min(sum(value for value, _predicate_id in improvements), 1.0)
+    if return_evidence:
+        return {
+            "score": float(score),
+            "attached": list(attached),
+            "reachability_delta": float(reachability_delta),
+        }
     if return_attached:
         return float(score), attached
     return float(score)
@@ -3869,13 +4117,7 @@ def _goal_transition_evidence(before: Any, after: Any, action: str) -> dict[str,
     improvements = sorted(improvements, key=lambda item: (item[0], item[1]), reverse=True)[:8]
     attached = [predicate_id for _value, predicate_id in improvements if predicate_id]
     reachability_delta = min(sum(value for value, _predicate_id in improvements), 1.0)
-    if attached and predicates:
-        entropy_drop = min(
-            1.0,
-            (math.log1p(float(len(attached))) / max(math.log1p(float(len(predicates))), 1.0e-9)) * max(reachability_delta, 0.0),
-        )
-    else:
-        entropy_drop = 0.0
+    entropy_drop = _goal_entropy_reduction_from_attachment(len(attached), len(predicates), reachability_delta)
     return {
         "predicate_count": int(len(predicates)),
         "reachability_delta": float(reachability_delta),

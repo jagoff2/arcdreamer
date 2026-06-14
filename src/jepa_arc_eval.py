@@ -151,6 +151,101 @@ def manifest_game_ids(
     return selected
 
 
+def _as_float(value: Any, default: float = 0.0) -> float:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    return out if out == out and abs(out) != float("inf") else float(default)
+
+
+def learned_progress_candidate(
+    base_policy: dict[str, Any],
+    legal_actions: Sequence[str],
+    adjusted_scores: dict[str, float],
+    *,
+    min_future_progress: float = 0.35,
+    min_margin: float = 0.10,
+    min_adjusted_margin: float = 0.45,
+    strong_future_progress: float = 0.65,
+) -> dict[str, Any]:
+    external_diag = base_policy.get("external_diagnostics", {}) if isinstance(base_policy, dict) else {}
+    if not isinstance(external_diag, dict):
+        return {"active": False}
+    candidates: list[dict[str, Any]] = []
+    for index, action in enumerate(legal_actions):
+        row = external_diag.get(str(action), {})
+        if not isinstance(row, dict):
+            continue
+        future = _as_float(row.get("future_progress", 0.0))
+        immediate = _as_float(row.get("progress", 0.0))
+        model_score = _as_float(row.get("score", adjusted_scores.get(str(action), 0.0)))
+        adjusted = _as_float(adjusted_scores.get(str(action), 0.0))
+        candidates.append(
+            {
+                "action": str(action),
+                "future_progress": future,
+                "progress": immediate,
+                "model_score": model_score,
+                "adjusted_score": adjusted,
+                "legal_index": int(index),
+            }
+        )
+    if not candidates:
+        return {"active": False}
+    candidates.sort(
+        key=lambda item: (
+            item["future_progress"],
+            item["progress"],
+            item["model_score"],
+            item["adjusted_score"],
+            -item["legal_index"],
+        ),
+        reverse=True,
+    )
+    best = candidates[0]
+    second = candidates[1] if len(candidates) > 1 else {
+        "future_progress": 0.0,
+        "progress": 0.0,
+        "model_score": 0.0,
+        "adjusted_score": 0.0,
+    }
+    future_margin = float(best["future_progress"] - second["future_progress"])
+    adjusted_margin = float(best["adjusted_score"] - second["adjusted_score"])
+    active = bool(
+        best["future_progress"] >= float(strong_future_progress)
+        or (
+            best["future_progress"] >= float(min_future_progress)
+            and (future_margin >= float(min_margin) or adjusted_margin >= float(min_adjusted_margin))
+        )
+    )
+    return {
+        "active": active,
+        "action": best["action"] if active else "",
+        "future_progress": float(best["future_progress"]),
+        "progress": float(best["progress"]),
+        "model_score": float(best["model_score"]),
+        "adjusted_score": float(best["adjusted_score"]),
+        "future_margin": future_margin,
+        "adjusted_margin": adjusted_margin,
+        "top": [
+            {
+                "action": item["action"],
+                "future_progress": round(float(item["future_progress"]), 6),
+                "progress": round(float(item["progress"]), 6),
+                "adjusted_score": round(float(item["adjusted_score"]), 6),
+            }
+            for item in candidates[:5]
+        ],
+        "thresholds": {
+            "min_future_progress": float(min_future_progress),
+            "min_margin": float(min_margin),
+            "min_adjusted_margin": float(min_adjusted_margin),
+            "strong_future_progress": float(strong_future_progress),
+        },
+    }
+
+
 class JEPAAugmentedController:
     def __init__(
         self,
@@ -198,6 +293,7 @@ class JEPAAugmentedController:
         self.sidecar_override_ledger: list[dict[str, Any]] = []
         self.pending_sidecar_override: dict[str, Any] | None = None
         self.last_transition_usefulness: dict[str, Any] | None = None
+        self.learned_simple_prefix_budget = 0
 
     @property
     def name(self) -> str:
@@ -221,6 +317,7 @@ class JEPAAugmentedController:
         self.sidecar_override_ledger.clear()
         self.pending_sidecar_override = None
         self.last_transition_usefulness = None
+        self.learned_simple_prefix_budget = 0
 
     def reset_attempt(self, seed: int) -> None:
         self.attempt_counter += 1
@@ -235,6 +332,7 @@ class JEPAAugmentedController:
         self.bridge_history_legal_counts.clear()
         self.anti_attractor.reset()
         self.last_transition_usefulness = None
+        self.learned_simple_prefix_budget = 0
         self.rng.seed(9173 + int(seed))
         self.post_prefix_rng.seed(9173 + (1009 * int(seed)) + (104729 * self.attempt_counter))
         self.pending_sidecar_override = None
@@ -242,6 +340,8 @@ class JEPAAugmentedController:
     def choose_action(self, observation: Any) -> tuple[str, dict[str, Any]]:
         if not hasattr(self, "anti_attractor"):
             self.anti_attractor = HardAntiAttractorGate()
+        if not hasattr(self, "learned_simple_prefix_budget"):
+            self.learned_simple_prefix_budget = 0
         base_action, diagnostics = self.base.choose_action(observation)
         legal = tuple(observation.available_actions)
         raw_scores = diagnostics.get("action_scores", {})
@@ -258,6 +358,8 @@ class JEPAAugmentedController:
         sidecar_override: dict[str, Any] = self._sidecar_override_placeholder(base_action)
         prefix_replay = False
         post_prefix_exploration = False
+        learned_progress_selected = False
+        learned_progress = {"active": False}
         experiment_candidate = None
         experiment_selected = False
         experiment_by_action: dict[str, Any] = {}
@@ -286,6 +388,15 @@ class JEPAAugmentedController:
             )
             for action in legal:
                 adjusted[action] += applied_jepa_bridge_scores.get(action, 0.0)
+        learned_progress = learned_progress_candidate(diagnostics.get("policy", {}), legal, adjusted)
+        learned_simple_prefix_gate = self._learned_simple_prefix_gate_state(
+            diagnostics.get("policy", {}),
+            legal,
+            learned_progress,
+        )
+        if learned_progress.get("active") and str(learned_progress.get("action", "")) in legal:
+            action = str(learned_progress["action"])
+            adjusted[action] = adjusted.get(action, 0.0) + 2.0 + (2.0 * float(learned_progress.get("future_progress", 0.0)))
         if self.variant.null_control or not self.variant.use_memory:
             chosen = base_action
         else:
@@ -293,16 +404,27 @@ class JEPAAugmentedController:
             eligible = [action for action in legal if not self.memory.public_no_effect_suppresses_action(action)]
             if not eligible:
                 eligible = list(legal)
+            if learned_simple_prefix_gate.get("active"):
+                simple_eligible = [action for action in eligible if not str(action).startswith("click:")]
+                if simple_eligible:
+                    eligible = simple_eligible
             experiment_eligible = list(eligible)
             count_balanced = False
             random_balanced = False
-            if not self.memory._has_public_goal_evidence():
+            learned_action = str(learned_progress.get("action", "")) if learned_progress.get("active") else ""
+            if learned_action and learned_action in eligible:
+                chosen = learned_action
+                learned_progress_selected = True
+            elif not self.memory._has_public_goal_evidence():
                 min_count = min(int(self.memory.action_counts.get(action, 0)) for action in eligible)
                 least_tried = [action for action in eligible if int(self.memory.action_counts.get(action, 0)) == min_count]
                 if least_tried:
                     eligible = least_tried
                     count_balanced = True
-            if self.memory.active_sequence_source == "positive_public_control_prefix":
+                chosen = ""
+            else:
+                chosen = ""
+            if not chosen and self.memory.active_sequence_source == "positive_public_control_prefix":
                 planned_prefix_action = self.memory.sequence_plan_action(legal, observation=observation)
                 if planned_prefix_action in eligible:
                     chosen = str(planned_prefix_action)
@@ -357,12 +479,19 @@ class JEPAAugmentedController:
             elif not chosen:
                 chosen = max(eligible, key=lambda action: (adjusted.get(action, -1.0e9), -legal.index(action)))
         pre_veto_chosen = str(chosen)
+        learned_progress_bypasses_veto = bool(
+            learned_progress_selected and float(learned_progress.get("future_progress", 0.0)) >= 0.35
+        )
         if self.variant.use_memory and not self.variant.null_control and hasattr(self.memory, "experiment_for_action"):
             for action in legal:
                 experiment = self.memory.experiment_for_action(observation, str(action))
                 if experiment is not None:
                     experiment_by_action[str(action)] = experiment
-        veto_ranked_actions = [str(action) for action in legal]
+        veto_ranked_actions = [
+            str(action)
+            for action in legal
+            if not learned_simple_prefix_gate.get("active") or not str(action).startswith("click:")
+        ] or [str(action) for action in legal]
 
         def veto_rank_key(action: str) -> tuple[int, float, int]:
             return (
@@ -386,7 +515,22 @@ class JEPAAugmentedController:
                 ranked_for_veto = sorted(veto_ranked_actions, key=veto_rank_key, reverse=True)
         else:
             ranked_for_veto = sorted(veto_ranked_actions, key=veto_rank_key, reverse=True)
-        chosen, anti_attractor_diagnostics = self.anti_attractor.select_action(
+        chosen, anti_attractor_diagnostics = (
+            pre_veto_chosen,
+            {
+                "schema": "hard_anti_attractor_gate_v1",
+                "active": True,
+                "bypassed_by_learned_progress_authority": True,
+                "preferred_action": pre_veto_chosen,
+                "selected_action": pre_veto_chosen,
+                "changed_action": False,
+                "vetoed_actions": [],
+                "fail_open_reasons": ["learned_future_progress_authority"],
+                "recent_progress": self.anti_attractor._recent_progress()
+                if hasattr(self.anti_attractor, "_recent_progress")
+                else False,
+            },
+        ) if learned_progress_bypasses_veto else self.anti_attractor.select_action(
             pre_veto_chosen,
             ranked_for_veto,
             observation,
@@ -458,6 +602,11 @@ class JEPAAugmentedController:
             "jepa_bridge_scores": top_scores(jepa_bridge_scores),
             "jepa_applied_action_bias": top_scores(applied_jepa_bridge_scores),
             "jepa_bridge": jepa_bridge_diagnostics,
+            "learned_progress_authority": {
+                **learned_progress,
+                "selected": bool(learned_progress_selected),
+            },
+            "learned_simple_prefix_gate": learned_simple_prefix_gate,
             "sidecar_override": sidecar_override,
             "top_adjusted_scores": top_scores(adjusted),
             "public_no_effect_suppressed_count": int(suppressed_count) if self.variant.use_memory else 0,
@@ -466,9 +615,13 @@ class JEPAAugmentedController:
             "public_prefix_replay": bool(prefix_replay) if self.variant.use_memory else False,
             "public_post_prefix_exploration": bool(post_prefix_exploration) if self.variant.use_memory else False,
             "experiment_protocol": experiment_diagnostics,
-            "action_source": "existing_core_plus_attempt_memory_with_approved_sidecar_bias"
-            if sidecar_override.get("approved") and sidecar_override.get("executed")
-            else "existing_core_plus_attempt_memory",
+            "action_source": "learned_progress_authority"
+            if learned_progress_selected
+            else (
+                "existing_core_plus_attempt_memory_with_approved_sidecar_bias"
+                if sidecar_override.get("approved") and sidecar_override.get("executed")
+                else "existing_core_plus_attempt_memory"
+            ),
             "jepa_direct_action": False,
             "emits_text": False,
             "causal_substrate": {
@@ -615,6 +768,41 @@ class JEPAAugmentedController:
         if finalized["approved"] and not finalized["executed"]:
             finalized["reason"] = "approved_but_vetoed_or_superseded"
         return finalized
+
+    def _learned_simple_prefix_gate_state(
+        self,
+        base_policy: dict[str, Any],
+        legal: Sequence[str],
+        learned_progress: dict[str, Any],
+    ) -> dict[str, Any]:
+        external_diag = base_policy.get("external_diagnostics", {}) if isinstance(base_policy, dict) else {}
+        simple_best = 0.0
+        coordinate_best = 0.0
+        for action in legal:
+            row = external_diag.get(str(action), {}) if isinstance(external_diag, dict) else {}
+            if not isinstance(row, dict):
+                continue
+            future = _as_float(row.get("future_progress", 0.0))
+            if str(action).startswith("click:"):
+                coordinate_best = max(coordinate_best, future)
+            else:
+                simple_best = max(simple_best, future)
+        learned_action = str(learned_progress.get("action", "")) if learned_progress.get("active") else ""
+        learned_simple = bool(learned_action and not learned_action.startswith("click:"))
+        if learned_simple and simple_best >= 0.35 and coordinate_best <= 0.05:
+            self.learned_simple_prefix_budget = max(int(getattr(self, "learned_simple_prefix_budget", 0)), 64)
+        active = bool(int(getattr(self, "learned_simple_prefix_budget", 0)) > 0 and coordinate_best <= max(0.05, 0.25 * simple_best))
+        budget_before = int(getattr(self, "learned_simple_prefix_budget", 0))
+        if budget_before > 0:
+            self.learned_simple_prefix_budget = max(0, budget_before - 1)
+        return {
+            "active": active,
+            "budget_before": budget_before,
+            "budget_after": int(getattr(self, "learned_simple_prefix_budget", 0)),
+            "simple_best_future_progress": round(float(simple_best), 6),
+            "coordinate_best_future_progress": round(float(coordinate_best), 6),
+            "triggered_by_learned_simple_action": bool(learned_simple),
+        }
 
     def _complete_pending_sidecar_override(self, action: str, result: Any) -> None:
         pending = dict(getattr(self, "pending_sidecar_override", None) or {})

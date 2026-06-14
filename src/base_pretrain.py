@@ -44,16 +44,45 @@ def load_trace_tensors(manifest_path: str | Path) -> tuple[dict[str, np.ndarray]
     return arrays, manifest
 
 
-def sample_batch(arrays: dict[str, np.ndarray], batch_size: int, device: torch.device, rng: np.random.Generator) -> dict[str, torch.Tensor]:
+def sample_batch(
+    arrays: dict[str, np.ndarray],
+    batch_size: int,
+    device: torch.device,
+    rng: np.random.Generator,
+    *,
+    positive_fraction: float = 0.0,
+) -> dict[str, torch.Tensor]:
     count = int(arrays["obs"].shape[0])
-    idx = rng.integers(0, count, size=batch_size)
-    return {
+    batch_size = max(int(batch_size), 1)
+    positive_fraction = max(min(float(positive_fraction), 1.0), 0.0)
+    reward = arrays.get("reward")
+    positive_signal = arrays.get("future_progress", reward)
+    positive_idx = (
+        np.flatnonzero(np.asarray(positive_signal) > 0.0)
+        if positive_signal is not None and positive_fraction > 0.0
+        else np.asarray([], dtype=np.int64)
+    )
+    if positive_idx.size:
+        positive_count = min(batch_size, max(1, int(round(float(batch_size) * positive_fraction))))
+        rest_count = batch_size - positive_count
+        positive_sample = rng.choice(positive_idx, size=positive_count, replace=positive_idx.size < positive_count)
+        rest_sample = rng.integers(0, count, size=rest_count) if rest_count else np.asarray([], dtype=np.int64)
+        idx = np.concatenate([positive_sample, rest_sample]).astype(np.int64, copy=False)
+        rng.shuffle(idx)
+    else:
+        idx = rng.integers(0, count, size=batch_size)
+    batch = {
         "obs": torch.as_tensor(arrays["obs"][idx], dtype=torch.float32, device=device),
         "next_obs": torch.as_tensor(arrays["next_obs"][idx], dtype=torch.float32, device=device),
         "action_features": torch.as_tensor(arrays["action_features"][idx], dtype=torch.float32, device=device),
         "reward": torch.as_tensor(arrays["reward"][idx], dtype=torch.float32, device=device),
         "family": torch.as_tensor(arrays["family"][idx], dtype=torch.long, device=device),
     }
+    if "action_id" in arrays:
+        batch["action_id"] = torch.as_tensor(arrays["action_id"][idx], dtype=torch.long, device=device)
+    if "future_progress" in arrays:
+        batch["future_progress"] = torch.as_tensor(arrays["future_progress"][idx], dtype=torch.float32, device=device)
+    return batch
 
 
 def shuffle_targets(batch: dict[str, torch.Tensor], rng: torch.Generator) -> dict[str, torch.Tensor]:
@@ -65,16 +94,49 @@ def shuffle_targets(batch: dict[str, torch.Tensor], rng: torch.Generator) -> dic
     return out
 
 
-def objective_losses(model: ExternalBaseWorldModel, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+def objective_losses_from_output(
+    model: ExternalBaseWorldModel,
+    output: dict[str, torch.Tensor],
+    batch: dict[str, torch.Tensor],
+) -> dict[str, torch.Tensor]:
     targets = training_targets(batch)
-    output = model(batch["obs"], batch["action_features"])
     zero_actions = torch.zeros_like(batch["action_features"])
     next_memory_target = model.encode(targets["next_obs"], zero_actions)["memory"].detach()
+    progress_target = targets["progress"]
+    positive_count = progress_target.sum()
+    negative_count = progress_target.numel() - positive_count
+    positive_weight = torch.clamp(negative_count / positive_count.clamp_min(1.0), min=1.0, max=100.0)
+    future_progress_target = targets["future_progress"]
+    future_positive_count = (future_progress_target > 0.0).float().sum()
+    future_negative_count = future_progress_target.numel() - future_positive_count
+    future_positive_weight = torch.clamp(
+        future_negative_count / future_positive_count.clamp_min(1.0),
+        min=1.0,
+        max=100.0,
+    )
+    if "action_id" in batch:
+        policy_weight = 0.25 + (4.0 * future_progress_target)
+        action_policy_prior = (
+            F.cross_entropy(output["action_prior_logits"], batch["action_id"].long(), reduction="none") * policy_weight
+        ).mean()
+    else:
+        action_policy_prior = output["action_prior_logits"].sum() * 0.0
     return {
         "next_observation": F.mse_loss(output["next_obs"], targets["next_obs"]),
         "change_mask": F.binary_cross_entropy_with_logits(output["change_logits"], targets["change_mask"]),
         "reward_event_noop": F.mse_loss(output["reward"], targets["reward"])
         + F.binary_cross_entropy_with_logits(output["noop_logits"], targets["noop"]),
+        "progress_event": F.binary_cross_entropy_with_logits(
+            output["progress_logits"],
+            progress_target,
+            pos_weight=positive_weight,
+        ),
+        "future_progress": F.binary_cross_entropy_with_logits(
+            output["future_progress_logits"],
+            future_progress_target,
+            pos_weight=future_positive_weight,
+        ),
+        "action_policy_prior": action_policy_prior,
         "inverse_dynamics": F.cross_entropy(output["inverse_logits"], targets["family"]),
         "action_affordance": F.mse_loss(torch.sigmoid(output["affordance"]), targets["affordance"]),
         "temporal_object_persistence": F.mse_loss(output["memory"], next_memory_target),
@@ -83,11 +145,19 @@ def objective_losses(model: ExternalBaseWorldModel, batch: dict[str, torch.Tenso
     }
 
 
+def objective_losses(model: ExternalBaseWorldModel, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    output = model(batch["obs"], batch["action_features"])
+    return objective_losses_from_output(model, output, batch)
+
+
 def weighted_loss(losses: dict[str, torch.Tensor]) -> torch.Tensor:
     weights = {
         "next_observation": 1.0,
         "change_mask": 0.7,
         "reward_event_noop": 0.8,
+        "progress_event": 1.4,
+        "future_progress": 1.8,
+        "action_policy_prior": 1.0,
         "inverse_dynamics": 0.4,
         "action_affordance": 0.6,
         "temporal_object_persistence": 0.2,
@@ -128,6 +198,7 @@ def train_arm(
     batch_size: int,
     device: torch.device,
     seed: int,
+    positive_fraction: float = 0.0,
 ) -> tuple[ExternalBaseWorldModel, dict[str, Any]]:
     set_seed(seed)
     model = ExternalBaseWorldModel(config, device=device)
@@ -140,7 +211,7 @@ def train_arm(
     initial = evaluate_losses(model, eval_batch)
     tail_losses: list[float] = []
     for _ in range(steps):
-        batch = sample_batch(arrays, batch_size, device, rng)
+        batch = sample_batch(arrays, batch_size, device, rng, positive_fraction=positive_fraction)
         if arm == "null_training_control":
             batch = shuffle_targets(batch, torch_rng)
         losses = objective_losses(model, batch)
@@ -157,6 +228,7 @@ def train_arm(
         "seed": seed,
         "steps": steps,
         "batch_size": batch_size,
+        "positive_fraction": float(max(min(float(positive_fraction), 1.0), 0.0)),
         "initial_losses": initial,
         "final_losses": final,
         "recent_total_loss_mean": float(np.mean(tail_losses[-min(len(tail_losses), 20) :])) if tail_losses else final["total"],
@@ -218,6 +290,9 @@ def train_external_base(
         "training_objectives": [
             "next observation/change prediction",
             "reward/event/no-op prediction",
+            "positive progress event classification",
+            "discounted future progress classification",
+            "future-positive recurrent action prior",
             "inverse dynamics",
             "action-affordance prediction",
             "temporal object/region persistence",

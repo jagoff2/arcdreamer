@@ -70,6 +70,7 @@ class ExternalBaseController:
         disable_world_model: bool = False,
         disable_memory: bool = False,
         disable_affordance: bool = False,
+        base_weight: float = 0.35,
         external_weight: float = 0.85,
     ) -> None:
         self.adapter = adapter
@@ -79,6 +80,7 @@ class ExternalBaseController:
         self.disable_world_model = disable_world_model
         self.disable_memory = disable_memory
         self.disable_affordance = disable_affordance
+        self.base_weight = float(base_weight)
         self.external_weight = float(external_weight)
         self.changed_actions = 0
         self.frames = 0
@@ -103,7 +105,7 @@ class ExternalBaseController:
         base_scores = {action: float(diagnostics.get("action_scores", {}).get(action, 0.0)) for action in legal}
         use_learned_calibration = self.model is not None and not self.disable_external_base
         adjusted = (
-            {action: 0.35 * value for action, value in normalized_scores(base_scores).items()}
+            {action: self.base_weight * value for action, value in normalized_scores(base_scores).items()}
             if use_learned_calibration
             else dict(base_scores)
         )
@@ -159,6 +161,10 @@ class ExternalBaseController:
             "external_scores": top_scores(external_scores),
             "external_calibrated_scores": top_scores(external_calibrated),
             "external_diagnostics": external_diag,
+            "score_weights": {
+                "base": self.base_weight if use_learned_calibration else 1.0,
+                "external": self.external_weight if use_learned_calibration else 0.0,
+            },
             "ablation": {
                 "disable_external_base": self.disable_external_base,
                 "disable_world_model": self.disable_world_model,
@@ -224,11 +230,19 @@ def make_base_controller(
     model = None
     if spec.checkpoint_arm is not None:
         model = load_external_arm(external_checkpoint, spec.checkpoint_arm, device=target_device)
+    base_weight = 0.35
+    external_weight = 0.85
+    manifest = getattr(model, "external_manifest", {}) if model is not None else {}
+    if isinstance(manifest, dict) and manifest.get("format") == "real_arc_external_base_manifest_v1":
+        base_weight = 0.05
+        external_weight = 1.45
     flags = dict(ABLATIONS.get(ablation or "", {}))
     return ExternalBaseController(
         make_adapter(explorer_checkpoint, target_device),
         spec,
         model=model,
+        base_weight=base_weight,
+        external_weight=external_weight,
         **flags,
     )
 

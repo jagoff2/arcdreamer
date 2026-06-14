@@ -69,7 +69,7 @@ def test_real_arc_split_excludes_holdout_games_before_tensorization(tmp_path: Pa
         game_manifest=game_manifest,
         holdout_game_ids=["holdout-cc"],
         train_game_ids=None,
-        max_traces_per_game=4,
+        max_traces_per_game=0,
         train_data_output=tmp_path / "train.npz",
         holdout_data_output=tmp_path / "holdout.npz",
         manifest_output=tmp_path / "manifest.json",
@@ -80,6 +80,12 @@ def test_real_arc_split_excludes_holdout_games_before_tensorization(tmp_path: Pa
     assert manifest["rules"]["split_by_game_id_before_tensorization"] is True
     assert manifest["rules"]["official_arcagi3_used_for_training"] is True
     assert manifest["rules"]["holdout_official_arcagi3_used_for_training"] is False
+    assert manifest["max_traces_per_game_unlimited"] is True
+    assert manifest["train_positive_transition_count"] == 2
+    assert manifest["holdout_positive_transition_count"] == 1
+    assert manifest["train_future_positive_transition_count"] == 2
+    assert manifest["holdout_future_positive_transition_count"] == 1
     assert train_arrays["obs"].shape[0] == 2
+    assert "future_progress" in train_arrays
     assert holdout_arrays["obs"].shape[0] == 1
     assert np.all(train_arrays["source_id"] == 10)
