@@ -605,6 +605,56 @@ def test_public_controllability_scores_above_unproven_contact_without_progress()
     assert scores["1"] > scores["click:16:16"]
 
 
+def test_live_public_controllability_updates_component_memory_before_ingest() -> None:
+    before_grid = np.zeros((8, 8), dtype=np.int64)
+    before_grid[2, 2] = 4
+    after_grid = np.zeros((8, 8), dtype=np.int64)
+    after_grid[2, 3] = 4
+    actions = ("1", "2", "click:16:16", "5")
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    memory.start_attempt()
+    before = _obs_grid(0, before_grid, actions)
+    after = _obs_grid(1, after_grid, actions)
+
+    memory.observe_live_transition(
+        before,
+        "1",
+        ArcAGI3StepResult(after, -0.001, False, False, {"events": ["move"]}),
+    )
+    object_summary = memory.summary()["object_memory"]
+
+    assert object_summary["component_transition_prediction_count"] >= 1
+    assert object_summary["component_chain_edge_count"] >= 1
+    assert object_summary["component_relation_chain_edge_count"] >= 1
+    assert object_summary["component_relation_delta_count"] >= 1
+
+
+def test_live_public_controllability_activates_component_scoring_before_ingest() -> None:
+    before_grid = np.zeros((8, 8), dtype=np.int64)
+    before_grid[2, 2] = 4
+    after_grid = np.zeros((8, 8), dtype=np.int64)
+    after_grid[2, 3] = 4
+    actions = ("1", "2", "click:16:16", "5")
+    memory = JEPAAttemptMemory(use_jepa_tokens=False)
+    memory.start_attempt()
+    before = _obs_grid(0, before_grid, actions)
+    after = _obs_grid(1, after_grid, actions)
+    memory.observe_live_transition(
+        before,
+        "1",
+        ArcAGI3StepResult(after, -0.001, False, False, {"events": ["move"]}),
+    )
+
+    scores = memory.plan_scores_for_observation(after)
+    summary = memory.summary()
+
+    assert summary["planner_activation"]["component_chain"]["score_hits"] >= 1
+    assert summary["planner_activation"]["component_chain"]["activations"] >= 1
+    assert summary["planner_activation"]["relation_delta"]["score_hits"] >= 1
+    assert scores["1"] > scores["click:16:16"]
+    assert scores["2"] > scores["click:16:16"]
+
+
 def test_object_region_memory_scores_contact_clicks_from_public_frame_diff() -> None:
     before_grid = np.zeros((8, 8), dtype=np.int64)
     after_grid = np.zeros((8, 8), dtype=np.int64)

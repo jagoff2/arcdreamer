@@ -586,6 +586,8 @@ class JEPAAttemptMemory:
             return "relation_delta_sequence"
         if "relation_delta" in source_text:
             return "relation_delta"
+        if "predicted_component_transition" in source_text:
+            return "component_chain"
         if "component_relation_goal_chain" in source_text:
             return "relation_chain"
         if "component_transition_goal_chain" in source_text:
@@ -692,7 +694,13 @@ class JEPAAttemptMemory:
                 scores[action] += self._object_region_score(action, frame)
                 target_relation = component_relations.get(action)
                 scores[action] += self._component_relation_score(action, frame, target_relation)
-                scores[action] += self._component_transition_prediction_score(action, frame, target_relation)
+                component_prediction_score = self._component_transition_prediction_score(action, frame, target_relation)
+                scores[action] += component_prediction_score
+                if abs(component_prediction_score) > 1.0e-9:
+                    self._record_planner_event("predicted_component_transition_planner", "score_hits")
+                    if component_prediction_score > 0.0:
+                        self._record_planner_event("predicted_component_transition_planner", "activations")
+                        self._record_planner_event("predicted_component_transition_planner", "legal_resolutions")
                 relation_delta_score = self._component_relation_delta_score(action, frame, target_relation)
                 scores[action] += relation_delta_score
                 if abs(relation_delta_score) > 1.0e-9:
@@ -1264,31 +1272,30 @@ class JEPAAttemptMemory:
                 self.reachable_state_classes.add(state_class)
         self._record_phase_action(obs_key, action)
         if obs_key:
-            self._update_transition_graph(
-                [
-                    {
-                        "edge": (obs_key, action),
-                        "action": action,
-                        "value": _transition_credit(
-                            useful=label,
-                            no_effect_event=no_effect_event,
-                            invalid_action=any("invalid" in event.lower() for event in events),
-                            score_delta=float(getattr(result, "reward", 0.0)),
-                            terminal=bool(getattr(result, "terminated", False) or getattr(result, "truncated", False)),
-                        ),
-                        "event_hit": event_hit,
-                        "changed": label.visible_effect,
-                        "visible_effect": label.visible_effect,
-                        "useful_effect": label.useful_effect,
-                        "nuisance_effect": label.nuisance_effect,
-                        "no_effect": label.no_effect,
-                        "progress_effect": label.progress_effect,
-                        "controllability_effect": label.controllability_effect,
-                        "reachable_state_class_effect": label.reachable_state_class_effect,
-                        "usefulness_reasons": list(label.reasons),
-                    }
-                ]
-            )
+            outcome = {
+                "edge": (obs_key, action),
+                "action": action,
+                "value": _transition_credit(
+                    useful=label,
+                    no_effect_event=no_effect_event,
+                    invalid_action=any("invalid" in event.lower() for event in events),
+                    score_delta=float(getattr(result, "reward", 0.0)),
+                    terminal=bool(getattr(result, "terminated", False) or getattr(result, "truncated", False)),
+                ),
+                "event_hit": event_hit,
+                "score_delta": float(getattr(result, "reward", 0.0)),
+                "changed": label.visible_effect,
+                "visible_effect": label.visible_effect,
+                "useful_effect": label.useful_effect,
+                "nuisance_effect": label.nuisance_effect,
+                "no_effect": label.no_effect,
+                "progress_effect": label.progress_effect,
+                "controllability_effect": label.controllability_effect,
+                "reachable_state_class_effect": label.reachable_state_class_effect,
+                "usefulness_reasons": list(label.reasons),
+            }
+            self._update_transition_graph([outcome])
+            self._update_live_public_memory(before, after, action, outcome)
         self._complete_pending_experiment(action, label)
         if not self.active_sequence or self.sequence_cursor >= len(self.active_sequence):
             if level_completed:
@@ -1344,6 +1351,56 @@ class JEPAAttemptMemory:
         if level_completed:
             self._enter_next_discovery_phase()
         return label
+
+    def _update_live_public_memory(
+        self,
+        before: np.ndarray | None,
+        after: np.ndarray | None,
+        action: str,
+        outcome: dict[str, Any],
+    ) -> None:
+        if before is None or after is None:
+            return
+        try:
+            before_arr = np.asarray(before, dtype=np.int64)
+            after_arr = np.asarray(after, dtype=np.int64)
+        except Exception:
+            return
+        if before_arr.ndim != 2 or after_arr.ndim != 2 or before_arr.size == 0 or after_arr.size == 0:
+            return
+        label_flags = {
+            "event_hit": bool(outcome.get("event_hit", False)),
+            "score_delta": float(outcome.get("score_delta", outcome.get("value", 0.0))),
+            "no_effect": bool(outcome.get("no_effect", False)),
+            "useful_effect": bool(outcome.get("useful_effect", False)),
+            "nuisance_effect": bool(outcome.get("nuisance_effect", False)),
+            "progress_effect": bool(outcome.get("progress_effect", False)),
+            "controllability_effect": bool(outcome.get("controllability_effect", False)),
+            "reachable_state_class_effect": bool(outcome.get("reachable_state_class_effect", False)),
+        }
+        object_hypothesis = _frame_diff_hypothesis(
+            before=before_arr,
+            after=after_arr,
+            action=str(action),
+            step_index=0,
+            **label_flags,
+        )
+        component_hypothesis = _component_hypothesis_from_frames(
+            before=before_arr,
+            after=after_arr,
+            action=str(action),
+            step_index=0,
+            **label_flags,
+        )
+        live_outcomes = [dict(outcome)]
+        if object_hypothesis is not None:
+            self._update_object_memory([object_hypothesis], live_outcomes)
+        if component_hypothesis is not None:
+            component_hypotheses = [component_hypothesis]
+            self._update_component_memory(component_hypotheses, live_outcomes)
+            self._update_component_chain_graph(component_hypotheses, live_outcomes)
+            self._update_component_relation_chain_graph(component_hypotheses, live_outcomes)
+            self._update_component_relation_delta_memory(component_hypotheses, live_outcomes)
 
     def _record_phase_action(self, obs_key: str, action: str) -> None:
         phase = int(self.discovery_phase)
@@ -3415,7 +3472,12 @@ def _component_hypothesis_value(hypothesis: dict[str, Any]) -> float:
     if changed_pixels and progress_linked:
         value += 0.16 + min(float(changed_pixels), 32.0) * 0.007
     elif changed_pixels and bool(hypothesis.get("useful_effect")) and not nuisance:
-        value += 0.035
+        if bool(hypothesis.get("reachable_state_class_effect")):
+            value += 0.32 + min(float(changed_pixels), 32.0) * 0.004
+        elif bool(hypothesis.get("controllability_effect")):
+            value += 0.26 + min(float(changed_pixels), 32.0) * 0.003
+        else:
+            value += 0.035
     elif changed_pixels and nuisance:
         value -= 0.18 + min(float(changed_pixels), 32.0) * 0.004
     if progress_linked and mechanism in {
@@ -3717,7 +3779,12 @@ def _object_hypothesis_value(hypothesis: dict[str, Any]) -> float:
     if changed_pixels and progress_linked:
         value += 0.18 + min(float(changed_pixels), 16.0) * 0.012
     elif changed_pixels and bool(hypothesis.get("useful_effect")) and not nuisance:
-        value += 0.035
+        if bool(hypothesis.get("reachable_state_class_effect")):
+            value += 0.22 + min(float(changed_pixels), 16.0) * 0.006
+        elif bool(hypothesis.get("controllability_effect")):
+            value += 0.16 + min(float(changed_pixels), 16.0) * 0.004
+        else:
+            value += 0.035
     elif changed_pixels and nuisance:
         value -= 0.18 + min(float(changed_pixels), 16.0) * 0.006
     if progress_linked and mechanism in {"movement", "spawn", "removal", "toggle_or_transform"}:
