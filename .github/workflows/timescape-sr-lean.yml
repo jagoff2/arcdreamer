@@ -1,0 +1,25 @@
+name: Timescape SR Lean
+
+on:
+  push:
+    branches:
+      - formal/timescape-sr-lean-20260619
+  pull_request:
+    paths:
+      - formal/timescape_sr/**
+      - .github/workflows/timescape-sr-lean.yml
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: leanprover/lean-action@v1
+        with:
+          lake-package-directory: formal/timescape_sr
+          build: true
+          test: false
+          lint: false
+          use-mathlib-cache: false
+          leanchecker: true
